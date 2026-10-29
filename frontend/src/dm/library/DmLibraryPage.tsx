@@ -9,6 +9,7 @@ import Paper from "@mui/material/Paper"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import TextField from "@mui/material/TextField"
@@ -186,48 +187,54 @@ export function DmLibraryPage() {
           <Alert severity="info">查無符合條件之文件。</Alert>
         ) : (
           <>
-            <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: "34%" }}>文件名稱</TableCell>
-                  <TableCell sx={{ width: "14%" }}>分類</TableCell>
-                  <TableCell sx={{ width: "12%" }}>發布日期</TableCell>
-                  <TableCell sx={{ width: "12%" }}>作者</TableCell>
-                  <TableCell sx={{ width: "28%" }}>標籤</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow
-                    key={row.doc_id}
-                    hover
-                    sx={{ cursor: "pointer" }}
-                    // 帶來源：文件詳細頁的側欄高亮指回入口功能項（同一頁也可自 DM03 進入）
-                    onClick={() => navigate(`/dm/documents/${row.doc_id}`, navFrom("/dm/library"))}
-                  >
-                    <TableCell>
-                      {row.doc_name}
-                      {row.func_code && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          {row.func_code} — {row.func_name}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={row.category_name} />
-                    </TableCell>
-                    <TableCell>{formatDateTaipei(row.published_date)}</TableCell>
-                    <TableCell>{row.author_name ?? row.author_id}</TableCell>
-                    <TableCell>
-                      {/* 標籤：灰色文字頓號分隔（非彩色 pill，FR-003）；僅檢索標籤 */}
-                      <Typography variant="caption" color="text.secondary">
-                        {row.tags.length > 0 ? row.tags.join("、") : "—"}
-                      </Typography>
-                    </TableCell>
+            {/* #835：補捲動容器，並把 width:100% 改為 minWidth 760——只補容器不改寬度的話，
+                tableLayout:fixed 會把表格鎖在容器的 100%，窄螢幕下欄位照樣被擠到讀不了，
+                而且看起來像做完了。760 取「每欄容得下自己的表頭」與上限 940 的較小值。
+                ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
+            <TableContainer>
+              <Table size="small" sx={{ tableLayout: "fixed", minWidth: 760 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: "34%" }}>文件名稱</TableCell>
+                    <TableCell sx={{ width: "14%" }}>分類</TableCell>
+                    <TableCell sx={{ width: "12%" }}>發布日期</TableCell>
+                    <TableCell sx={{ width: "12%" }}>作者</TableCell>
+                    <TableCell sx={{ width: "28%" }}>標籤</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow
+                      key={row.doc_id}
+                      hover
+                      sx={{ cursor: "pointer" }}
+                      // 帶來源：文件詳細頁的側欄高亮指回入口功能項（同一頁也可自 DM03 進入）
+                      onClick={() => navigate(`/dm/documents/${row.doc_id}`, navFrom("/dm/library"))}
+                    >
+                      <TableCell>
+                        {row.doc_name}
+                        {row.func_code && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                            {row.func_code} — {row.func_name}
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" label={row.category_name} />
+                      </TableCell>
+                      <TableCell>{formatDateTaipei(row.published_date)}</TableCell>
+                      <TableCell>{row.author_name ?? row.author_id}</TableCell>
+                      <TableCell>
+                        {/* 標籤：灰色文字頓號分隔（非彩色 pill，FR-003）；僅檢索標籤 */}
+                        <Typography variant="caption" color="text.secondary">
+                          {row.tags.length > 0 ? row.tags.join("、") : "—"}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
             {data && (
               <Box sx={{ mt: 2 }}>
                 <Pagination

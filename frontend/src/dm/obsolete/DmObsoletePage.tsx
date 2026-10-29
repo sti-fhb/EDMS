@@ -8,6 +8,7 @@ import Paper from "@mui/material/Paper"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import TextField from "@mui/material/TextField"
@@ -168,51 +169,57 @@ export function DmObsoletePage() {
           <Alert severity="info">查無符合條件之已廢止文件。</Alert>
         ) : (
           <>
-            <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: "24%" }}>文件名稱</TableCell>
-                  <TableCell sx={{ width: "10%" }}>分類</TableCell>
-                  <TableCell sx={{ width: "10%" }}>原作者</TableCell>
-                  <TableCell sx={{ width: "14%" }}>廢止時間</TableCell>
-                  <TableCell sx={{ width: "10%" }}>廢止申請人</TableCell>
-                  <TableCell sx={{ width: "10%" }}>核准者</TableCell>
-                  <TableCell sx={{ width: "22%" }}>廢止原因</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow
-                    key={row.doc_id}
-                    hover
-                    sx={{ cursor: "pointer" }}
-                    // 帶來源：文件詳細頁預設高亮 DM01 文件庫，自本頁進入者要留在 DM03
-                    onClick={() => navigate(`/dm/documents/${row.doc_id}`, navFrom("/dm/obsolete"))}
-                  >
-                    <TableCell>
-                      {row.doc_name}
-                      {row.latest_version_no && (
-                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          版本 {row.latest_version_no}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={row.category_name} />
-                    </TableCell>
-                    <TableCell>{row.author_name ?? row.author_id ?? "—"}</TableCell>
-                    <TableCell>{formatDateTimeTaipei(row.obsolete_date)}</TableCell>
-                    <TableCell>{row.applicant_name ?? row.applicant_id ?? "—"}</TableCell>
-                    <TableCell>{row.approver_name ?? row.approver_id ?? "—"}</TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {row.obsolete_reason ?? "—"}
-                      </Typography>
-                    </TableCell>
+            {/* #835：補捲動容器，並把 width:100% 改為 minWidth 940——只補容器不改寬度的話，
+                tableLayout:fixed 會把表格鎖在容器的 100%，窄螢幕下欄位照樣被擠到讀不了，
+                而且看起來像做完了。940 取「每欄容得下自己的表頭」與上限 940 的較小值。
+                ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
+            <TableContainer>
+              <Table size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: "24%" }}>文件名稱</TableCell>
+                    <TableCell sx={{ width: "10%" }}>分類</TableCell>
+                    <TableCell sx={{ width: "10%" }}>原作者</TableCell>
+                    <TableCell sx={{ width: "14%" }}>廢止時間</TableCell>
+                    <TableCell sx={{ width: "10%" }}>廢止申請人</TableCell>
+                    <TableCell sx={{ width: "10%" }}>核准者</TableCell>
+                    <TableCell sx={{ width: "22%" }}>廢止原因</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow
+                      key={row.doc_id}
+                      hover
+                      sx={{ cursor: "pointer" }}
+                      // 帶來源：文件詳細頁預設高亮 DM01 文件庫，自本頁進入者要留在 DM03
+                      onClick={() => navigate(`/dm/documents/${row.doc_id}`, navFrom("/dm/obsolete"))}
+                    >
+                      <TableCell>
+                        {row.doc_name}
+                        {row.latest_version_no && (
+                          <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                            版本 {row.latest_version_no}
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" label={row.category_name} />
+                      </TableCell>
+                      <TableCell>{row.author_name ?? row.author_id ?? "—"}</TableCell>
+                      <TableCell>{formatDateTimeTaipei(row.obsolete_date)}</TableCell>
+                      <TableCell>{row.applicant_name ?? row.applicant_id ?? "—"}</TableCell>
+                      <TableCell>{row.approver_name ?? row.approver_id ?? "—"}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {row.obsolete_reason ?? "—"}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
             {data && (
               <Box sx={{ mt: 2 }}>
                 <Pagination

@@ -11,6 +11,7 @@ import Paper from "@mui/material/Paper"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import TextField from "@mui/material/TextField"
@@ -106,29 +107,35 @@ function TrainingSection({ docs, total }: { docs: KpiTrainingDoc[]; total: numbe
       <Alert severity="info" sx={{ mb: 1.5 }}>
         本類文件之閱讀由教育訓練模組追蹤——學員於教育訓練閱讀教材時不寫入 DM 閱讀統計，於此計算閱讀率會固定低報，故不呈現。
       </Alert>
-      <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ width: "60%" }}>文件</TableCell>
-            <TableCell sx={{ width: "25%" }}>分類</TableCell>
-            <TableCell sx={{ width: "15%" }}>目前版本</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {docs.map((d) => (
-            <TableRow key={d.doc_id}>
-              <TableCell>
-                {d.doc_name}
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                  {d.doc_id}
-                </Typography>
-              </TableCell>
-              <TableCell>{d.category_name ?? "訓練教材"}</TableCell>
-              <TableCell>{d.current_version_no ?? "—"}</TableCell>
+      {/* #835：補捲動容器，並把 width:100% 改為 minWidth 600——只補容器不改寬度的話，
+          tableLayout:fixed 會把表格鎖在容器的 100%，窄螢幕下欄位照樣被擠到讀不了，
+          而且看起來像做完了。600 取「每欄容得下自己的表頭」與上限 940 的較小值。
+          ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
+      <TableContainer>
+        <Table size="small" sx={{ tableLayout: "fixed", minWidth: 600 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ width: "60%" }}>文件</TableCell>
+              <TableCell sx={{ width: "25%" }}>分類</TableCell>
+              <TableCell sx={{ width: "15%" }}>目前版本</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {docs.map((d) => (
+              <TableRow key={d.doc_id}>
+                <TableCell>
+                  {d.doc_name}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                    {d.doc_id}
+                  </Typography>
+                </TableCell>
+                <TableCell>{d.category_name ?? "訓練教材"}</TableCell>
+                <TableCell>{d.current_version_no ?? "—"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
       {docs.length < total && (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
           僅顯示前 {docs.length} 份，請以關鍵字縮小範圍（本區僅訓練教材一種分類，改分類無法縮小）。
@@ -300,67 +307,73 @@ export function DmKpiPage() {
             <Alert severity="info">查無符合條件之文件統計</Alert>
           ) : (
             <>
-              <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ width: "4%" }} />
-                    <TableCell sx={{ width: "28%" }}>文件</TableCell>
-                    <TableCell sx={{ width: "11%" }}>分類</TableCell>
-                    <TableCell sx={{ width: "9%" }}>目前版本</TableCell>
-                    <TableCell sx={{ width: "8%" }} align="right">
-                      應看
-                    </TableCell>
-                    <TableCell sx={{ width: "8%" }} align="right">
-                      已看
-                    </TableCell>
-                    <TableCell sx={{ width: "8%" }} align="right">
-                      未看
-                    </TableCell>
-                    <TableCell sx={{ width: "24%" }}>閱讀率</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {rows.map((row) => {
-                    const isOpen = expanded.has(row.doc_id)
-                    return (
-                      <Fragment key={row.doc_id}>
-                        <TableRow>
-                          <TableCell sx={{ pr: 0 }}>
-                            {row.groups.length > 0 && (
-                              <IconButton
-                                size="small"
-                                aria-label={isOpen ? `收合 ${row.doc_name} 的可見對象` : `展開 ${row.doc_name} 的可見對象`}
-                                onClick={() => toggleExpanded(row.doc_id)}
-                              >
-                                {isOpen ? (
-                                  <KeyboardArrowDownIcon fontSize="small" />
-                                ) : (
-                                  <KeyboardArrowRightIcon fontSize="small" />
-                                )}
-                              </IconButton>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {row.doc_name}
-                            <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                              {row.doc_id}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>{row.category_name ?? row.category_code}</TableCell>
-                          <TableCell>{row.current_version_no ?? "—"}</TableCell>
-                          <TableCell align="right">{row.should_see}</TableCell>
-                          <TableCell align="right">{row.seen}</TableCell>
-                          <TableCell align="right">{row.unseen}</TableCell>
-                          <TableCell>
-                            <RateCell rate={row.rate} />
-                          </TableCell>
-                        </TableRow>
-                        {isOpen && <AudienceGroupRows doc={row} />}
-                      </Fragment>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              {/* #835：補捲動容器，並把 width:100% 改為 minWidth 940——只補容器不改寬度的話，
+                  tableLayout:fixed 會把表格鎖在容器的 100%，窄螢幕下欄位照樣被擠到讀不了，
+                  而且看起來像做完了。940 取「每欄容得下自己的表頭」與上限 940 的較小值。
+                  ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
+              <TableContainer>
+                <Table size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ width: "4%" }} />
+                      <TableCell sx={{ width: "28%" }}>文件</TableCell>
+                      <TableCell sx={{ width: "11%" }}>分類</TableCell>
+                      <TableCell sx={{ width: "9%" }}>目前版本</TableCell>
+                      <TableCell sx={{ width: "8%" }} align="right">
+                        應看
+                      </TableCell>
+                      <TableCell sx={{ width: "8%" }} align="right">
+                        已看
+                      </TableCell>
+                      <TableCell sx={{ width: "8%" }} align="right">
+                        未看
+                      </TableCell>
+                      <TableCell sx={{ width: "24%" }}>閱讀率</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((row) => {
+                      const isOpen = expanded.has(row.doc_id)
+                      return (
+                        <Fragment key={row.doc_id}>
+                          <TableRow>
+                            <TableCell sx={{ pr: 0 }}>
+                              {row.groups.length > 0 && (
+                                <IconButton
+                                  size="small"
+                                  aria-label={isOpen ? `收合 ${row.doc_name} 的可見對象` : `展開 ${row.doc_name} 的可見對象`}
+                                  onClick={() => toggleExpanded(row.doc_id)}
+                                >
+                                  {isOpen ? (
+                                    <KeyboardArrowDownIcon fontSize="small" />
+                                  ) : (
+                                    <KeyboardArrowRightIcon fontSize="small" />
+                                  )}
+                                </IconButton>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {row.doc_name}
+                              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                {row.doc_id}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>{row.category_name ?? row.category_code}</TableCell>
+                            <TableCell>{row.current_version_no ?? "—"}</TableCell>
+                            <TableCell align="right">{row.should_see}</TableCell>
+                            <TableCell align="right">{row.seen}</TableCell>
+                            <TableCell align="right">{row.unseen}</TableCell>
+                            <TableCell>
+                              <RateCell rate={row.rate} />
+                            </TableCell>
+                          </TableRow>
+                          {isOpen && <AudienceGroupRows doc={row} />}
+                        </Fragment>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
               {data && (
                 <Box sx={{ mt: 2 }}>
                   <Pagination

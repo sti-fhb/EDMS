@@ -11,6 +11,7 @@ import Stack from "@mui/material/Stack"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import Tooltip from "@mui/material/Tooltip"
@@ -126,57 +127,63 @@ export function AttemptOverviewBlock({
                       尚未作答
                     </Typography>
                   ) : (
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>次別</TableCell>
-                          <TableCell>作答時間</TableCell>
-                          <TableCell align="right">分數</TableCell>
-                          <TableCell>是否及格</TableCell>
-                          <TableCell>明細</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {/* #709：依輪次分段——與 ET07 歷次作答紀錄同一套規則與文字 */}
-                        {withRoundDividers(quiz.attempts, quiz.resets).map((row) =>
-                          row.type === "divider" ? (
-                            <RoundDividerRow
-                              key={`reset-${row.reset.after_attempt_no}-${row.reset.executed_at}`}
-                              reset={row.reset}
-                            />
-                          ) : (
-                          <TableRow
-                            key={row.attempt.attempt_id}
-                            hover
-                            sx={{ cursor: "pointer", ...(row.previous && { "& td": { color: "text.disabled" } }) }}
-                            onClick={() => onOpenDetail(row.attempt.attempt_id)}
-                          >
-                            <TableCell>
-                              第 {row.attempt.attempt_no} 次
-                              {row.previous && <Chip size="small" variant="outlined" label="前一輪" sx={{ ml: 1 }} />}
-                            </TableCell>
-                            <TableCell>{formatDateTime(row.attempt.submitted_at)}</TableCell>
-                            {/* 分母用快照的 points_total，**不可寫死 100**——發布後教師仍可改配分 */}
-                            <TableCell align="right">
-                              {row.attempt.score} / {row.attempt.points_total}
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="small"
-                                color={row.attempt.is_pass && !row.previous ? "success" : "default"}
-                                label={row.attempt.is_pass ? "及格" : "未及格"}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="caption" color="text.secondary">
-                                查看逐題明細
-                              </Typography>
-                            </TableCell>
+                    // #835：auto layout 的表格會依內容撐寬並超過容器，窄螢幕下整頁跟著橫向
+                    // 捲動（頁首、側欄一起跑掉）。包 TableContainer 讓捲動留在表格自己身上。
+                    // ⚠️ 註解寫成 `//` 而非 `{/* */}`：此處是三元運算子的分支，只能有一個
+                    // 表達式，JSX 註解會變成第二個同層節點而編譯失敗。
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>次別</TableCell>
+                            <TableCell>作答時間</TableCell>
+                            <TableCell align="right">分數</TableCell>
+                            <TableCell>是否及格</TableCell>
+                            <TableCell>明細</TableCell>
                           </TableRow>
-                          ),
-                        )}
-                      </TableBody>
-                    </Table>
+                        </TableHead>
+                        <TableBody>
+                          {/* #709：依輪次分段——與 ET07 歷次作答紀錄同一套規則與文字 */}
+                          {withRoundDividers(quiz.attempts, quiz.resets).map((row) =>
+                            row.type === "divider" ? (
+                              <RoundDividerRow
+                                key={`reset-${row.reset.after_attempt_no}-${row.reset.executed_at}`}
+                                reset={row.reset}
+                              />
+                            ) : (
+                            <TableRow
+                              key={row.attempt.attempt_id}
+                              hover
+                              sx={{ cursor: "pointer", ...(row.previous && { "& td": { color: "text.disabled" } }) }}
+                              onClick={() => onOpenDetail(row.attempt.attempt_id)}
+                            >
+                              <TableCell>
+                                第 {row.attempt.attempt_no} 次
+                                {row.previous && <Chip size="small" variant="outlined" label="前一輪" sx={{ ml: 1 }} />}
+                              </TableCell>
+                              <TableCell>{formatDateTime(row.attempt.submitted_at)}</TableCell>
+                              {/* 分母用快照的 points_total，**不可寫死 100**——發布後教師仍可改配分 */}
+                              <TableCell align="right">
+                                {row.attempt.score} / {row.attempt.points_total}
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  size="small"
+                                  color={row.attempt.is_pass && !row.previous ? "success" : "default"}
+                                  label={row.attempt.is_pass ? "及格" : "未及格"}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="caption" color="text.secondary">
+                                  查看逐題明細
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                            ),
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   )}
                 </Stack>
               ))}

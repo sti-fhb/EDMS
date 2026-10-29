@@ -89,7 +89,7 @@ paths:
 | 元素 | 規範摘要 |
 |------|---------|
 | 卡片 | 白底、`1px solid #dee2e6`、圓角 `8px`、內距 `1rem` |
-| 表格 | ⛔ **底色 / `nowrap` / 列 hover 都不要逐頁寫**，已由 `muiTheme` 的 `MuiTableCell.head` 與 `MuiTableRow.root` 全站供應（#828、#832）；字體 `0.875rem` 為 MUI `body2` 預設，不需設定 |
+| 表格 | ⛔ **底色 / `nowrap` / 列 hover 都不要逐頁寫**，已由 `muiTheme` 的 `MuiTableCell.head` 與 `MuiTableRow.root` 全站供應（#828、#832）；字體 `0.875rem` 為 MUI `body2` 預設，不需設定。**外層一律包 `TableContainer`**，且 `tableLayout: "fixed"` 的表必須用 `minWidth`（上限 940）而非 `width: "100%"`，否則窄螢幕欄位被擠壓卻不會出現捲軸（#835）|
 | 表單 | 卡片內展開（非 Modal）、綠色 2px 邊框、`max-width: 500~600px` |
 | 按鈕 | 主要 = `contained primary`、次要 = `outlined`、危險 = `outlined error` |
 | 按鈕大小 | 一般 `size="small"`，掃碼確認可用預設大小 |

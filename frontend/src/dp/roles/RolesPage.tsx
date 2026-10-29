@@ -19,6 +19,7 @@ import Tab from "@mui/material/Tab"
 import Table from "@mui/material/Table"
 import TableBody from "@mui/material/TableBody"
 import TableCell from "@mui/material/TableCell"
+import TableContainer from "@mui/material/TableContainer"
 import TableHead from "@mui/material/TableHead"
 import TableRow from "@mui/material/TableRow"
 import Tabs from "@mui/material/Tabs"
@@ -181,87 +182,93 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
 
       {/* 固定表格版面：欄寬由表頭決定、不隨儲存格內容（可見對象標籤數）變動，避免加標籤時其他欄位位移 */}
       <Paper variant="outlined">
-        <Table size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
-          <TableHead>
-            <TableRow>
-              <TableCell sx={{ width: "20%" }}>帳號</TableCell>
-              <TableCell sx={{ width: "10%" }}>姓名</TableCell>
-              {roleDefs.map((r) => (
-                <TableCell key={r.code} align="center" sx={{ width: "7%" }}>
-                  {r.label}
-                </TableCell>
-              ))}
-              <TableCell sx={{ width: "26%" }}>{dimensionLabel}</TableCell>
-              <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((row) => {
-              // 停用 / 鎖定中的帳號登不進系統 → 整列唯讀，兩維度皆不可操作（加權與降權都不行，SA 裁示）。
-              // 需要降權時的路徑是：先於使用者管理頁啟用帳號 → 撤權 → 再停用。
-              // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
-              const editable = isAccountUsable(row)
-              return (
-                <TableRow key={row.user_id} sx={editable ? undefined : { opacity: 0.5 }}>
-                  <TableCell>{row.email}</TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <span>{row.user_name}</span>
-                      {/* 兩種狀態都用預設灰：本頁的語意是「此列不可操作」，非警示 */}
-                      {isDisabled(row) && <Chip size="small" label="已停用" />}
-                      {isLocked(row) && (
-                        <Chip size="small" label="已鎖定" title={`鎖定至 ${formatDateTime(row.locked_until)}`} />
-                      )}
-                    </Stack>
+        {/* #835：補捲動容器，並把 width:100% 改為 minWidth 940——只補容器不改寬度的話，
+            tableLayout:fixed 會把表格鎖在容器的 100%，窄螢幕下欄位照樣被擠到讀不了，
+            而且看起來像做完了。940 取「每欄容得下自己的表頭」與上限 940 的較小值。
+            ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
+        <TableContainer>
+          <Table size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: "20%" }}>帳號</TableCell>
+                <TableCell sx={{ width: "10%" }}>姓名</TableCell>
+                {roleDefs.map((r) => (
+                  <TableCell key={r.code} align="center" sx={{ width: "7%" }}>
+                    {r.label}
                   </TableCell>
-                  {roleDefs.map((r) => (
-                    <TableCell key={r.code} align="center">
-                      <Checkbox
-                        size="small"
-                        checked={row.roles.includes(r.code)}
-                        // 帳號不可用 → 整列唯讀；否則只在「正對本列做角色操作」時 disable
-                        //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
-                        disabled={
-                          !editable ||
-                          (assignMut.isPending &&
-                            assignMut.variables?.userId === row.user_id &&
-                            assignMut.variables?.source === "role")
-                        }
-                        onChange={() => toggleRole(row, r.code)}
-                        slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
-                      />
+                ))}
+                <TableCell sx={{ width: "26%" }}>{dimensionLabel}</TableCell>
+                <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.map((row) => {
+                // 停用 / 鎖定中的帳號登不進系統 → 整列唯讀，兩維度皆不可操作（加權與降權都不行，SA 裁示）。
+                // 需要降權時的路徑是：先於使用者管理頁啟用帳號 → 撤權 → 再停用。
+                // 後端 assign 另以 DP_ROLE_004 硬擋——本判定只是體驗，非權限邊界。
+                const editable = isAccountUsable(row)
+                return (
+                  <TableRow key={row.user_id} sx={editable ? undefined : { opacity: 0.5 }}>
+                    <TableCell>{row.email}</TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <span>{row.user_name}</span>
+                        {/* 兩種狀態都用預設灰：本頁的語意是「此列不可操作」，非警示 */}
+                        {isDisabled(row) && <Chip size="small" label="已停用" />}
+                        {isLocked(row) && (
+                          <Chip size="small" label="已鎖定" title={`鎖定至 ${formatDateTime(row.locked_until)}`} />
+                        )}
+                      </Stack>
                     </TableCell>
-                  ))}
-                  <TableCell sx={{ verticalAlign: "top" }}>
-                    {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
-                    <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
-                      {row.groups.length === 0 ? (
-                        <Typography variant="caption" color="text.secondary">
-                          未指派
-                        </Typography>
-                      ) : (
-                        row.groups.map((g) => (
-                          <Chip key={g} size="small" label={groupLabel(g, groupOptions)} />
-                        ))
-                      )}
-                      {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
-                      <Button size="small" disabled={!editable} onClick={() => setEditing(row)}>
-                        編輯
-                      </Button>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="caption" color="text.secondary">
-                      {row.last_modified_by
-                        ? `${row.last_modified_by_name ?? row.last_modified_by}｜${formatDateTaipei(row.last_modified_date)}`
-                        : "—"}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+                    {roleDefs.map((r) => (
+                      <TableCell key={r.code} align="center">
+                        <Checkbox
+                          size="small"
+                          checked={row.roles.includes(r.code)}
+                          // 帳號不可用 → 整列唯讀；否則只在「正對本列做角色操作」時 disable
+                          //（存可見對象 source==="group" 不影響角色 checkbox，不閃）
+                          disabled={
+                            !editable ||
+                            (assignMut.isPending &&
+                              assignMut.variables?.userId === row.user_id &&
+                              assignMut.variables?.source === "role")
+                          }
+                          onChange={() => toggleRole(row, r.code)}
+                          slotProps={{ input: { "aria-label": `${row.user_name} ${r.label}` } }}
+                        />
+                      </TableCell>
+                    ))}
+                    <TableCell sx={{ verticalAlign: "top" }}>
+                      {/* 標籤 + 編輯鈕以 flex-wrap 收在本欄固定寬度內，多選時只在本格內換行、不擠壓其他欄 */}
+                      <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5 }}>
+                        {row.groups.length === 0 ? (
+                          <Typography variant="caption" color="text.secondary">
+                            未指派
+                          </Typography>
+                        ) : (
+                          row.groups.map((g) => (
+                            <Chip key={g} size="small" label={groupLabel(g, groupOptions)} />
+                          ))
+                        )}
+                        {/* 不可用帳號：保留 disabled 鈕而非隱藏，維持固定表格版面（tableLayout: fixed）不位移 */}
+                        <Button size="small" disabled={!editable} onClick={() => setEditing(row)}>
+                          編輯
+                        </Button>
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary">
+                        {row.last_modified_by
+                          ? `${row.last_modified_by_name ?? row.last_modified_by}｜${formatDateTaipei(row.last_modified_date)}`
+                          : "—"}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
       </Paper>
 
       {data && (
