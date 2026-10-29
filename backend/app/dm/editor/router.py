@@ -18,6 +18,7 @@ from app.core.schema_types import (
     SAFE_SINGLE_LINE_OR_EMPTY_PATTERN,
     STRIP_BEFORE_VALIDATE,
 )
+from app.core.upload_form_limits import LimitedFormRoute
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.document.file_store import enforce_size_limit, resolve_upload_limits
 from app.dm.editor.schemas import (
@@ -34,7 +35,9 @@ from app.dm.editor.schemas import (
 from app.dm.editor.service import EditorService
 from app.dm.roles.authz import DM_EDITOR, has_role
 
-router = APIRouter(prefix="/api/dm", tags=["dm-editor"])
+# route_class：文件上傳的表單解析上限（#833 A2）。⚠️ 欄位數上限是照這裡的欄位形狀算的——
+# 新增多值欄或調高 `_TAG_IDS_MAX` 時，`test_core_upload_form_limits.py` 的守門會告訴你是否超過
+router = APIRouter(prefix="/api/dm", tags=["dm-editor"], route_class=LimitedFormRoute)
 _service = EditorService()
 
 # ── 寫入欄位的邊界（#697 / #500）─────────────────────────────────────────────

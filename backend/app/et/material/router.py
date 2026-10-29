@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.core.upload_form_limits import LimitedFormRoute
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, require_et_roles
 from app.et.material.schemas import (
@@ -33,6 +34,7 @@ router = APIRouter(
     prefix="/api/et",
     tags=["et-material"],
     dependencies=[Depends(get_et_context), Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    route_class=LimitedFormRoute,  # 影片上傳的表單解析上限（#833 A2）
 )
 _service = EtMaterialService()
 

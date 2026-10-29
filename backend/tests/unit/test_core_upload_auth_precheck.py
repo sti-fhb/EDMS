@@ -10,6 +10,7 @@ FastAPI 先解析 body（`await request.form()`）才跑 dependency，身分驗�
 - 清單守門：收檔案的路由 ↔ middleware 的路徑清單 ↔ nginx 的上傳 regex 三邊一致
 """
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -19,7 +20,12 @@ import pytest
 
 from app.core.auth import create_access_token
 from app.core.config import settings
-from app.core.upload_auth_precheck import UPLOAD_METHODS, UPLOAD_PATH_PATTERN, UploadAuthPrecheckMiddleware
+from app.core.upload_auth_precheck import (
+    UPLOAD_MAX_CONCURRENT_PER_USER,
+    UPLOAD_METHODS,
+    UPLOAD_PATH_PATTERN,
+    UploadAuthPrecheckMiddleware,
+)
 from main import app
 
 pytestmark = pytest.mark.unit
@@ -167,6 +173,105 @@ async def test_非上傳請求不經本檢查_原樣交給路由(method, path):
     rec = await _run(_scope(method, path))
 
     assert rec.inner_called is True
+
+
+# ── 每位使用者同時上傳數上限（#833 A3）─────────────────────────────
+
+
+class _Gate:
+    """內層 app 停在「上傳進行中」直到放行，用來製造同時進行的上傳。"""
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.entered = 0
+
+    async def inner_app(self, scope, receive, send) -> None:
+        self.entered += 1
+        await self.release.wait()
+        await send({"type": "http.response.start", "status": 201, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+
+def _as(sub: str) -> dict:
+    return _scope("POST", _UPLOAD_PATH, _bearer(create_access_token(sub=sub, ttl_minutes=15)))
+
+
+async def _start(mw: UploadAuthPrecheckMiddleware, sub: str) -> tuple[asyncio.Task, _Recorder]:
+    rec = _Recorder()
+    task = asyncio.create_task(mw(_as(sub), rec.receive, rec.send))
+    await asyncio.sleep(0)
+    return task, rec
+
+
+async def test_同一人同時上傳超過上限_丟棄_body_回_429():
+    gate = _Gate()
+    mw = UploadAuthPrecheckMiddleware(gate.inner_app)
+    running = [await _start(mw, "u1") for _ in range(UPLOAD_MAX_CONCURRENT_PER_USER)]
+    assert gate.entered == UPLOAD_MAX_CONCURRENT_PER_USER, "前置：上限內的上傳都進得去"
+
+    rejected = _Recorder()
+    # 逾時：沒擋下的話它會進到內層、停在閘門前，測試要紅而不是卡住
+    await asyncio.wait_for(mw(_as("u1"), rejected.receive, rejected.send), timeout=5)
+
+    assert rejected.status == 429
+    assert rejected.body["error_code"] == "COMMON_429"
+    assert gate.entered == UPLOAD_MAX_CONCURRENT_PER_USER, "超量的那個不可交給路由"
+    assert rejected.receive_calls == _CHUNKS, "body 要讀完丟棄，否則 nginx 回 502"
+    gate.release.set()
+    await asyncio.gather(*(t for t, _ in running))
+
+
+async def test_上限以人計算_別人的上傳不受影響():
+    gate = _Gate()
+    mw = UploadAuthPrecheckMiddleware(gate.inner_app)
+    running = [await _start(mw, "u1") for _ in range(UPLOAD_MAX_CONCURRENT_PER_USER)]
+
+    other, _ = await _start(mw, "u2")
+
+    assert gate.entered == UPLOAD_MAX_CONCURRENT_PER_USER + 1
+    gate.release.set()
+    await asyncio.gather(*(t for t, _ in running), other)
+
+
+async def test_上傳結束後名額歸還_含路由拋錯的情況():
+    """名額沒歸還的話，那個人從此再也上傳不了——直到後端重啟。"""
+    calls = []
+
+    async def failing_then_ok(scope, receive, send):
+        calls.append(1)
+        if len(calls) <= UPLOAD_MAX_CONCURRENT_PER_USER:
+            raise RuntimeError("路由內部錯誤")
+        await send({"type": "http.response.start", "status": 201, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = UploadAuthPrecheckMiddleware(failing_then_ok)
+    for _ in range(UPLOAD_MAX_CONCURRENT_PER_USER):
+        with pytest.raises(RuntimeError):
+            await mw(_as("u1"), _Recorder().receive, _Recorder().send)
+
+    rec = _Recorder()
+    await mw(_as("u1"), rec.receive, rec.send)
+
+    assert rec.status == 201
+    assert mw._in_flight == {}, "歸零的鍵要移除，計數表不隨使用者數累積"
+
+
+async def test_上傳被取消時名額也歸還():
+    """`CancelledError` 不是 `Exception` 的子類，只靠 `except Exception` 會漏掉這條（code review）。"""
+    gate = _Gate()
+    mw = UploadAuthPrecheckMiddleware(gate.inner_app)
+    running = [await _start(mw, "u1") for _ in range(UPLOAD_MAX_CONCURRENT_PER_USER)]
+    assert gate.entered == UPLOAD_MAX_CONCURRENT_PER_USER
+
+    for task, _ in running:
+        task.cancel()
+    await asyncio.gather(*(t for t, _ in running), return_exceptions=True)
+
+    assert mw._in_flight == {}
+    after, _ = await _start(mw, "u1")
+    assert gate.entered == UPLOAD_MAX_CONCURRENT_PER_USER + 1, "取消後名額歸還，同一人可以再上傳"
+    gate.release.set()
+    await after
 
 
 async def test_非_http_的_scope_原樣放行():

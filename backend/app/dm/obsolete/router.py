@@ -13,13 +13,15 @@ from app.core.db import get_db
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo, get_operator
 from app.core.schema_types import SAFE_MULTILINE_PATTERN, STRIP_BEFORE_VALIDATE
+from app.core.upload_form_limits import LimitedFormRoute
 from app.dm.deps import DmContext, get_dm_context
 from app.dm.document.file_store import enforce_size_limit
 from app.dm.obsolete.schemas import InitiateObsoleteResult
 from app.dm.obsolete.service import ObsoleteService
 from app.dm.roles.authz import DM_EDITOR, has_role
 
-router = APIRouter(prefix="/api/dm", tags=["dm-obsolete"])
+# route_class：附件上傳的表單解析上限（#833 A2）
+router = APIRouter(prefix="/api/dm", tags=["dm-obsolete"], route_class=LimitedFormRoute)
 _service = ObsoleteService()
 
 #: 廢止申請原因上限（裁示 2026-10-17）。`DM_REVIEW.REASON` 是無界 `Text`，但此值會寫入
