@@ -7,14 +7,15 @@
 # 注意：這是設定檔，不是 workflow；不會在每次 PR 時執行，而是按下方 schedule 自行排程
 # 檢查，有更新才另外開 PR，經 CI 與人工 review 後才 merge。
 #
-# 本檔目前**僅納管 github-actions**。npm（frontend）與 uv（backend）的「版本更新」
+# 本檔納管 github-actions 與 backend/Dockerfile 的建置用映像（docker）。npm（frontend）與
+# uv（backend 套件）的「版本更新」
 # 刻意不納管——那會讓每個有新版的套件都開一張 PR（2026-08-10 實測 frontend 有 19 個
 # 套件有新版），PR 噪音會淹沒真正需要看的東西。依賴的「安全更新」由 repo 層級的
 # Dependabot security updates 處理，未被涵蓋的部分由 dependency-alerts.yml 定期提醒
 # 人工處理（見 #143）。
 #
 # 對齊主專案 TBMS 的 .github/dependabot.yml，差異三處：
-#   1. TBMS 亦僅納管 github-actions，本檔相同
+#   1. 兩邊皆納管 github-actions 與 backend 的 docker 映像，本檔相同
 #   2. TBMS 對 pnpm/action-setup 設 major ignore（其 v6 self-installer 改走 npm，會踩到
 #      self-hosted runner 內建 node24 的半殘 npm 而爆 CI）。EDMS 全部 job 使用
 #      ubuntu-latest（GitHub-hosted），該限制不適用，故不照抄
@@ -52,5 +53,36 @@ updates:
     # 明確指定 label，否則 Dependabot 會自行建立 `github_actions` label——與
     # .claude/rules/sti-label-rules.md「禁止自創語意相近的新 label」抵觸。
     # `dependencies` 為 repo 既有 label。
+    labels:
+      - "dependencies"
+
+  # backend/Dockerfile 的 FROM 皆以 tag@sha256 鎖定。tag 被上游改指（如 python:3.12-slim
+  # 套用安全修補）時由 bot 提 PR 更新 digest，避免「釘死後拿不到修補」。
+  # ⚠️ ci.yml 不建後端映像，本類 PR 的 CI 綠燈**不代表新基底建得起來**——merge 前須在本機
+  #    實際 docker build 並確認容器可啟動（否則要到 cd.yml 才發現）。
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    ignore:
+      # python 只追 3.12-slim 這個 tag 的 digest 更新（tag 被上游改指時仍會提 PR）：
+      # 升 3.13 等於換直譯器，.venv 與相依套件須一併驗證，應由人工另開 issue 處理。
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+    # 兩個 python 階段同一檔案、同一 dependency，Dependabot 本就於同一 PR 一併更新。
+    # uv 與 python 分組：uv 為 0.x，minor 升級可能改變建置行為，不可拖住基底映像的安全修補。
+    groups:
+      backend-python:
+        patterns:
+          - "python"
+      backend-uv:
+        patterns:
+          - "*astral-sh/uv" # 萬用字元：不論 dependency 名稱是否含 registry 前綴皆可對上
+    commit-message:
+      prefix: "chore"
     labels:
       - "dependencies"

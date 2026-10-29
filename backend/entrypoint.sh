@@ -24,7 +24,7 @@ export FORWARDED_ALLOW_IPS=
 
 # --no-access-log：uvicorn 的 access log 之 request line 含 query string，
 # 存取記錄改由 nginx 負責（已設為不記 query string，見 nginx/log-format.conf）。
-exec uv run uvicorn main:app \
+exec /app/.venv/bin/uvicorn main:app \
   --host 0.0.0.0 --port 8000 \
   --workers 1 \
   --no-proxy-headers \

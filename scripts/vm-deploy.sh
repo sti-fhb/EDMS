@@ -137,7 +137,8 @@ log "migration 前備份..."
 bash scripts/db-backup.sh pre-migrate
 
 log "執行 migration..."
-"${COMPOSE[@]}" run --rm edms-backend uv run alembic upgrade head
+# 容器內指令一律以絕對路徑 /app/.venv/bin/ 執行：映像不含 uv（新舊映像皆有此路徑）。
+"${COMPOSE[@]}" run --rm edms-backend /app/.venv/bin/alembic upgrade head
 
 log "啟動所有服務..."
 "${COMPOSE[@]}" up -d --remove-orphans

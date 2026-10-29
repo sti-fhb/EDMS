@@ -233,7 +233,7 @@ cp .env.example .env.local
 docker compose up -d --build
 
 # 4. 執行 DB Migration
-docker compose exec edms-backend uv run alembic upgrade head
+docker compose exec edms-backend /app/.venv/bin/alembic upgrade head
 ```
 
 - 前端：`http://localhost`（port 80）
