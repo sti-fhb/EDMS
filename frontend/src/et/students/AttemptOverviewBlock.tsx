@@ -132,14 +132,29 @@ export function AttemptOverviewBlock({
                     // ⚠️ 註解寫成 `//` 而非 `{/* */}`：此處是三元運算子的分支，只能有一個
                     // 表達式，JSX 註解會變成第二個同層節點而編譯失敗。
                     <TableContainer>
-                      <Table size="small">
+                      {/* #844：同一位學員底下**每個測驗各自是一張表**，而 auto 版型讓每張表
+                          依自己的內容算欄寬——於是上下兩張表的欄位左右錯開，無法對照。
+
+                          觸發它的是第一欄：有「前一輪」Chip（或底下有「教師要求重測」分隔列）
+                          的那張會被撐寬，沒有的那張整排往左縮。
+
+                          ⇒ 改 `fixed` + 各欄固定百分比，讓所有表共用同一份欄寬。
+
+                          ⚠️ `fixed` **必須**搭 `minWidth`，⛔ 不可用 `width: "100%"`
+                          （`docs/ref/ui-design-guide.md` §4，#835 定調）：後者會把表格鎖在
+                          容器的 100%，窄螢幕下欄位照樣被擠到讀不了，而且**看起來像做完了**。
+                          620 取「每欄容得下自己的表頭」所需值，低於 guide 的 940 上限。 */}
+                      <Table size="small" sx={{ tableLayout: "fixed", minWidth: 620 }}>
                         <TableHead>
                           <TableRow>
-                            <TableCell>次別</TableCell>
-                            <TableCell>作答時間</TableCell>
-                            <TableCell align="right">分數</TableCell>
-                            <TableCell>是否及格</TableCell>
-                            <TableCell>明細</TableCell>
+                            {/* 次別最寬：要容得下「第 10 次」＋「前一輪」Chip */}
+                            <TableCell sx={{ width: "18%" }}>次別</TableCell>
+                            <TableCell sx={{ width: "24%" }}>作答時間</TableCell>
+                            <TableCell align="right" sx={{ width: "16%" }}>
+                              分數
+                            </TableCell>
+                            <TableCell sx={{ width: "14%" }}>是否及格</TableCell>
+                            <TableCell sx={{ width: "28%" }}>明細</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>

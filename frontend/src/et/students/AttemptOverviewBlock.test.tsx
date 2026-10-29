@@ -114,3 +114,110 @@ describe("重置鈕的說明（#768 第 1 項）", () => {
     expect(tooltip).toHaveTextContent("重置後該學員可再作答")
   })
 })
+
+describe("AttemptOverviewBlock 多測驗表格欄位對齊（#844）", () => {
+  /**
+   * 兩個測驗：測驗一有「前一輪」Chip 與輪次分隔列（第一欄被撐寬的來源），測驗二沒有。
+   *
+   * 🔴 **這個組合就是本 issue 的觸發條件**。兩個內容相同的測驗測不出任何東西——
+   * `table-layout: auto` 下它們本來就會一樣寬。
+   */
+  function twoQuizzes() {
+    server.use(
+      http.get("/api/et/courses/:courseId/attempt-overview", () =>
+        HttpResponse.json({
+          students: [
+            {
+              user_id: "s01",
+              user_name: "ET學員乙",
+              quizzes: [
+                {
+                  quiz_id: 1,
+                  quiz_name: "測驗一",
+                  max_retry: 2,
+                  used_attempts: 0,
+                  is_passed: false,
+                  can_reset: true,
+                  // 第一欄會多出「前一輪」Chip
+                  attempts: [
+                    { attempt_id: 11, attempt_no: 1, submitted_at: "2026-10-21T06:31:00Z", score: "100.00", points_total: 100, is_pass: true },
+                  ],
+                  // 底下還會多一列「教師要求重測」分隔列
+                  resets: [{ after_attempt_no: 1, kind: "RETEST", executed_at: "2026-10-21T06:39:00Z" }],
+                },
+                {
+                  quiz_id: 2,
+                  quiz_name: "測驗二",
+                  max_retry: 2,
+                  used_attempts: 1,
+                  is_passed: true,
+                  can_reset: true,
+                  attempts: [
+                    { attempt_id: 21, attempt_no: 1, submitted_at: "2026-10-21T06:31:00Z", score: "100.00", points_total: 100, is_pass: true },
+                  ],
+                  resets: [],
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    )
+  }
+
+  /** 展開學員後取得兩張表的表頭儲存格寬度。 */
+  async function headerWidths() {
+    const user = userEvent.setup()
+    renderWithProviders(<AttemptOverviewBlock courseId={1} readOnly={false} onOpenDetail={vi.fn()} onReset={vi.fn()} />)
+    await user.click(await screen.findByRole("button", { name: /ET學員乙/ }))
+    await screen.findByText("測驗二")
+
+    const tables = document.querySelectorAll("table")
+    expect(tables.length).toBe(2)
+    // ⚠️ 讀 `getComputedStyle` 而非 `element.style`：MUI 的 `sx` 編譯成 **CSS class**
+    // （`css-xxxx-MuiTable-root`），不是 inline style——讀 `.style.width` 一律是空字串，
+    // 而「兩張表都是空字串」會讓 `toEqual` 恆真，是個看起來很綠的假守門。
+    return [...tables].map((t) =>
+      [...t.querySelectorAll("thead th")].map((th) => getComputedStyle(th as HTMLElement).width),
+    )
+  }
+
+  it("🔴 兩個測驗的五個欄位寬度相同——含「前一輪」標籤與分隔列的那張也一樣", async () => {
+    twoQuizzes()
+    const [first, second] = await headerWidths()
+
+    expect(first).toHaveLength(5)
+    expect(first).toEqual(second)
+    // ⚠️ 不可全是空字串——那代表沒有給寬度，`toEqual` 會在「兩邊都沒設」時恆真
+    expect(first.every((w) => w !== "")).toBe(true)
+  })
+
+  it("表格採 fixed 版型並帶 minWidth（#835 定調的寫法）", async () => {
+    // ⚠️ `tableLayout: fixed` 若不搭 `minWidth`，窄螢幕下欄位照樣被擠到讀不了
+    //（`ui-design-guide.md` §4：fixed 的表必須搭 minWidth，不可用 width:100%）。
+    twoQuizzes()
+    await headerWidths()
+
+    const table = document.querySelector("table") as HTMLElement
+    const style = getComputedStyle(table)
+    expect(style.tableLayout).toBe("fixed")
+    const minWidth = Number.parseInt(style.minWidth, 10)
+    expect(minWidth).toBeGreaterThan(0)
+    // guide 的上限：1280 螢幕扣掉側欄
+    expect(minWidth).toBeLessThanOrEqual(940)
+  })
+
+  it("⛔ 欄位內容、排序與輪次分隔列一字不改（正向錨點）", async () => {
+    twoQuizzes()
+    await headerWidths()
+
+    const headers = [...document.querySelectorAll("thead th")].slice(0, 5).map((th) => th.textContent)
+    expect(headers).toEqual(["次別", "作答時間", "分數", "是否及格", "明細"])
+    // #709 的分隔列與「前一輪」標籤不受版面調整影響
+    expect(screen.getByText(/教師要求重測（測驗內容已更新）/)).toBeInTheDocument()
+    expect(screen.getAllByText("前一輪")).toHaveLength(1)
+    // 分數欄維持右對齊
+    const scoreTh = document.querySelectorAll("thead th")[2] as HTMLElement
+    expect(scoreTh.className).toMatch(/alignRight/)
+  })
+})
