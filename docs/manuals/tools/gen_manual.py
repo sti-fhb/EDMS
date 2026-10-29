@@ -139,6 +139,7 @@ def finalize_fields(path: Path) -> None:
     try:
         import win32com.client   # pywin32；非 Windows 或未安裝者退回保留旗標
     except ImportError:
+        print("    （未能以 Word 預先更新目錄，改為開檔時更新：缺 pywin32）")
         return
     _set_field_update_flag(path, enabled=False)
     # Word 存檔會把「最後修訂者」改成本機 Windows 使用者；先記下產生器設定之修訂者，存檔後寫回
@@ -394,10 +395,13 @@ def _person(source: Path, *, created: bool) -> str:
 
 
 def build_front_matter(doc: Document, break_p, title: str, module: str | None,
-                       doc_name: str = DOC_NAME, source: Path | None = None) -> None:
+                       doc_name: str = DOC_NAME, source: Path | None = None,
+                       with_history: bool = True) -> None:
     """封面、修訂履歷、目錄——一律插入第 1 節。
 
-    測試報告與操作手冊共用本函式，僅文件名稱（doc_name）不同。
+    測試報告與操作手冊共用本函式，文件名稱（doc_name）不同；測試報告另以
+    with_history=False 省略封面之文件資訊表與修訂履歷頁，只留封面與目錄
+    （2026-10-29 BC／TL SA 裁示）。
 
     作者與修訂人依 `source` 之 git 紀錄判定，兩者**語意不同**：作者為建立該檔者、
     修訂人為最後改動者。1.0 版通常相同，其後改版則未必——修訂履歷要記的是這一版
@@ -435,8 +439,23 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
         cover_line(title, COVER_OPERATION_SIZE)
     else:                                        # 不在模組資料夾下者，封面只印文件名
         cover_line(title, COVER_DOC_SIZE)
+    if with_history:
+        _add_doc_info_and_history(doc, break_p, author, reviser)
+
+    heading = doc.add_paragraph("目錄", style="Heading 1 No TOC")
+    heading.paragraph_format.page_break_before = True
+    _move_before(break_p, heading)
+    toc = doc.add_paragraph()
+    _add_toc_field(toc)
+    _move_before(break_p, toc)
+
+
+def _add_doc_info_and_history(doc: Document, break_p, author: str, reviser: str) -> None:
+    """封面下方之文件資訊表，及其後之文件制/修訂履歷頁。"""
     for _ in range(5):                           # 與文件資訊表之間距
-        cover_line()
+        para = doc.add_paragraph()
+        para.paragraph_format.space_after = Pt(0)
+        _move_before(break_p, para)
 
     today = date.today().strftime("%Y/%m/%d")
 
@@ -476,13 +495,6 @@ def build_front_matter(doc: Document, break_p, title: str, module: str | None,
             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     _space_cells(history)
     _move_before(break_p, history)
-
-    heading = doc.add_paragraph("目錄", style="Heading 1 No TOC")
-    heading.paragraph_format.page_break_before = True
-    _move_before(break_p, heading)
-    toc = doc.add_paragraph()
-    _add_toc_field(toc)
-    _move_before(break_p, toc)
 
 
 # ---- Markdown 轉換 ------------------------------------------------------
@@ -591,12 +603,32 @@ def _image_scale(md_path: Path, lines: list[str]) -> float:
     return MAX_IMAGE_WIDTH / max(widths) if widths else 0.0
 
 
+def _decimal_num_ids(doc: Document) -> list[int]:
+    """範本中第 0 層為阿拉伯數字（decimal）之編號定義，依 numId 由小到大。
+
+    ⚠️ 範本之編號定義並非全為數字：numId 4 為項目符號「•」。依清單組序直接以 1、2、3…
+    當 numId 配發時，每份手冊之**第 4 組步驟**會印成圓點而非 1. 2. 3.——故只從數字者中配發。
+    """
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    numbering = doc.part.part_related_by(RT.NUMBERING).element
+    decimal_abstracts = set()
+    for abstract in numbering.findall(qn("w:abstractNum")):
+        fmt = abstract.find(f"{qn('w:lvl')}[@{qn('w:ilvl')}='0']/{qn('w:numFmt')}")
+        if fmt is not None and fmt.get(qn("w:val")) == "decimal":
+            decimal_abstracts.add(abstract.get(qn("w:abstractNumId")))
+    return sorted(int(num.get(qn("w:numId"))) for num in numbering.findall(qn("w:num"))
+                  if num.find(qn("w:abstractNumId")).get(qn("w:val")) in decimal_abstracts)
+
+
 def convert_body(doc: Document, md_path: Path) -> str:
     lines = md_path.read_text(encoding="utf-8").splitlines()
     scale = _image_scale(md_path, lines)
     title = md_path.stem
     counters = {1: 0, 2: 0, 3: 0}
-    list_num_id = 0          # 清單組序；範本備有多組編號定義可供配發
+    decimal_ids = _decimal_num_ids(doc)   # 可配發給步驟之編號定義（僅數字格式）
+    list_group = 0           # 清單組序（自 1. 起算者為新的一組）
+    list_num_id = 0          # 本組配到之編號定義
 
     i = 0
     while i < len(lines):
@@ -709,7 +741,11 @@ def convert_body(doc: Document, md_path: Path) -> str:
         if match := LIST_RE.match(line):
             bullet = match.group("bullet")
             if bullet[0].isdigit() and bullet.startswith("1."):
-                list_num_id += 1        # 自 1. 起算者為新的一組
+                list_group += 1         # 自 1. 起算者為新的一組
+                if list_group > len(decimal_ids):
+                    raise ValueError(
+                        f"{md_path.name} 之編號清單達 {list_group} 組，超過範本可用之 {len(decimal_ids)} 組編號定義")
+                list_num_id = decimal_ids[list_group - 1]
             text, i = _gather(lines, i + 1, match.group("text"))
             _add_list_item(doc, bullet, text,
                            depth=len(match.group("indent")) // 2,
