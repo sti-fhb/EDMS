@@ -452,3 +452,50 @@ class Test前端快取設定契約:
         """nginx 自產錯誤頁（404、限流、上游不通）的內文會帶版本字串，並被 front-proxy 原樣轉送。"""
         text = self._CONF.read_text(encoding="utf-8")
         assert re.search(r"^\s*server_tokens\s+off;", text, re.MULTILINE), "nginx.conf 未設 server_tokens off"
+
+
+class Test轉址契約:
+    """`nginx/nginx.conf` 的轉址指令：一律送根相對的 Location，由 front-proxy 補回 `/edms` 前綴。
+
+    本層不知道外部的 scheme 與掛載前綴，故轉址（目錄補尾斜線、後端 `redirect_slashes`）
+    一律送根相對路徑，front-proxy 的 `proxy_redirect / /edms/;` 再補上前綴。
+
+    與上面兩組契約同理，本機 dev 走 vite 不經 nginx，故以解析設定檔釘住；
+    執行期行為見 `scripts/tests/test_nginx_redirects.sh`（需 docker）。
+    """
+
+    _NGINX_DIR = Path(__file__).resolve().parents[2].parent / "nginx"
+    _CONF = _NGINX_DIR / "nginx.conf"
+    # 會被 location include 的 proxy 設定：其中若另寫 proxy_redirect，會遮蔽 server 層那一條
+    _INCLUDED = ("api-proxy.conf", "api-upload.conf")
+
+    def _server_level(self) -> str:
+        """server 區塊內、所有 location 之外的指令（去掉註解）。"""
+        lines, depth = [], 0
+        for raw in self._CONF.read_text(encoding="utf-8").splitlines():
+            line = raw.split("#", 1)[0]
+            if depth == 1 and not re.match(r"^\s*location\b", line):
+                lines.append(line)
+            depth += line.count("{") - line.count("}")
+        return "\n".join(lines)
+
+    def _directives(self, path: Path, name: str) -> list[str]:
+        text = path.read_text(encoding="utf-8")
+        return [m.group(0) for m in re.finditer(rf"^\s*{name}\s[^;]*;", text, re.MULTILINE)]
+
+    def test_目錄補尾斜線送相對路徑(self) -> None:
+        assert re.search(r"^\s*absolute_redirect\s+off;", self._server_level(), re.MULTILINE), (
+            "nginx.conf 的 server 層未設 absolute_redirect off"
+        )
+
+    def test_後端轉址改寫為相對路徑(self) -> None:
+        assert re.search(r"^\s*proxy_redirect\s+http://edms-backend/\s+/;", self._server_level(), re.MULTILINE), (
+            "nginx.conf 的 server 層未設 proxy_redirect http://edms-backend/ /"
+        )
+
+    def test_proxy_redirect_只有_server_層一處(self) -> None:
+        """location（含被 include 的檔）內另寫 proxy_redirect 會整組取代 server 層的設定。"""
+        found = self._directives(self._CONF, "proxy_redirect")
+        for name in self._INCLUDED:
+            found += self._directives(self._NGINX_DIR / name, "proxy_redirect")
+        assert len(found) == 1, f"proxy_redirect 應只在 nginx.conf 的 server 層出現一次，實際：{found}"
