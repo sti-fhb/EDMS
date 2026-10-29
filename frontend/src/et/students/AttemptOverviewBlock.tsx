@@ -132,14 +132,38 @@ export function AttemptOverviewBlock({
                     // ⚠️ 註解寫成 `//` 而非 `{/* */}`：此處是三元運算子的分支，只能有一個
                     // 表達式，JSX 註解會變成第二個同層節點而編譯失敗。
                     <TableContainer>
-                      <Table size="small">
+                      {/* #844：同一位學員底下**每個測驗各自是一張表**，auto 版型讓每張表依
+                          自己的內容算欄寬 ⇒ 上下兩張表的欄位左右錯開。觸發它的是第一欄：有
+                          「前一輪」Chip（或底下有「教師要求重測」分隔列）的那張被撐寬。
+
+                          ⇒ 改 `fixed` + 各欄固定百分比，讓所有表共用同一份欄寬。
+
+                          ⚠️ `fixed` **必須**搭 `minWidth`、⛔ 不可用 `width: "100%"`
+                          （`ui-design-guide.md` §4，#835 定調）：後者會把表格鎖在容器的 100%，
+                          窄螢幕下欄位照樣被擠到讀不了。
+
+                          620 由各欄需求反推（取「表頭」與「最寬內容」的大者，含 small 版型
+                          左右各 16px 內距）：次別 151／時間 142／分數 117／及格 88／明細 104，
+                          合計 602px。百分比依此分配，每欄都還有餘裕。
+
+                          ⛔ **欄寬不足時不要加大 `minWidth`**（`ui-design-guide.md` §4，#841）
+                          ——那會讓桌機平白多出捲軸，是用一個回歸去蓋另一個問題。正確作法是
+                          **自同表中最寬鬆的欄勻**。本表即如此：#844 初版把「明細」給到 28%
+                          （它只放 72px 的 caption）而「是否及格」只有 14%（連 4 字表頭的 88px
+                          都裝不下），勻回來之後 620 就夠用。 */}
+                      <Table size="small" sx={{ tableLayout: "fixed", minWidth: 620 }}>
                         <TableHead>
                           <TableRow>
-                            <TableCell>次別</TableCell>
-                            <TableCell>作答時間</TableCell>
-                            <TableCell align="right">分數</TableCell>
-                            <TableCell>是否及格</TableCell>
-                            <TableCell>明細</TableCell>
+                            {/* 次別最寬：唯一要同時容下文字與「前一輪」Chip（151px）的欄 */}
+                            <TableCell sx={{ width: "25%" }}>次別</TableCell>
+                            <TableCell sx={{ width: "23%" }}>作答時間</TableCell>
+                            {/* ⚠️ 分母是快照的 `points_total`、**不是固定 100**，故留 19% */}
+                            <TableCell align="right" sx={{ width: "19%" }}>
+                              分數
+                            </TableCell>
+                            {/* ⚠️ 表頭 4 字 ＝ 88px（CJK 14px × 4 ＋ 內距 32），16% 即 99px */}
+                            <TableCell sx={{ width: "16%" }}>是否及格</TableCell>
+                            <TableCell sx={{ width: "17%" }}>明細</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
