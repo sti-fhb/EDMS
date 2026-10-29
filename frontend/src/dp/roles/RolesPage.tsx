@@ -188,17 +188,30 @@ function AssignmentsTab({ module, tabs }: { module: string; tabs: ReactNode }) {
             ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
         <TableContainer>
           <Table size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
+            {/*
+              #841：角色欄的標籤最長 3 字（管理者 / 編輯者 / 審核者 / 閱覽者），需 74px
+              （3×14 ＋ 左右內距 32），而原本 7% 在 minWidth 940 下只有 65px——表頭溢出
+              儲存格。改 9%（84px），自 `dimensionLabel` 勻 6%、`最後異動` 勻 4%。
+              ⛔ 不要改用加大 minWidth 解決：#835 的 940 上限是為了不讓 1280～1366 筆電
+              冒出今天沒有的橫向捲軸。
+
+              ⚠️ 百分比總和**隨模組而異**，因為角色欄是依 `MODULE_ROLES` 逐一渲染的：
+                DM（4 個角色）：20 + 10 + 9×4 + 20 + 14 = 100%
+                ET（3 個角色）：20 + 10 + 9×3 + 20 + 14 =  91%
+              ET 少掉的 9% 由 `table-layout: fixed` 按比例分回各欄，不會有欄位變窄。
+              改這些數字時**兩個分頁都要看過**，只算 DM 會以為加總必須等於 100。
+            */}
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: "20%" }}>帳號</TableCell>
                 <TableCell sx={{ width: "10%" }}>姓名</TableCell>
                 {roleDefs.map((r) => (
-                  <TableCell key={r.code} align="center" sx={{ width: "7%" }}>
+                  <TableCell key={r.code} align="center" sx={{ width: "9%" }}>
                     {r.label}
                   </TableCell>
                 ))}
-                <TableCell sx={{ width: "26%" }}>{dimensionLabel}</TableCell>
-                <TableCell sx={{ width: "16%" }}>最後異動</TableCell>
+                <TableCell sx={{ width: "20%" }}>{dimensionLabel}</TableCell>
+                <TableCell sx={{ width: "14%" }}>最後異動</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>

@@ -175,15 +175,19 @@ export function DmObsoletePage() {
                 ⛔ 不要拿掉 tableLayout:fixed——那是刻意的版型選擇。 */}
             <TableContainer>
               <Table size="small" sx={{ tableLayout: "fixed", minWidth: 940 }}>
+                {/* #841：「廢止申請人」是本表最長的表頭（5 字），原本 10% 在 minWidth 940
+                    下只有 94px，容不下它所需的 102px（5×14 字寬 ＋ 左右內距 32）。自
+                    「廢止原因」勻 2% 過來。⛔ 不要改用加大 minWidth 解決——940 是
+                    #835 的上限裁示，超過會讓 1280～1366 筆電冒出今天沒有的橫向捲軸。 */}
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ width: "24%" }}>文件名稱</TableCell>
                     <TableCell sx={{ width: "10%" }}>分類</TableCell>
                     <TableCell sx={{ width: "10%" }}>原作者</TableCell>
                     <TableCell sx={{ width: "14%" }}>廢止時間</TableCell>
-                    <TableCell sx={{ width: "10%" }}>廢止申請人</TableCell>
+                    <TableCell sx={{ width: "12%" }}>廢止申請人</TableCell>
                     <TableCell sx={{ width: "10%" }}>核准者</TableCell>
-                    <TableCell sx={{ width: "22%" }}>廢止原因</TableCell>
+                    <TableCell sx={{ width: "20%" }}>廢止原因</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
