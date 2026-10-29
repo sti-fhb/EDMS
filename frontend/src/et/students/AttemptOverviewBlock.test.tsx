@@ -204,6 +204,9 @@ describe("AttemptOverviewBlock 多測驗表格欄位對齊（#844）", () => {
     // 總和應為 100%，否則最後一欄會被瀏覽器自行分配而回到「隨內容跑」
     const total = first.reduce((sum, w) => sum + Number.parseFloat(w), 0)
     expect(total).toBeCloseTo(100, 1)
+    // 🔴 **這組是「對齊」的充分條件，但管不到「寬度夠不夠用」**：把某欄改成 5%、其餘
+    // 放大，總和仍是 100%，欄位仍對齊——只是內容會折行。那件事 jsdom 驗不到（它不做
+    // 排版），由元件註解的寬度推導與手測負責。⛔ 不要以為這條綠了就代表版面沒問題。
   })
 
   it("表格採 fixed 版型並帶 minWidth（#835 定調的寫法）", async () => {
@@ -216,9 +219,29 @@ describe("AttemptOverviewBlock 多測驗表格欄位對齊（#844）", () => {
     const style = getComputedStyle(table)
     expect(style.tableLayout).toBe("fixed")
     const minWidth = Number.parseInt(style.minWidth, 10)
-    expect(minWidth).toBeGreaterThan(0)
+    // ⚠️ 下界不是 `> 0`：那樣把 `minWidth` 改成 1 也會通過，而窄螢幕下欄位照樣被擠爛。
+    // 600 是「五欄各自容得下表頭」的粗略底線（實際取 680，推導見元件註解）。
+    expect(minWidth).toBeGreaterThanOrEqual(600)
     // guide 的上限：1280 螢幕扣掉側欄
     expect(minWidth).toBeLessThanOrEqual(940)
+  })
+
+  it("🔴 輪次分隔列跨滿全部欄位——欄數與 colSpan 是兩處各自寫死的 5", async () => {
+    // `RoundDividerRow` 的 `colSpan` 預設 5，而本表剛好五欄；兩個呼叫端
+    //（本檔與 ET07 的 `AttemptHistory`）**都不傳**，靠的就是那個預設值。
+    //
+    // 🔴 #844 把欄數釘成「五個有明確寬度的欄」之後，這個隱性耦合更容易出事：
+    // 日後有人加第六欄卻忘了傳 `colSpan`，分隔列會少跨一欄而錯位——而那正是本 issue
+    // 要消除的那種錯位，只是換個地方重演。
+    //
+    // ⇒ 以「分隔列的 colSpan == 表頭欄數」釘住，不依賴任何人記得。
+    twoQuizzes()
+    await headerWidths()
+
+    const headerCount = document.querySelectorAll("thead th").length / 2 // 兩張表
+    const divider = document.querySelector("tbody td[colspan]") as HTMLTableCellElement
+    expect(divider).not.toBeNull()
+    expect(Number(divider.getAttribute("colspan"))).toBe(headerCount)
   })
 
   it("⛔ 欄位內容、排序與輪次分隔列一字不改（正向錨點）", async () => {
@@ -231,7 +254,9 @@ describe("AttemptOverviewBlock 多測驗表格欄位對齊（#844）", () => {
     expect(screen.getByText(/教師要求重測（測驗內容已更新）/)).toBeInTheDocument()
     expect(screen.getAllByText("前一輪")).toHaveLength(1)
     // 分數欄維持右對齊
+    // ⚠️ 驗 computed 的 `text-align`，⛔ 不比對 `MuiTableCell-alignRight` 這類**MUI 內部
+    // class 名**——那是實作細節，升版改名時會無聲失效（#844 code review LOW）。
     const scoreTh = document.querySelectorAll("thead th")[2] as HTMLElement
-    expect(scoreTh.className).toMatch(/alignRight/)
+    expect(getComputedStyle(scoreTh).textAlign).toBe("right")
   })
 })

@@ -132,29 +132,33 @@ export function AttemptOverviewBlock({
                     // ⚠️ 註解寫成 `//` 而非 `{/* */}`：此處是三元運算子的分支，只能有一個
                     // 表達式，JSX 註解會變成第二個同層節點而編譯失敗。
                     <TableContainer>
-                      {/* #844：同一位學員底下**每個測驗各自是一張表**，而 auto 版型讓每張表
-                          依自己的內容算欄寬——於是上下兩張表的欄位左右錯開，無法對照。
-
-                          觸發它的是第一欄：有「前一輪」Chip（或底下有「教師要求重測」分隔列）
-                          的那張會被撐寬，沒有的那張整排往左縮。
+                      {/* #844：同一位學員底下**每個測驗各自是一張表**，auto 版型讓每張表依
+                          自己的內容算欄寬 ⇒ 上下兩張表的欄位左右錯開。觸發它的是第一欄：有
+                          「前一輪」Chip（或底下有「教師要求重測」分隔列）的那張被撐寬。
 
                           ⇒ 改 `fixed` + 各欄固定百分比，讓所有表共用同一份欄寬。
 
-                          ⚠️ `fixed` **必須**搭 `minWidth`，⛔ 不可用 `width: "100%"`
-                          （`docs/ref/ui-design-guide.md` §4，#835 定調）：後者會把表格鎖在
-                          容器的 100%，窄螢幕下欄位照樣被擠到讀不了，而且**看起來像做完了**。
-                          620 取「每欄容得下自己的表頭」所需值，低於 guide 的 940 上限。 */}
-                      <Table size="small" sx={{ tableLayout: "fixed", minWidth: 620 }}>
+                          ⚠️ `fixed` **必須**搭 `minWidth`、⛔ 不可用 `width: "100%"`
+                          （`ui-design-guide.md` §4，#835 定調）：後者會把表格鎖在容器的 100%，
+                          窄螢幕下欄位照樣被擠到讀不了。
+
+                          680 由「每欄容得下自己的表頭與最寬內容」反推（扣掉 small 版型左右各
+                          16px padding 後：次別 131／時間 124／分數 97／及格 84／明細 84，各欄
+                          需求 119／110／85／56／72）。低於 guide 的 940 上限。
+                          🔴 初版給 620，次別 116.8px 裝不下「第 10 次」＋Chip 的 119px，Chip
+                          會折行（#844 code review MEDIUM）。 */}
+                      <Table size="small" sx={{ tableLayout: "fixed", minWidth: 680 }}>
                         <TableHead>
                           <TableRow>
-                            {/* 次別最寬：要容得下「第 10 次」＋「前一輪」Chip */}
-                            <TableCell sx={{ width: "18%" }}>次別</TableCell>
-                            <TableCell sx={{ width: "24%" }}>作答時間</TableCell>
-                            <TableCell align="right" sx={{ width: "16%" }}>
+                            {/* 次別最寬：唯一要同時容下文字與 Chip 的欄 */}
+                            <TableCell sx={{ width: "24%" }}>次別</TableCell>
+                            <TableCell sx={{ width: "23%" }}>作答時間</TableCell>
+                            {/* ⚠️ 分母是快照的 `points_total`、**不是固定 100**，故留 19% */}
+                            <TableCell align="right" sx={{ width: "19%" }}>
                               分數
                             </TableCell>
-                            <TableCell sx={{ width: "14%" }}>是否及格</TableCell>
-                            <TableCell sx={{ width: "28%" }}>明細</TableCell>
+                            <TableCell sx={{ width: "17%" }}>是否及格</TableCell>
+                            <TableCell sx={{ width: "17%" }}>明細</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
