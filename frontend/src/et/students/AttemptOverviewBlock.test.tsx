@@ -182,14 +182,28 @@ describe("AttemptOverviewBlock 多測驗表格欄位對齊（#844）", () => {
     )
   }
 
-  it("🔴 兩個測驗的五個欄位寬度相同——含「前一輪」標籤與分隔列的那張也一樣", async () => {
+  it("🔴 兩個測驗的五個欄位都宣告了寬度，且兩張表逐欄相同", async () => {
+    // ## ⚠️ 這條驗的是**宣告**，不是排版結果
+    //
+    // jsdom **不做實際排版**：`getComputedStyle` 回的是宣告值，不會算出「這張表因為
+    // 內容較寬所以第一欄 180px、那張 120px」。而 #844 要修的錯位正是排版結果 ⇒
+    // **瀏覽器才看得到的東西，測不到**（真要驗得靠 e2e 的視覺比對）。
+    //
+    // ⇒ 本條改驗可驗證的契約：**五欄都宣告了明確寬度、且兩張表逐欄一致**。這是「欄位
+    // 會對齊」的充分條件——`fixed` 版型下，欄寬只由宣告決定，與各表內容無關。
+    //
+    // 🔴 初版寫成「兩張表的 computed width 相同」，**拿掉任一欄的 width 照樣通過**
+    //（兩邊都變 `auto`，`toEqual` 恆真）。⇒ 必須同時斷言「每一欄都有宣告」。
     twoQuizzes()
     const [first, second] = await headerWidths()
 
     expect(first).toHaveLength(5)
     expect(first).toEqual(second)
-    // ⚠️ 不可全是空字串——那代表沒有給寬度，`toEqual` 會在「兩邊都沒設」時恆真
-    expect(first.every((w) => w !== "")).toBe(true)
+    // ⛔ 缺了這行，上面那句在「兩張表都沒宣告寬度」時恆真——而那正是修之前的狀態
+    expect(first.every((w) => /^\d+(\.\d+)?%$/.test(w))).toBe(true)
+    // 總和應為 100%，否則最後一欄會被瀏覽器自行分配而回到「隨內容跑」
+    const total = first.reduce((sum, w) => sum + Number.parseFloat(w), 0)
+    expect(total).toBeCloseTo(100, 1)
   })
 
   it("表格採 fixed 版型並帶 minWidth（#835 定調的寫法）", async () => {
