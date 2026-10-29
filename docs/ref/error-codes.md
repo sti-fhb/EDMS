@@ -57,6 +57,12 @@
 > 請求 body 超過該路徑的 `client_max_body_size`（一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，
 > 後端完全不會收到請求。後端程式碼 grep 不到這個碼是正常的，⛔ 不要當成孤兒刪掉。
 
+> **上傳端點的兩道上限**（#833）沿用通用碼，訊息較表列的具體：
+> - `COMMON_422`「上傳表單格式不符」：表單超過解析上限（欄位數、單一欄位大小、檔案數），
+>   `app/core/upload_form_limits.py`。發生在解析 body 時，早於身分與角色檢查
+> - `COMMON_429`「同時上傳的檔案過多，請待目前的上傳完成後再試」：同一位使用者同時進行中的
+>   上傳超過上限，`app/core/upload_auth_precheck.py`
+
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
 
 ---
