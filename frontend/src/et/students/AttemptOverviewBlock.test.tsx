@@ -220,10 +220,13 @@ describe("AttemptOverviewBlock 多測驗表格欄位對齊（#844）", () => {
     expect(style.tableLayout).toBe("fixed")
     const minWidth = Number.parseInt(style.minWidth, 10)
     // ⚠️ 下界不是 `> 0`：那樣把 `minWidth` 改成 1 也會通過，而窄螢幕下欄位照樣被擠爛。
-    // 600 是「五欄各自容得下表頭」的粗略底線（實際取 680，推導見元件註解）。
-    expect(minWidth).toBeGreaterThanOrEqual(600)
-    // guide 的上限：1280 螢幕扣掉側欄
-    expect(minWidth).toBeLessThanOrEqual(940)
+    // 602 是五欄需求的總和（推導見元件註解）。
+    expect(minWidth).toBeGreaterThanOrEqual(602)
+    // 🔴 **上界不是只有 guide 的 940**：#841 另立一條「⛔ 欄寬不足時不要加大 minWidth
+    // ——那會讓桌機平白多出捲軸，是用一個回歸去蓋另一個問題；正確作法是自最寬鬆的欄勻」。
+    // ⇒ 卡在 700 而非 940：本表五欄需求合計 602px，一旦有人為了塞下某欄而把它推到
+    // 700 以上，就是走了那條被禁止的路。
+    expect(minWidth).toBeLessThanOrEqual(700)
   })
 
   it("🔴 輪次分隔列跨滿全部欄位——欄數與 colSpan 是兩處各自寫死的 5", async () => {

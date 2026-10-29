@@ -142,22 +142,27 @@ export function AttemptOverviewBlock({
                           （`ui-design-guide.md` §4，#835 定調）：後者會把表格鎖在容器的 100%，
                           窄螢幕下欄位照樣被擠到讀不了。
 
-                          680 由「每欄容得下自己的表頭與最寬內容」反推（扣掉 small 版型左右各
-                          16px padding 後：次別 131／時間 124／分數 97／及格 84／明細 84，各欄
-                          需求 119／110／85／56／72）。低於 guide 的 940 上限。
-                          🔴 初版給 620，次別 116.8px 裝不下「第 10 次」＋Chip 的 119px，Chip
-                          會折行（#844 code review MEDIUM）。 */}
-                      <Table size="small" sx={{ tableLayout: "fixed", minWidth: 680 }}>
+                          620 由各欄需求反推（取「表頭」與「最寬內容」的大者，含 small 版型
+                          左右各 16px 內距）：次別 151／時間 142／分數 117／及格 88／明細 104，
+                          合計 602px。百分比依此分配，每欄都還有餘裕。
+
+                          ⛔ **欄寬不足時不要加大 `minWidth`**（`ui-design-guide.md` §4，#841）
+                          ——那會讓桌機平白多出捲軸，是用一個回歸去蓋另一個問題。正確作法是
+                          **自同表中最寬鬆的欄勻**。本表即如此：#844 初版把「明細」給到 28%
+                          （它只放 72px 的 caption）而「是否及格」只有 14%（連 4 字表頭的 88px
+                          都裝不下），勻回來之後 620 就夠用。 */}
+                      <Table size="small" sx={{ tableLayout: "fixed", minWidth: 620 }}>
                         <TableHead>
                           <TableRow>
-                            {/* 次別最寬：唯一要同時容下文字與 Chip 的欄 */}
-                            <TableCell sx={{ width: "24%" }}>次別</TableCell>
+                            {/* 次別最寬：唯一要同時容下文字與「前一輪」Chip（151px）的欄 */}
+                            <TableCell sx={{ width: "25%" }}>次別</TableCell>
                             <TableCell sx={{ width: "23%" }}>作答時間</TableCell>
                             {/* ⚠️ 分母是快照的 `points_total`、**不是固定 100**，故留 19% */}
                             <TableCell align="right" sx={{ width: "19%" }}>
                               分數
                             </TableCell>
-                            <TableCell sx={{ width: "17%" }}>是否及格</TableCell>
+                            {/* ⚠️ 表頭 4 字 ＝ 88px（CJK 14px × 4 ＋ 內距 32），16% 即 99px */}
+                            <TableCell sx={{ width: "16%" }}>是否及格</TableCell>
                             <TableCell sx={{ width: "17%" }}>明細</TableCell>
                           </TableRow>
                         </TableHead>
