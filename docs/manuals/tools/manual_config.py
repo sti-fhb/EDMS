@@ -30,10 +30,11 @@ PROJECT_CASE_NO = "（待確認）"
 SYSTEM_NAME = "教育訓練文件管理系統"
 VENDOR = "（待確認）"
 FORM_TITLE = f"{ORGANISATION}測試報告"  # 測試報告表首之標題
+FORM_CAPTION = "附表7 測試報告"          # 測試報告總表上方之表號（總表由 TBMS 端產出，見下方 REPORT_SUMMARY_*）
 DOC_VERSION = "1.0"
 
-# 測試報告開頭之執行環境警語（比照 TBMS 2026-10-15 SA 裁示；EDMS 2026-10-20 使用者裁示採用同一段文字）。
-# ⚠️ 僅測試報告有；操作手冊不印——手冊是給正式環境的操作人員看的。
+# 執行環境警語（比照 TBMS 2026-10-15 SA 裁示；EDMS 2026-10-20 使用者裁示採用同一段文字）。
+# 2026-10-29 TBMS BC／TL SA 裁示交付之測試報告不再印此頁（EDMS 比照），現僅 MEMO 版（內部協測備忘）印。
 REPORT_ENV_NOTICE_TITLE = "測試注意事項"
 REPORT_ENV_NOTICE = "本測試報告之各項測試會建立、修改與刪除資料，且無法復原，一律於「測試環境」進行，不得於正式環境執行。"
 
@@ -74,6 +75,11 @@ MODULE_NAMES = {
 }
 
 # 全部模組資料夾。手冊與測試項目之檔案落在其下，據以判定所屬模組。
+# 測試報告總表（附表 7）由 TBMS 端產出，EDMS 三個模組列在其最後（2026-10-29 TBMS BC／TL SA 裁示）。
+# EDMS 端不產總表，故兩者皆空；gen_acceptance_form 遇空即略過總表。
+REPORT_SUMMARY_MODULES: tuple[str, ...] = ()
+REPORT_SUMMARY_EDMS: tuple[str, ...] = ()
+
 MODULE_DIRS = ("dm", "dp", "et")
 
 # ---- 三、命名慣例 --------------------------------------------------------
