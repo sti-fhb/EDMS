@@ -159,21 +159,19 @@ jobs:
           cache-from: type=gha,scope=edms-backend
           cache-to: type=gha,scope=edms-backend,mode=max
 
-      # 交付標的為院內封閉網路，映像不得在執行期依賴對外連線。
-      # uv run 預設會先把環境同步到與 uv.lock 一致，而映像刻意以 --no-dev 建置，
-      # uv 便判定 dev 依賴缺漏而連 PyPI 下載——院內無網路即容器起不來。
-      # 根因由 backend/Dockerfile 的 ENV UV_NO_SYNC=1 收斂；此處每次實測一次。
+      # 交付標的為院內封閉網路，映像不得在執行期依賴對外連線。此處每次實測一次。
+      # 容器內一律以絕對路徑 /app/.venv/bin/ 執行：新版映像不含 uv，而本 workflow
+      # 可指定舊 commit 出版，其映像含 uv 但同樣有此路徑，兩者皆適用。
       #
-      # ⚠️ 探針刻意用最小的 uv run python，**不要用 alembic heads**：
+      # ⚠️ 探針刻意用最小的 python -c，**不要用 alembic heads**：
       # 本專案有 migration 在 module 層 from app.core.config import settings，
       # 使 alembic 相關指令需要一整組通過驗證的 production 設定，探針會隨設定
       # 規則增修而失效（2026-09-03 首次 CD 即因此誤判為「封閉網路不可執行」）。
-      # 本步驟要驗的只是「uv run 不會嘗試對外同步」，與 app 設定無關。
+      # 本步驟要驗的只是「.venv 的 python 可離線執行」，與 app 設定無關。
       - name: 驗證映像可於封閉網路執行
         run: |
-          if ! OUT=$(docker run --rm --network none "${{ steps.rev.outputs.backend }}" uv run python -c "print('offline-ok')" 2>&1); then
+          if ! OUT=$(docker run --rm --network none "${{ steps.rev.outputs.backend }}" /app/.venv/bin/python -c "print('offline-ok')" 2>&1); then
             echo "::error::映像在無對外網路的環境下無法執行。"
-            echo "::error::請確認 backend/Dockerfile 的 ENV UV_NO_SYNC=1 未被移除。"
             echo "::error::實際輸出：${OUT}"
             exit 1
           fi
@@ -191,7 +189,7 @@ jobs:
             -e DEBUG=true \
             -e DATABASE_URL="postgresql+asyncpg://probe:probe@localhost:5432/probe" \
             -e JWT_SECRET_KEY="ci-probe-only-not-a-real-secret-0123456789" \
-            "${{ steps.rev.outputs.backend }}" uv run alembic heads 2>&1); then
+            "${{ steps.rev.outputs.backend }}" /app/.venv/bin/alembic heads 2>&1); then
             echo "::error::alembic heads 執行失敗（非 head 數問題）。實際輸出：${HEADS}"
             exit 1
           fi

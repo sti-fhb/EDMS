@@ -1,3 +1,18 @@
+# 建置階段：以 uv 安裝依賴到 /app/.venv。
+# uv 只在此階段使用，最終映像不放 uv／uvx：執行期本就不需要 uv，直接執行 .venv 內的指令即可。
+# 兩個階段須用同一個基底：.venv 內的 python 指向基底映像的 /usr/local/bin/python3.12。
+FROM python:3.12-slim AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
+
+WORKDIR /app
+
+# 先複製依賴檔案（利用 Docker layer cache）
+COPY pyproject.toml uv.lock ./
+
+# 安裝 production 依賴（不含 dev）
+RUN uv sync --frozen --no-dev --no-cache
+
 FROM python:3.12-slim
 
 # ffmpeg：本專案**唯一的系統層依賴**，其餘相依皆為純 Python 套件。
@@ -15,7 +30,7 @@ FROM python:3.12-slim
 #
 # 放在最前面是為了 layer cache：它幾乎不變，擺在 COPY 程式碼之後會讓每次改碼都重裝。
 # `--no-install-recommends` 省掉一批用不到的編解碼週邊；`rm -rf` 不留 apt 索引。
-# 本行需要 build 時有網路——院內封閉網路的約束管的是**執行期**（見下方 UV_NO_SYNC），
+# 本行需要 build 時有網路——院內封閉網路的約束管的是**執行期**（見檔尾說明），
 # build 一律在 CI 進行，不受該約束。
 #
 # ⚠️ 移除或改動本行前，先確認 `cd.yml` 的「驗證映像內含 ffprobe」仍會擋下。
@@ -23,19 +38,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# 安裝 uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
 WORKDIR /app
-
-# 先複製依賴檔案（利用 Docker layer cache）
-COPY pyproject.toml uv.lock ./
-
-# 安裝 production 依賴（不含 dev）
-RUN uv sync --frozen --no-dev --no-cache
 
 # 移除基底映像內建的 pip：依賴一律由 uv 安裝進 /app/.venv，執行期不使用系統 pip。
 RUN python -m pip uninstall -y pip
+
+COPY --from=builder /app/.venv /app/.venv
+
+# 執行期一律直接用 .venv 內的指令（uvicorn、alembic、python），不經 uv run。
+# 呼叫端（entrypoint、CD、vm-deploy.sh、TBMS 院內交付包）寫絕對路徑 /app/.venv/bin/<指令>。
+# ⚠️ 刻意不把 .venv/bin 加進 PATH：/app 整個歸 app 使用者所有（見下方 chown），
+#    加進 PATH 後以 root 進容器打裸指令（python、alembic）就會執行 app 可改寫的檔案。
 
 # 複製應用程式碼
 COPY . .
@@ -49,18 +62,10 @@ RUN addgroup --system --gid 10001 app && adduser --system --uid 10001 --ingroup 
     && chown -R app:app /app
 USER app
 
-# uv 預設快取路徑對 non-root 使用者無寫入權限，改指向 /tmp
-ENV UV_CACHE_DIR=/tmp/.uv-cache
-
-# 執行期一律不做依賴同步，直接沿用上面 `uv sync --no-dev` 裝好的 .venv。
-# 不設此項時，`uv run`（entrypoint 的 uvicorn、CD 的 alembic）每次啟動都會先把環境
-# 同步到與 uv.lock 一致 —— 本映像刻意不裝 dev 依賴，uv 便判定缺漏而連線 PyPI 下載
-# pytest 等套件。後果分兩種環境：
-#   - 院內封閉網路（交付標的）：無對外連線，直接失敗，容器起不來、migration 也跑不了
-#   - GCP CD：有網路故不會失敗，但每次啟動多裝一次 dev 依賴，且正式容器內混入測試套件
-# 驗證方式：docker run --rm --network none <image> uv run alembic heads
-# （CD 的「驗證映像可於封閉網路執行」步驟每次部署都會跑這件事）
-ENV UV_NO_SYNC=1
+# 院內為封閉網路，映像執行期不得依賴對外連線。直接執行 .venv 內的指令不會做任何依賴
+# 同步，不再需要原本 `uv run` 搭配的 UV_NO_SYNC。
+# 驗證方式：docker run --rm --network none <image> /app/.venv/bin/python -c "print('offline-ok')"
+# （CD 與出版的「驗證映像可於封閉網路執行」步驟每次都會跑這件事）
 
 EXPOSE 8000
 
