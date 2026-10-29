@@ -117,7 +117,7 @@ jobs:
           fetch-depth: 0
 
       - name: 安裝 uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
 
       # 🔴 必須排在 `uv sync` **之前**：`uv sync`（未帶 `--locked`）在偵測到 lock 與
       # pyproject 不一致時會**自行重新解析並改寫 lock**，於是「改了 pyproject 卻忘了跑
