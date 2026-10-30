@@ -137,7 +137,9 @@ class AuditLogRepository:
         stmt = self._select_with_operator(conditions).offset(offset).limit(limit)
         return list((await db.execute(stmt)).all())
 
-    async def fetch_for_export(self, db: AsyncSession, *, conditions: list[ColumnElement[bool]]) -> list[Row]:
-        """依條件取全量稽核（含 operator_name），供 CSV 匯出（無分頁）。"""
-        stmt = self._select_with_operator(conditions)
+    async def fetch_for_export(
+        self, db: AsyncSession, *, conditions: list[ColumnElement[bool]], limit: int
+    ) -> list[Row]:
+        """依條件取稽核（含 operator_name），供 CSV 匯出（無分頁，`limit` 為硬上限）。"""
+        stmt = self._select_with_operator(conditions).limit(limit)
         return list((await db.execute(stmt)).all())

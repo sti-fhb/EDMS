@@ -179,6 +179,59 @@ describe("AuditPage 操作記錄查詢（唯讀）", () => {
     expect(screen.getByRole("button", { name: "匯出" })).toBeEnabled()
   })
 
+  it.each([
+    { total: 10000, exported: true },
+    { total: 10001, exported: false },
+  ])("查詢總筆數 $total → 匯出 API 是否送出：$exported（上限 10,000 筆，#102）", async ({ total, exported }) => {
+    let exportHits = 0
+    server.use(
+      http.get("/api/dp/audit/logs", () =>
+        HttpResponse.json({ data: [], meta: { total, page: 1, limit: 20, total_pages: Math.ceil(total / 20) } }),
+      ),
+      http.get("/api/dp/audit/logs/export", () => {
+        exportHits += 1
+        return HttpResponse.text("﻿LOG_ID\n", { headers: { "Content-Type": "text/csv; charset=utf-8" } })
+      }),
+    )
+    // @ts-expect-error jsdom 未實作 createObjectURL，測試以 mock 補上
+    global.URL.createObjectURL = vi.fn(() => "blob:audit")
+    // @ts-expect-error jsdom 未實作 revokeObjectURL，測試以 mock 補上
+    global.URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    const button = await screen.findByRole("button", { name: "匯出" })
+    await waitFor(() => expect(button).toBeEnabled())
+
+    await user.click(button)
+
+    if (exported) {
+      await waitFor(() => expect(exportHits).toBe(1))
+    } else {
+      expect(await screen.findByRole("alert")).toBeInTheDocument()
+      expect(exportHits).toBe(0)
+    }
+  })
+
+  it("後端擋下超量匯出（DP_AUDIT_001）→ 顯示後端訊息而非通用錯誤（#102）", async () => {
+    server.use(
+      http.get("/api/dp/audit/logs/export", () =>
+        HttpResponse.json(
+          { error_code: "DP_AUDIT_001", error_message: "匯出筆數超過 10,000 筆，請縮小查詢範圍" },
+          { status: 422 },
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("成功")
+
+    await user.click(screen.getByRole("button", { name: "匯出" }))
+
+    expect(await screen.findByText("匯出筆數超過 10,000 筆，請縮小查詢範圍")).toBeInTheDocument()
+  })
+
   beforeEach(() => {
     localStorage.setItem("authToken", "test-token")
   })

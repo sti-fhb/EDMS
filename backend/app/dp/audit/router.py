@@ -112,7 +112,10 @@ async def export_audit_logs(
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
 ) -> Response:
-    """依當前查詢條件全量匯出 CSV（無分頁）；匯出本身寫一筆 `EXPORT` 稽核（#675）。"""
+    """依當前查詢條件匯出 CSV（無分頁，上限 10,000 筆，超過回 `DP_AUDIT_001`，#102）。
+
+    匯出本身寫一筆 `EXPORT` 稽核（#675）。
+    """
     content = await _service.export_csv(
         db,
         operator_id=operator_info.user_id,
