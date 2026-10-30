@@ -226,8 +226,9 @@ def _malformed() -> AppError:
     ⚠️ **工廠函式而非模組層級常數。** raise 一個帶著既有 `__traceback__` 的實例會讓
     CPython 把本次傳播的每個 frame 附加上去，而模組層級的實例永遠被 module globals
     持有 → traceback 只增不減，每筆釘住一個 frame 及其 locals（含最多 200 筆作答的
-    請求 body）。本函式是**單次請求代價最大**的拒絕路徑，故不沿用 `app/et/` 其餘處的
-    singleton 慣例（那些的清理屬平台層，另開 issue）。
+    請求 body）。本函式是**單次請求代價最大**的拒絕路徑，故用工廠函式（#284 起；#289 裁示
+    維持現狀）。其餘處的常數由 `main.app_error_handler` 兜底清除（#289），兩種寫法並存是
+    刻意的，見 `.claude/rules/sti-backend-modules.md`「模組層級常數 vs 工廠函式」。
     """
     return AppError(status_code=422, detail="作答內容與問卷題目不符，請重新整理後再試", error_code="ET_SURVEY_017")
 

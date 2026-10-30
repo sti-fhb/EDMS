@@ -24,6 +24,8 @@
 一律不鎖。
 """
 
+from collections.abc import Callable
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -54,18 +56,33 @@ from app.services import ParamService
 _MAX_RATE_PARAM = "ET_VIDEO_PLAYBACK_MAX_RATE"
 _DEFAULT_MAX_RATE = 2
 
-_NOT_FOUND = AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
+
+def _not_found() -> AppError:
+    """查無課程（`/courses/{id}/learn`）。
+
+    ⚠️ 本檔 `_not_found` / `_file_not_found` 為**工廠函式而非模組層級常數**（#289 裁示 A）：
+    兩者對應的 `/courses/{任意 id}/learn` 與 `/materials/{任意 id}/content` 不需在籍、
+    不需該 id 存在，任一登入者迴圈即可觸發（#296 起已掛限流，但限流只降速、不止累積）。
+    常數的 `__traceback__` 會隨每次 raise 只增不減（`main.app_error_handler` 已兜底清除，
+    此為第二道防線）。其餘常數都須在籍或已有權才觸發，維持原寫法。判準見 `.claude/rules/sti-backend-modules.md`。
+    """
+    return AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
+
+
 _DELETED = AppError(status_code=404, detail="此內容已刪除", error_code="ET_LEARN_003")
 #: #374：已加入但課程尚未開放。**403 而非 404**——課程的存在對在籍學員不是秘密
 #: （他自己加入的、卡片就在我的課程清單上），要告訴他的是「還沒開始」而非「查無此課」。
 _NOT_YET_OPEN = AppError(status_code=403, detail="此課程尚未開放，請於開放時間後再進入", error_code="ET_LEARN_005")
 
-#: 取檔端點之統一「取不到」回應。
-#:
-#: ⚠️ **一律 404，不用 `ET_LEARN_002`（403）**：回 403 等於確認「這個 id 存在，只是你
-#: 不能看」，可被用來枚舉全站有多少教材、哪些 id 有效。取檔端點對「不存在」與「無權」
-#: 回同一個 404，外部觀察不到差異。比照 #247 `ET_ENROLL_001`（格式不符與查無共用同碼）。
-_FILE_NOT_FOUND = AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
+
+def _file_not_found() -> AppError:
+    """取檔端點之統一「取不到」回應。工廠函式的理由同 `_not_found`。
+
+    ⚠️ **一律 404，不用 `ET_LEARN_002`（403）**：回 403 等於確認「這個 id 存在，只是你
+    不能看」，可被用來枚舉全站有多少教材、哪些 id 有效。取檔端點對「不存在」與「無權」
+    回同一個 404，外部觀察不到差異。比照 #247 `ET_ENROLL_001`（格式不符與查無共用同碼）。
+    """
+    return AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
 
 
 class EtLearningService:
@@ -118,7 +135,7 @@ class EtLearningService:
         端點只呼叫本方法就會把陌生人當擁有者放行，而那比它要擋的事嚴重得多。
 
         `item_id` 取不到（教材或其項目已軟刪、或不屬於本課程）時放行：那是既有的
-        `_DELETED` / `_FILE_NOT_FOUND` 路徑要回報的事，在此攔下只會把「已刪除」講成
+        `_DELETED` / `_file_not_found` 路徑要回報的事，在此攔下只會把「已刪除」講成
         「查無」。
 
         Raises:
@@ -131,7 +148,7 @@ class EtLearningService:
         if item_id is None:
             return
         if await self._progress_service.is_item_locked(db, course_id=course_id, user_id=user_id, item_id=item_id):
-            raise _FILE_NOT_FOUND
+            raise _file_not_found()
 
     async def structure(
         self, db: AsyncSession, course_id: int, *, user_id: str, roles: frozenset[str] = frozenset()
@@ -143,7 +160,7 @@ class EtLearningService:
         """
         course = await self._repo.get_course(db, course_id)
         if course is None:
-            raise _NOT_FOUND
+            raise _not_found()
         if course.status == COURSE_DRAFT and course.owner_id != user_id:
             # 未發布課程的**存在**對學員是秘密。若照一般流程回 403「您尚未加入此課程」，
             # 任一登入者（ET 學員角色人人有）即可用它二分掃描出全站有效 course_id，
@@ -154,7 +171,7 @@ class EtLearningService:
             #
             # ⚠️ #698 起 ET05 編輯頁不再提供「預覽課程」入口（使用者裁示），擁有者預覽
             # 草稿／已關閉課程只剩直接輸入網址一途。**後端能力刻意保留**——不是死碼，勿刪。
-            raise _NOT_FOUND
+            raise _not_found()
         enrolled = await self._repo.is_enrolled(db, user_id=user_id, course_id=course_id)
         is_owner = course.owner_id == user_id
         # 被移除者要看到「您已被該課程移除」而不是「您尚未加入此課程」——後者會讓他以為
@@ -342,7 +359,7 @@ class EtLearningService:
         # 登入者確認「這個 material_id 曾經存在」。
         owning_course = await self._repo.course_id_of_material_any(db, material_id)
         if owning_course is None:
-            raise _FILE_NOT_FOUND
+            raise _file_not_found()
         enrolled = await self._require_access_by_course(db, course_id=owning_course, user_id=user_id, roles=roles)
 
         material = await self._repo.get_material(db, material_id)
@@ -356,7 +373,7 @@ class EtLearningService:
             # 建項目一律產生新教材——但 `course/repository.py` 已預告日後可能支援重用），
             # 兩者就可能不同課程，於是「用 A 課的資格看 B 課的教材」。
             # 不一致即拒，不去猜哪一個才對。
-            raise _FILE_NOT_FOUND
+            raise _file_not_found()
 
         # 授權已於上方通過（在籍 OR 擁有者），故「不在籍」在這裡等同「擁有者預覽」。
         # 預覽不累積進度（#255 裁示 Q1）——不查也不回，查了只會拿到一片 0，而那個 0 會
@@ -411,7 +428,7 @@ class EtLearningService:
         video = await self._repo.get_video(db, video_id)
         course_id = await self._repo.course_id_of_video(db, video_id)
         if video is None or course_id is None:
-            raise _FILE_NOT_FOUND
+            raise _file_not_found()
         enrolled = await self._require_access_by_course(db, course_id=course_id, user_id=user_id, roles=roles)
         # 判定掛在**發票端**：取檔端點憑票放行、不重跑授權（見本方法 docstring）。
         # 影片掛在教材下，故以 `video.material_id` 走同一支判定（#424）。
@@ -429,8 +446,8 @@ class EtLearningService:
         """
         video = await self._repo.get_video(db, video_id)
         if video is None:
-            raise _FILE_NOT_FOUND
-        return resolve_within_root(video.file_path, not_found=_FILE_NOT_FOUND), video.file_name
+            raise _file_not_found()
+        return resolve_within_root(video.file_path, not_found=_file_not_found()), video.file_name
 
     async def doc_file(
         self, db: AsyncSession, material_id: int, doc_id: str, *, user_id: str, roles: frozenset[str] = frozenset()
@@ -442,7 +459,7 @@ class EtLearningService:
         """
         course_id = await self._repo.course_id_of_material(db, material_id)
         if course_id is None:
-            raise _FILE_NOT_FOUND
+            raise _file_not_found()
         enrolled = await self._require_access_by_course(db, course_id=course_id, user_id=user_id, roles=roles)
         await self._ensure_item_unlocked(
             db, course_id=course_id, user_id=user_id, material_id=material_id, enrolled=enrolled
@@ -450,7 +467,7 @@ class EtLearningService:
         if not await self._repo.doc_belongs_to_material(db, material_id=material_id, doc_id=doc_id):
             # 未經此檢查，在籍任一課程者即可用自己有權的 material_id 搭配任意 doc_id
             # 取走全站被引用過的文件。
-            raise _FILE_NOT_FOUND
+            raise _file_not_found()
 
         client = get_dm_document_client()
         try:
@@ -458,7 +475,7 @@ class EtLearningService:
             return await client.read_file_for_reference(db, doc_id=doc_id, version_id=current.current_version_id)
         except AppError as exc:
             # DM 端的錯誤碼（DM_DOC_*）不外洩給學員——對他而言就是取不到這份文件。
-            raise _FILE_NOT_FOUND from exc
+            raise _file_not_found() from exc
 
     # ── 內部 ────────────────────────────────────────────────────────────────
 
@@ -534,7 +551,7 @@ class EtLearningService:
         course_id: int,
         user_id: str,
         roles: frozenset[str] = frozenset(),
-        not_found: AppError = _FILE_NOT_FOUND,
+        not_found: Callable[[], AppError] = _file_not_found,
     ) -> bool:
         """同上，但由 `course_id` 反查擁有者；**無權一律收斂成 404**。回傳 `enrolled`。
 
@@ -547,7 +564,7 @@ class EtLearningService:
         """
         course = await self._repo.get_course(db, course_id)
         if course is None:
-            raise not_found
+            raise not_found()
         try:
             return await self._require_access(
                 db,
@@ -558,4 +575,4 @@ class EtLearningService:
                 course_status=course.status,
             )
         except AppError:
-            raise not_found from None
+            raise not_found() from None

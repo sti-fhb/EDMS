@@ -211,6 +211,36 @@ async def client_ip_middleware(request: Request, call_next):
 # 各業務模組的 router 於後續 task 開發時在此 include。
 
 
+def _release_tracebacks(exc: BaseException) -> None:
+    """清掉 `exc` 及其串鏈（`__cause__` / `__context__`）上每個例外的 `__traceback__`（#289）。
+
+    各模組慣用**模組層級 `AppError` 常數**再重複 raise。CPython raise 一個已帶
+    `__traceback__` 的既有實例時，會把本次傳播的 frame **附加**上去而非取代，而常數永遠
+    被 module globals 持有 → traceback 只增不減，每筆釘住一個 frame 及其 locals（請求
+    body、含 bearer token 的 `Request`）。被拒絕的請求每一次都永久佔一份記憶體。
+
+    走到 handler 時例外已不再傳播，traceback 沒有任何用途（本 handler 只記 debug log、
+    不印 stack），清掉即可讓常數寫法也安全。
+
+    ⚠️ **要沿串鏈清，不能只清 `exc`**：`raise X from None` 只是不顯示 `__context__`，
+    被攔下的那個例外仍掛在上面（`et/learning/service.py` 的 `_require_access_by_course`
+    即此形狀）；若它也是常數，它的 traceback 在本 handler 看不到的地方照樣成長。
+
+    ⛔ 本函式涵蓋不到「`except AppError` 之後**不重拋**」的路徑——那個例外根本不會走到
+    handler。故未掛限流的匿名可達端點仍應用工廠函式（`sti-backend-modules.md`「模組層級常數 vs
+    工廠函式」）。
+    """
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        current.__traceback__ = None
+        pending.extend(e for e in (current.__cause__, current.__context__) if e is not None)
+
+
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """將 AppError 統一轉換為標準錯誤回應格式。
@@ -218,8 +248,11 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     回傳格式：{"error_code": "...", "error_message": "..."}；限流 / 冷卻類 429 另帶
     retry_after；帶 `extra` 者（如 ET 發布檢核之 blockers 清單）併入同一層。
     debug log 保留完整錯誤細節供後端排查，不對外暴露。
+
+    回應前清掉 traceback（#289），理由見 `_release_tracebacks`。
     """
     logger.debug("AppError %s %s: [%s] %s", request.method, request.url.path, exc.error_code, exc.detail)
+    _release_tracebacks(exc)
     content: dict[str, object] = {"error_code": exc.error_code, "error_message": exc.detail}
     if exc.retry_after is not None:
         content["retry_after"] = exc.retry_after
