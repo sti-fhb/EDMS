@@ -4,7 +4,7 @@
 IP 維度無法區分「一個攻擊者狂送」與「一批使用者各送一次」，而內部平台的使用者常共用同一
 對外 IP（教室 / 辦公室 NAT）。同一 Email 的重複註冊由 600 秒寄信冷卻把關，不靠本門檻。
 
-限流器為 module-level 單例，本檔會刻意打滿配額，故 setup 與 teardown 都清空狀態。
+限流器為 module-level 單例，本檔會刻意打滿配額；測試間的狀態隔離由 integration conftest 統一處理（#654）。
 出貨門檻為 30，逐次打 31 個 HTTP 請求成本過高（每次含約 209ms 的同步 bcrypt），
 故行為測試以 monkeypatch 暫時縮小該實例的門檻——仍是真實端點、真實 dependency 接線。
 """
@@ -17,18 +17,6 @@ from app.dp.user import router as auth_router
 pytestmark = pytest.mark.integration
 
 _GOOD_PWD = "Abcd1234"
-
-
-@pytest.fixture(autouse=True)
-def _reset_limits():
-    auth_router._register_limiter._hits.clear()
-    auth_router._verify_send_cooldown._last.clear()
-    # #234 新增的單例：它跨測試存活（24 小時視窗），不清會讓第 5 次起的同 Email
-    # 註冊落入靜默路徑——而那條路徑回 202、不報錯，測試可能**為了錯的理由通過**。
-    auth_router._overwrite_counter._hits.clear()
-    yield
-    auth_router._register_limiter._hits.clear()
-    auth_router._verify_send_cooldown._last.clear()
 
 
 def _payload(email: str):
