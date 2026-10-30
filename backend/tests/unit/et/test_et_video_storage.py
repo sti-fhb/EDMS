@@ -137,9 +137,10 @@ def test_promote_rejects_source_outside_root(root, tmp_path):
     assert os.path.isfile(outside)
 
 
-@pytest.mark.parametrize("hint", ["", ".tmp", "abc", "1/2", "\u00b2"])
+@pytest.mark.parametrize("hint", ["", ".tmp", "abc", "1/2", "\u00b2", "007"])
 def test_promote_rejects_non_numeric_hint(root, hint):
-    """目錄名須為純 ASCII 數字：空字串 / `.tmp` 會落在 root 頂層或暫存區，巢狀與非數字亦不合預期。"""
+    """目錄名須為 `str(abs(id))` 的正規形式：空字串 / `.tmp` 會落在 root 頂層或暫存區，
+    巢狀、非數字亦不合預期；前導零（`007`）會與 `7/` 分成兩個目錄。"""
     staged = _make_tmp_video(root)
     with pytest.raises(AppError) as e:
         storage.promote(staged, video_id_hint=hint, ext="mp4")

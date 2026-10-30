@@ -205,6 +205,11 @@ async def save_video_stream(upload, *, ext: str, max_size_bytes: int) -> tuple[s
     return tmp_path, written
 
 
+def _is_canonical_id(value: str) -> bool:
+    """value 是否為非負整數的正規字串形式（純 ASCII 數字、無前導零），即 `str(abs(id))` 的輸出。"""
+    return value.isascii() and value.isdigit() and value == str(int(value))
+
+
 def _is_staged_upload(root: str, path: str) -> bool:
     """path 是否為 `{root}/.tmp/` 下的一般檔（非 symlink、非目錄）——`promote` 唯一合法的來源。"""
     target = _entry_within(root, path) if isinstance(path, str) and os.path.isabs(path) else None
@@ -254,16 +259,20 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
 
     - **來源**須是 `{root}/.tmp/` 下的一般檔（非 symlink）——即 `save_video_stream` 的產出。只圈到
       root 不夠：root 內另一支被引用中的影片同樣在 root 內，搬走它即讓原教材失聯。
-    - **目的地**目錄名須為純數字（`str(abs(material_id))`）——`..` 即寫入端穿越，空字串 / `.tmp`
-      則會落在 root 頂層或暫存區。
+    - **目的地**目錄名須為 `str(abs(material_id))` 的正規形式（純數字、無前導零）——`..` 即寫入端
+      穿越，空字串 / `.tmp` 則會落在 root 頂層或暫存區，`007` 會與 `7/` 分成兩個目錄。
 
     攔截時暫存檔原地不動（由孤兒清理回收），不在此處刪——來源既已不可信，就不該拿它去 `os.remove`。
+
+    ⚠️ 已知限制：來源檢查與 `os.replace` 之間有 TOCTOU 空窗（期間 `.tmp/` 內的檔可被換成 symlink）。
+    `.tmp/` 為伺服器自建、外部無寫入途徑，在此威脅模型下接受；若日後 `.tmp/` 可被他方寫入須改以
+    fd 為基準搬移。
 
     Raises:
         AppError: 422 `ET_MATERIAL_007`——來源或目的地不合上述條件。
     """
     root = storage_root()
-    if not (_is_staged_upload(root, tmp_path) and video_id_hint.isascii() and video_id_hint.isdigit()):
+    if not (_is_staged_upload(root, tmp_path) and _is_canonical_id(video_id_hint)):
         logger.warning("ET 影片落盤圍籬攔截一筆非暫存區來源 / 不合法目錄名（不記路徑）")
         raise _BAD_STORAGE_PATH
     final_dir = os.path.join(root, video_id_hint)

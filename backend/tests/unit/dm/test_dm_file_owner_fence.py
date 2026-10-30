@@ -22,7 +22,7 @@ from app.dm.roles.authz import DM_ADMIN
 
 pytestmark = pytest.mark.unit
 
-_DOC ="DM-TRAINING-000001"
+_DOC = "DM-TRAINING-000001"
 _OTHER = "DM-TRAINING-000999"
 _OWN_PATH = f"{_DOC}/abc123.pdf"
 _FOREIGN_PATH = f"{_OTHER}/abc123.pdf"
