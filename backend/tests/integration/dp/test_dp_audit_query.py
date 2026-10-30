@@ -189,6 +189,21 @@ async def test_operator_search_matches_soft_deleted_user(db):
     assert res["data"][0].operator_name == "離職者"
 
 
+async def test_operator_search_treats_underscore_literally(db):
+    """#275：operator 含 `_` 時視為字面，不當 LIKE 單字元萬用字元。
+
+    對照組的帳號 / 姓名 / Email 三欄皆只差 `_` 一字——任一欄漏跳脫都會讓對照組被誤中。
+    """
+    await _seed_user(db, user_id="admin_01_t275", user_name="admin_01_t275", email="admin_01_t275@example.com")
+    await _seed_user(db, user_id="adminX01_t275", user_name="adminX01_t275", email="adminX01_t275@example.com")
+    hit = await _insert_log(db, operator_id="admin_01_t275")
+    await _insert_log(db, operator_id="adminX01_t275")
+
+    res = await _service.query_logs(db, **_q(operator="admin_01_t275"))
+
+    assert [r.log_id for r in res["data"]] == [hit.log_id]
+
+
 # ── AC2：明細欄位（含 result / description / 前後值）────────────────────────
 
 

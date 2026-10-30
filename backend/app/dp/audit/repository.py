@@ -3,6 +3,7 @@ from datetime import date
 from sqlalchemy import ColumnElement, Row, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import taipei_day_start
 from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
@@ -32,15 +33,20 @@ def build_audit_conditions(
     conditions: list[ColumnElement[bool]] = []
 
     if operator:
-        pattern = f"%{operator}%"
+        pattern = contains(operator)
         matching_users = select(DpUser.user_id).where(
             or_(
-                DpUser.user_id.ilike(pattern),
-                DpUser.user_name.ilike(pattern),
-                DpUser.email.ilike(pattern),
+                DpUser.user_id.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                DpUser.user_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                DpUser.email.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
             )
         )
-        conditions.append(or_(DpAuditLog.created_user.ilike(pattern), DpAuditLog.created_user.in_(matching_users)))
+        conditions.append(
+            or_(
+                DpAuditLog.created_user.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                DpAuditLog.created_user.in_(matching_users),
+            )
+        )
     if module:
         conditions.append(DpAuditLog.module == module)
     if func_name:
