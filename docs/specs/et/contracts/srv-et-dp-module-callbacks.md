@@ -77,6 +77,7 @@ async def assign(db, *, user_id: str, roles: set[str], groups: set[str], operato
 | 項目 | 規則 |
 |------|------|
 | `roles` | 子集 `{ADMIN, TEACHER, STUDENT}`；非法代碼 → `ET_ROLE_003` |
+| `user_id` | 須為存在之帳號（`DP_USER` 未軟刪除；經 `app/services` 之 `AccountQueryService.exists` 判定），否則 `ET_ROLE_004`、不寫入任何列（2026-10-30 #188）。**不看帳號狀態**——停用 / 鎖定由 DP 端 `_require_usable_target` 把關；DP 該檢核對查無帳號刻意放行，故存在性由 ET 自行守住，避免留下孤兒授權列。撤權（目標集為空）同樣擋——#188 之前已存在之孤兒列（查無或已軟刪除帳號名下）無法經 DP 後台清除，須走 DB 維運；USER_ID 為不可預測之隨機值，孤兒列不會被日後新帳號繼承成真實權限 |
 | `groups` | **配對**字串集合 `"{單位 TAG_ID}:{職位 TAG_ID}"`（#538，與 DM 同格式）；單位可空（`":{職位}"`＝單位未指定）。新增之配對：職位須為啟用中之職位、單位（若有）須為啟用中之單位，且皆非通用值，否則 `ET_ROLE_002`。**停用標籤不可新增指派，既有指派保留** |
 | 批次讀取 | `get_users_assignments` 一次回一頁使用者之現況（避免 N+1）；查無指派者回**空集合 View**（非缺 key） |
 | 最後異動 | View 帶 `last_modified_by` / `last_modified_date`，來源為 `ET_USER_ROLE` / `ET_USER_TAG` 之 `UPDATED_*` |
@@ -153,6 +154,7 @@ async def daily_window_job() -> None   # SCHET002：每日到期關閉 + 截止�
 | `ET_ROLE_001` | 403 | 無法停用自己之管理者角色 | SRVET003 自我保護；DP 映射為 `DP-MSG-DP02-001` |
 | `ET_ROLE_002` | 422 | 指定之受訓單位標籤無效或未啟用 | SRVET003 指派值檢核 |
 | `ET_ROLE_003` | 422 | 指定之角色代碼無效 | SRVET003 角色代碼檢核 |
+| `ET_ROLE_004` | 404 | 查無此使用者帳號 | SRVET003 目標帳號存在性檢核（#188）|
 | `ET_TAG_001` | 422 | 「全體」標籤不可停用或改名 | SRVET004「全體」（`IS_ALL`）保護；**內建但非「全體」之標籤可改名**（#182 D2）|
 
 > 命名比照 DM 既有慣例（`DM_AUTH_001` / `DM_ROLE_001~003`）。`ET_ROLE_001` 之 DP 端映射依 DP 契約「以 `_ROLE_001` 結尾判別」之約定。
