@@ -148,7 +148,7 @@ find "{WORKTREE_PATH}" \( -name node_modules -o -name .git -o -name .venv \) -pr
 
 `/sti-implement` 步驟 2.5 為 worktree 配發了獨立 test DB（`test_edms_{DB_SLUG}`），本步驟對應地清掉。
 
-> ⚠️ **只清 test DB，dev DB（`edms`）絕對不動**：dev DB 刻意跨 worktree 共用（#239 SA 裁示，見 `/sti-implement`「共用 dev 環境守則」），其他 session 正在用。未合併分支的 dev DB 處理見步驟 2。
+> ⚠️ **只清 test DB，dev DB（`edms`）絕對不動**：dev DB 刻意跨 worktree 共用（#239 SA 裁示，見 `/sti-implement`「共用 dev 環境守則」），其他 session 正在用。未合併分支的 dev DB 處理見步驟 3.2。
 
 #### 4a 推導 DB 名稱
 
