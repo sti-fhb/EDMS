@@ -15,7 +15,7 @@ from app.core.operator import OperatorInfo, get_operator
 from app.core.schema_types import SAFE_MULTILINE_PATTERN, STRIP_BEFORE_VALIDATE
 from app.core.upload_form_limits import LimitedFormRoute
 from app.dm.deps import DmContext, get_dm_context
-from app.dm.document.file_store import enforce_size_limit
+from app.dm.document.file_store import read_upload
 from app.dm.obsolete.schemas import InitiateObsoleteResult
 from app.dm.obsolete.service import ObsoleteService
 from app.dm.roles.authz import DM_EDITOR, has_role
@@ -59,18 +59,6 @@ def _ensure_editor(ctx: DmContext) -> None:
         raise AppError(status_code=403, detail="需要文件編輯者權限", error_code="DM_AUTH_002")
 
 
-async def _read_upload(db: AsyncSession, file: UploadFile | None) -> tuple[str | None, bytes | None, str | None]:
-    """讀取選填廢止附件 → (檔名, bytes, mime)；未附檔回 (None, None, None)。
-
-    M1：`read()` 前先以 `UploadFile.size` 對照大小上限先擋，避免過大 body 整包載入記憶體（認證後 DoS）。
-    """
-    if file is None:
-        return None, None, None
-    if file.size is not None:
-        await enforce_size_limit(db, size_bytes=file.size)
-    return file.filename or "", await file.read(), file.content_type or "application/octet-stream"
-
-
 @router.post("/documents/{doc_id}/obsolete", response_model=InitiateObsoleteResult)
 async def initiate_obsolete(
     doc_id: str,
@@ -83,7 +71,7 @@ async def initiate_obsolete(
 ) -> InitiateObsoleteResult:
     """發起整份文件廢止申請：文件轉廢止待簽核並通知指定審核者。"""
     _ensure_editor(ctx)
-    file_name, data, file_mime = await _read_upload(db, file)
+    file_name, data, file_mime = await read_upload(db, file)
     return await _service.initiate(
         db,
         doc_id=doc_id,
