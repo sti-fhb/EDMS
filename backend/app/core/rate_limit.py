@@ -7,9 +7,12 @@
 
 import logging
 import time
-from collections import defaultdict, deque
-from collections.abc import Awaitable, Callable
+from collections import Counter, defaultdict, deque
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
+from fastapi import Depends
+
+from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.exceptions import AppError
 from app.core.request_context import get_client_ip
 
@@ -53,6 +56,19 @@ REGISTER_RATE_MAX = 30
 # 兩個端點共用同一常數是刻意的：#212 之後它們是同一段程式碼（activation.activate_with_new_password），
 # 只差 expected_kind，門檻不同會是意外而非決定。
 SET_PASSWORD_RATE_MAX = 30
+
+# 匯出端點門檻（#833 B4）：每位使用者 / 每個 IP 每分鐘。比照 ET 週報匯出（`et/reports/router.py`）。
+# 匯出一次就整批撈資料、組 CSV，全程佔住一條 DB 連線，而連線池只有 15 條、後端只有一個 worker；
+# 正常使用不會連打。IP 維度放寬到不誤傷同一 NAT 出口的同事，擋的是多開帳號繞過使用者維度。
+EXPORT_USER_RATE_MAX = 10
+EXPORT_IP_RATE_MAX = 60
+
+# 每人同時進行中的匯出上限，全部匯出端點共用（#833 security review M-1，2026-10-30 使用者裁示）。
+# 上面兩個門檻算的是「每分鐘幾次」，擋不住同一秒送出一批：三支 DM 匯出各 10 次就是 30 條連線，
+# 超過連線池的 15 條。前端每個匯出按鈕在進行中會停用，正常使用一次只有一支。
+# ⚠️ 只限單一帳號，不設全站上限（使用者裁示）：多位管理者同時匯出時不互相擋。
+EXPORT_MAX_CONCURRENT_PER_USER = 1
+_exports_in_flight: Counter[str] = Counter()
 
 # 每處理 N 次 hit 掃描一次全桶、清除視窗外「已老化」空桶（key 由使用者可控的帳號組成，
 # 須主動回收，不能只靠被動觸碰同一 key）。注意：sweep 僅回收已過期桶，視窗內工作集大小
@@ -225,3 +241,49 @@ def rate_limit_by_ip(limiter: SlidingWindowRateLimiter, scope: str) -> Callable[
         limiter.hit(f"{scope}:ip:{ip}")
 
     return _dependency
+
+
+def rate_limit_by_user(limiter: SlidingWindowRateLimiter, scope: str) -> Callable[..., Awaitable[None]]:
+    """產生「依登入者限流」的 FastAPI dependency（#833 B4）。
+
+    以 token 的 `sub` 分桶，認證失敗的請求在 `get_jwt_payload` 就被擋下、不佔名額。
+    ET 端點請用 `app/et/deps.rate_limit_by_et_user`（依賴 `EtContext`，同時把關 ET 角色）；
+    本函式給沒有模組專屬 context 可依賴的端點。通常與 `rate_limit_by_ip` 一起掛，理由見該函式。
+
+    ⚠️ 要排在模組權限閘**之後**（router-level 的閘，或在 route 的 `dependencies` 裡放在前面）。
+    本函式只驗「已登入」，排在權限閘之前時，沒有權限的帳號每次 403 之前都已佔掉 IP 名額——
+    自助註冊是開的，任何人都能用它把同一 NAT 出口的同事擋成 429。`tests/unit/test_core_export_rate_limit.py`
+    的 `test_無權限者不佔名額` 守門。
+
+    Raises:
+        AppError: 該使用者於 scope 內超過門檻時（429 / COMMON_429）。
+    """
+
+    async def _dependency(payload: JwtPayload = Depends(get_jwt_payload)) -> None:
+        limiter.hit(f"{scope}:user:{payload.sub}")
+
+    return _dependency
+
+
+async def limit_concurrent_exports(payload: JwtPayload = Depends(get_jwt_payload)) -> AsyncGenerator[None, None]:
+    """同一人同時進行中的匯出達 `EXPORT_MAX_CONCURRENT_PER_USER` 即回 429（#833）。
+
+    以 yield 依賴持有名額：FastAPI 0.139 在回應**整個送完**之後才執行 yield 之後的收尾
+    （同 `core/db.get_db`），所以名額涵蓋查詢、組 CSV、送出的全程——正是佔住 DB 連線的那段。
+    handler 拋錯或被取消（客戶端中途斷線）時由 `finally` 歸還。
+
+    與 `upload_auth_precheck` 的同時上傳數一樣以行程內計數：後端固定單一 worker。
+
+    Raises:
+        AppError: 同一人已有匯出進行中（429 / COMMON_429）。
+    """
+    user = payload.sub
+    if _exports_in_flight[user] >= EXPORT_MAX_CONCURRENT_PER_USER:
+        raise AppError(status_code=429, detail="已有匯出正在進行，請待完成後再試", error_code="COMMON_429")
+    _exports_in_flight[user] += 1
+    try:
+        yield
+    finally:
+        _exports_in_flight[user] -= 1
+        if _exports_in_flight[user] <= 0:
+            del _exports_in_flight[user]

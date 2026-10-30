@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, DBAPIError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.access_log_redaction import install_access_log_redaction
@@ -315,27 +316,42 @@ async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
     )
 
 
-#: PostgreSQL 的 query_canceled——`statement_timeout` 到期即以此中止查詢。
-_PG_QUERY_CANCELED = "57014"
+#: 刻意設下的 DB 等候上限到期時 PostgreSQL 回的 SQLSTATE：
+#: 57014 query_canceled（`statement_timeout`，#810）、55P03 lock_not_available（稽核鎖的 `lock_timeout`，#833 B2）。
+_PG_BUSY_SQLSTATES = frozenset({"57014", "55P03"})
 
 
-def query_timeout_response(request: Request, exc: Exception) -> JSONResponse | None:
-    """查詢逾時回 503「系統忙碌」；不是查詢逾時回 None（#810 第 2 項）。
+def _is_db_busy(exc: Exception) -> bool:
+    if isinstance(exc, SATimeoutError):  # 連線池等候逾時（#833 B1）：還沒拿到連線，不是 DBAPIError
+        return True
+    return isinstance(exc, DBAPIError) and getattr(exc.orig, "sqlstate", None) in _PG_BUSY_SQLSTATES
 
-    查詢超過 `DB_STATEMENT_TIMEOUT_MS` 時 PostgreSQL 以 57014 中止它，SQLAlchemy 包成 `DBAPIError`
-    ——不是 `DataError`，會落到 `unhandled_exception_handler`。改前那裡回 500 並以 ERROR 印出堆疊；
-    但逾時是刻意設下的上限、代表系統忙碌，不是程式錯誤，記成 ERROR 會在系統最忙、最需要 log 乾淨
-    的時候刷屏。交易與連線不必在這裡處理：`get_db` 遇例外會 rollback，連線回池後可重用。
+
+def db_busy_response(request: Request, exc: Exception) -> JSONResponse | None:
+    """DB 等候上限到期回 503「系統忙碌」；其他例外回 None。
+
+    三種來源，都是刻意設下的上限：
+    - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`，PostgreSQL 以 57014 中止
+    - 等稽核鎖逾時（#833 B2）：超過 `DB_AUDIT_LOCK_TIMEOUT_MS`，PostgreSQL 以 55P03 中止
+    - 連線池等候逾時（#833 B1）：池滿等超過 `DB_POOL_TIMEOUT`，SQLAlchemy 拋 `sqlalchemy.exc.TimeoutError`
+
+    前兩種被 SQLAlchemy 包成 `DBAPIError`——不是 `DataError`，會落到 `unhandled_exception_handler`。
+    改前那裡回 500 並以 ERROR 印出堆疊；但這些代表系統忙碌、不是程式錯誤，記成 ERROR 會在系統最忙、
+    最需要 log 乾淨的時候刷屏。交易與連線不必在這裡處理：`get_db` 遇例外會 rollback，連線回池後可重用。
+
+    ⚠️ 55P03 目前只有稽核鎖會產生（本庫沒有 `NOWAIT`；`dp/notify` 用的是 `SKIP LOCKED`，不會報錯）。
+    日後加了 `NOWAIT`，它的 55P03 也會變成 503，要確認那是想要的語意。
 
     ⛔ **不要改成以 `@app.exception_handler(DBAPIError)` 註冊**：`IntegrityError` 也是 `DBAPIError`
     的子類，註冊後它會被這裡攔走——`tests/unit/test_core_data_error_handler.py` 的
     `test_不可攔截_IntegrityError`（#697）明文禁止，理由是它是 `dm/editor/service` 的並發後盾。
     所以由 catch-all 在最前面呼叫本函式，其餘錯誤照舊。
     """
-    if not isinstance(exc, DBAPIError) or getattr(exc.orig, "sqlstate", None) != _PG_QUERY_CANCELED:
+    if not _is_db_busy(exc):
         return None
     logger.warning(
-        "Query canceled by statement_timeout on %s %s\n%s",
+        "DB busy (%s) on %s %s\n%s",
+        type(exc).__name__,
         request.method,
         request.url.path,
         format_exception_for_log(exc),
@@ -355,11 +371,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     ——SQLAlchemy StatementError 的訊息含 SQL 與綁定參數，會把個資寫進 log（#123），
     改由 app/core/log_redaction.format_exception_for_log 去識別化。
     AppError / HTTPException / RequestValidationError 均有專屬 handler，不會走到此處。
-    查詢逾時（SQLSTATE 57014）例外，回 503，見 `query_timeout_response`。
+    DB 等候上限到期（查詢逾時、等稽核鎖逾時、連線池等候逾時）回 503，見 `db_busy_response`。
     """
-    timeout = query_timeout_response(request, exc)
-    if timeout is not None:
-        return timeout
+    busy = db_busy_response(request, exc)
+    if busy is not None:
+        return busy
     logger.error(
         "Unhandled exception on %s %s\n%s",
         request.method,

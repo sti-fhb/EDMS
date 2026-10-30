@@ -95,7 +95,10 @@ def require_et_roles(*required: str) -> Callable[..., Awaitable[EtContext]]:
 
 
 def rate_limit_by_et_user(limiter: SlidingWindowRateLimiter, scope: str) -> Callable[..., Awaitable[None]]:
-    """依 `USER_ID` 限流之 dependency（`core.rate_limit` 只提供 IP 維度）。
+    """依 `USER_ID` 限流之 dependency。
+
+    `core.rate_limit.rate_limit_by_user`（#833）也是使用者維度，但只依賴 token；ET 端點用本函式，
+    限流前先經 `get_et_context` 把關 ET 角色。
 
     **使用者維度為主、IP 維度為輔**：ET 的寫入端點都要求已登入，攻擊者是一個帳號而非
     一個位址；但使用者維度可用「多開帳號」線性擴張（自助註冊是開的），故通常兩個維度
