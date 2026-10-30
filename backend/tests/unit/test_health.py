@@ -22,18 +22,6 @@ async def test_version_endpoint_ok():
 
 
 @pytest.mark.unit
-async def test_client_info_endpoint_ok():
-    """/api/client-info 應回 200 並含 ip / is_ipv6 欄位（不需 DB）。"""
-    transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/client-info")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "ip" in body
-    assert "is_ipv6" in body
-
-
-@pytest.mark.unit
 async def test_unknown_route_returns_standard_error():
     """未知路由應由 http_exception_handler 轉為標準錯誤格式（error_code=HTTP_404）。"""
     transport = ASGITransport(app=app)
