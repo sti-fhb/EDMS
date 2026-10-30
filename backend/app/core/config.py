@@ -120,11 +120,13 @@ class Settings(BaseSettings):
     # 未設定或查無帳號時 seed 跳過並記 log，不使 migration 失敗（CI / 新環境不受影響）。
     ET_BOOTSTRAP_ADMIN_EMAIL: str = ""
 
-    # 示範測試帳號 seed（migration 7b24b5dea3ad）開關。預設種入——一般環境（本機 / 部署）
-    # 皆需要一組可登入的帳號做手動驗證。**測試環境一律設 false**：測試 DB 同樣以
+    # 示範測試帳號 seed（migration 7b24b5dea3ad）開關。dev（DEBUG=true）預設種入，供本機
+    # 手動驗證登入；production（DEBUG=false）**必須明示設定**，未設定啟動即擋
+    # （見 _validate_seed_demo_accounts_explicit）。**測試環境一律設 false**：測試 DB 同樣以
     # `alembic upgrade head` 建置，這些帳號會混進「列全部使用者 / 全部管理者 / DM_VIEWER
     # 母體」等斷言的預期值（CI 實測 7 條 integration 測試因此失敗），
     # 見 tests/integration/conftest.py 之 apply_migrations 與 .github/workflows/ci.yml。
+    # ⚠️ 日後輪替示範帳號密碼，一律在目標環境直接操作，不再以 migration 寫入雜湊。
     SEED_DEMO_ACCOUNTS: bool = True
 
     @model_validator(mode="after")
@@ -198,6 +200,21 @@ class Settings(BaseSettings):
             raise ValueError(
                 "TRUSTED_PROXY_COUNT 在 production（DEBUG=false）必須明示設定："
                 "應用直接對外設 0，反向代理後方設實際追加段數（見 docs/ref/deployment-client-ip.md）"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_seed_demo_accounts_explicit(self) -> "Settings":
+        """production 護欄：`SEED_DEMO_ACCOUNTS` 必須明示設定（true / false 皆可，但要寫出來）。
+
+        預設 true 是為 dev 便利；production 未設定時會沿用它而種入示範帳號，且不會有任何
+        訊息。比照 `_validate_trusted_proxy_count_explicit` 於啟動即擋。alembic 的 env.py
+        亦載入 settings，故 `alembic upgrade` 同樣被擋、不會走到 seed migration。
+        """
+        if not self.DEBUG and "SEED_DEMO_ACCOUNTS" not in self.model_fields_set:
+            raise ValueError(
+                "SEED_DEMO_ACCOUNTS 在 production（DEBUG=false）必須明示設定："
+                "不需要示範帳號設 false（見 backend/.env.example）"
             )
         return self
 

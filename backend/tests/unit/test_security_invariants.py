@@ -122,6 +122,7 @@ class TestMailTransportSecurity:
             "JWT_SECRET_KEY": "x" * 64,
             "FRONTEND_BASE_URL": "https://edms.example.gov.tw",
             "TRUSTED_PROXY_COUNT": 0,
+            "SEED_DEMO_ACCOUNTS": False,
             "DM_FILE_STORAGE_ROOT": _ABS_ROOT + "dm",
             "ET_VIDEO_STORAGE_ROOT": _ABS_ROOT + "et",
             "MAIL_SERVER": "smtp.example.gov.tw",
@@ -195,6 +196,7 @@ class TestProductionStartupGuards:
             "JWT_SECRET_KEY": "x" * 64,
             "FRONTEND_BASE_URL": "https://edms.example.gov.tw",
             "TRUSTED_PROXY_COUNT": 0,
+            "SEED_DEMO_ACCOUNTS": False,
             "DM_FILE_STORAGE_ROOT": _ABS_ROOT + "dm",
             "ET_VIDEO_STORAGE_ROOT": _ABS_ROOT + "et",
             "MAIL_SERVER": "smtp.example.gov.tw",
@@ -215,13 +217,16 @@ class TestProductionStartupGuards:
             ("FRONTEND_BASE_URL", "", "信件連結會組成空網域，使用者點不到"),
             ("FRONTEND_BASE_URL", "http://localhost:5173", "信件連結指向開發機"),
             ("TRUSTED_PROXY_COUNT", None, "未明示則限流與稽核的來源 IP 可被偽造"),
+            ("SEED_DEMO_ACCOUNTS", None, "未明示則沿用預設 true，正式環境種入示範帳號"),
             ("DM_FILE_STORAGE_ROOT", "./var/dm_files", "相對路徑依工作目錄解析，換啟動位置全部檔案讀不到"),
             ("ET_VIDEO_STORAGE_ROOT", "./var/et_videos", "同上"),
             # MAIL_STARTTLS=false 已非護欄（#585 撤銷強制 TLS），見 TestMailTransportSecurity
         ],
     )
-    def test_單項設錯即拒絕啟動(self, field: str, bad_value, why: str) -> None:
+    def test_單項設錯即拒絕啟動(self, field: str, bad_value, why: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """其餘欄位全部合法，只壞一項——證明擋下來的確實是這一項。"""
+        # 「未設定」案例須連環境變數一併排除：`_env_file=None` 只隔離 .env 檔，不隔離 os.environ
+        monkeypatch.delenv(field, raising=False)
         settings = self._base()
         if bad_value is None:
             settings.pop(field)
