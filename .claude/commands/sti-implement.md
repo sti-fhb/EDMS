@@ -49,7 +49,7 @@
 ⚠️ **不要用 `alembic current` 查**：版本表若停在別人分支的 revision，它會直接 `Can't locate revision`，什麼都看不到。改用 psql 直接讀版本表，再拿 revision 回 git 比對：
 
 ```bash
-cd {WORKTREE}/backend || exit 1
+cd {WORKTREE}/backend || exit 1   # branch 模式改為 cd {主 repo 絕對路徑}/backend；/sti-cleanup 的 {WORKTREE_PATH} 即此處的 {WORKTREE}
 # 從 backend/.env 的 DATABASE_URL 解析 dev DB 連線資訊（與步驟 2.5d 同法，多取 DB 名）。
 # 先收進變數再 eval：python 失敗時 exit code 不會被 `eval "$(...)"` 吞掉，不會帶著空的連線資訊往下查錯庫
 OUT=$(python3 -I - .env <<'PYEOF'
@@ -298,12 +298,14 @@ def read_roots(repo):
     vals = {}
     with open(path, encoding='utf-8') as f:
         for line in f:
-            m = re.match(rf'^\s*({"|".join(KEYS)})\s*=(.*)$', line.rstrip('\n'))
+            # 比照 pydantic-settings（case_sensitive=False）與 python-dotenv：容許 export 前綴、key 不分大小寫
+            m = re.match(rf'^\s*(?:export\s+)?({"|".join(KEYS)})\s*=(.*)$', line.rstrip('\n'), re.I)
             if m:
                 v = m.group(2).strip()
-                # 比照 python-dotenv：未加引號的值，空白後的 # 起為行內註解
-                v = v[1:-1] if v[:1] in '"\'' and v[-1:] == v[:1] else re.sub(r'\s+#.*$', '', v)
-                vals[m.group(1)] = v.strip()
+                # 引號值取成對引號內的內容（其後可接註解）；未加引號的值，空白後的 # 起為行內註解
+                q = re.match(r'(["\'])(.*?)\1', v)
+                v = q.group(2) if q else re.sub(r'\s+#.*$', '', v)
+                vals[m.group(1).upper()] = v.strip()
     return vals
 
 def inside_repo(v):
@@ -325,7 +327,7 @@ for k in KEYS:
         print(f'❌ {k}={v} 是相對路徑'); bad = True
     elif inside_repo(v):
         print(f'❌ {k}={v} 位於 {inside_repo(v)} 之內，清理該 worktree 或 git clean 時會被刪除'); bad = True
-    elif main is not None and main.get(k) != v:
+    elif main is not None and os.path.realpath(main.get(k) or '') != os.path.realpath(v):
         print(f'⚠️ {k}={v} 與主 repo（{main.get(k)!r}）不一致，請使用者確認哪一個才是共用根'); bad = True
     else:
         print(f'✓ {k}={v}')
@@ -347,7 +349,7 @@ backend/.env 的檔案落盤根不是 repo 外的共用絕對路徑。建議：
 
 - **主 repo 與本 worktree 都要改**：只改 worktree，下一個新 worktree 又會從主 repo 複製到錯的值。寫入方式：該 key 已有一行（含被 `#` 註解掉的範本行）就取代那一行，沒有就附加在檔尾
 - 只有「與主 repo 不一致」（兩邊都是合法絕對路徑）時**不要直接覆蓋**：列出兩個值與各自底下的檔案數，由使用者決定以哪個為準
-- 改之前先看舊落盤根（`{主 repo 絕對路徑}/backend/var/`、`{WORKTREE}/backend/var/`）有沒有檔案；有就依對應關係搬過去：`var/dm_files/` → `DM_FILE_STORAGE_ROOT`、`var/et_videos/` → `ET_VIDEO_STORAGE_ROOT`，保留其下子目錄結構。**不得覆蓋新根已有的同名檔**——用 `rsync -a --ignore-existing --remove-source-files {舊}/ {新}/`，搬完舊目錄仍有剩的就是撞名，列給使用者決定。DB 存的是相對於落盤根的路徑（#233），**搬目錄 + 改設定即可，DB 不必動**
+- 改之前先看舊落盤根（`{主 repo 絕對路徑}/backend/var/`、`{WORKTREE}/backend/var/`）有沒有檔案；有就依對應關係搬過去：`var/dm_files/` → `DM_FILE_STORAGE_ROOT`、`var/et_videos/` → `ET_VIDEO_STORAGE_ROOT`，保留其下子目錄結構。**不得覆蓋新根已有的同名檔**——用 `mkdir -p "{新}" && rsync -a --ignore-existing --remove-source-files "{舊}/" "{新}/"`（建議路徑的上層 `edms-storage/` 可能還不存在，rsync 只會建最後一層）。搬完以 `find "{舊}" -type f` 判斷撞名——有輸出的才是沒搬走的同名檔，列給使用者決定；只剩空目錄不算。DB 存的是相對於落盤根的路徑（#233），**搬目錄 + 改設定即可，DB 不必動**
 - 其他既有 worktree 的 `backend/.env` 不在本步驟範圍：回報使用者哪些 worktree 仍是相對路徑，由使用者決定是否一併改（那些 worktree 可能正被其他 session 使用）
 
 #### 2.5c 改寫 worktree 的 backend/.env.test 中 DATABASE_URL
