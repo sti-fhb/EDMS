@@ -28,6 +28,16 @@ _DEFAULT_RETRY_INTERVAL_MIN = 2
 _DEFAULT_RATE_PER_MIN = 60
 _POLL_INTERVAL_SECONDS = 60
 
+# SENT 之後須遮罩 BODY 的敏感系統信（#50 SA 裁示方案 A）：信中含一次性明文連結，
+# DP_PWD_RESET 只存 token 雜湊的縱深防禦會被 outbox 快照抵銷。以 (MODULE, TEMPLATE_CODE)
+# 為鍵——兩者皆為 IS_SYSTEM 種子範本，代碼固定、不可新增 / 刪除，故不必每輪再查範本表。
+# ⛔ 只能在寄出成功後遮罩：PENDING 需原文供重試，提前遮會寄出遮罩信；FAILED 依 SA 裁示保留原文。
+_REDACT_AFTER_SENT = frozenset({("DP", "PWD_RESET"), ("DP", "EMAIL_CHANGE_VERIFY")})
+# 遮罩後的 BODY 固定標記（非空字串，以免與渲染失敗列的空 BODY 混淆）；
+# 此字串已凍結於 alembic 回溯 migration 04fc1cf07681（寫死、不 import）：日後若改這裡，
+# 既有已遮罩列不會跟著改，兩種標記會並存——要改請另寫 migration 一併更新。
+REDACTED_BODY = "[已遮罩：本信含一次性連結，寄出後清除原文]"
+
 
 class Mailer(Protocol):
     """SMTP 寄送器介面；worker 依此注入（正式為 SmtpMailer，測試為 fake）。"""
@@ -82,6 +92,8 @@ class EmailWorker:
                     row.status = "FAILED"
             else:
                 row.status = "SENT"
+                if (row.module, row.template_code) in _REDACT_AFTER_SENT:
+                    row.body = REDACTED_BODY
                 row.sent_date = current
                 row.updated_user = _SYSTEM_USER
                 row.updated_date = current

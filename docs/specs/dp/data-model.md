@@ -116,7 +116,7 @@ erDiagram
         VARCHAR CALLER_MODULE
         VARCHAR RECIPIENT
         VARCHAR SUBJECT "渲染快照"
-        TEXT BODY "渲染快照"
+        TEXT BODY "渲染快照（敏感系統信SENT後遮罩）"
         VARCHAR STATUS "PENDING/SENT/FAILED"
         INT RETRY_COUNT
         VARCHAR ERROR_MSG
@@ -297,7 +297,7 @@ erDiagram
 | CALLER_MODULE | VARCHAR(5) | Y | — | 呼叫方模組（DP / ET / DM）|
 | RECIPIENT | VARCHAR(255) | Y | — | 收件人（一列一收件人，單筆失敗獨立重試）|
 | SUBJECT | VARCHAR(200) | Y | — | 渲染後主旨快照 |
-| BODY | TEXT | Y | — | 渲染後內文快照 |
+| BODY | TEXT | Y | — | 渲染後內文快照。例外：(DP, `PWD_RESET`) / (DP, `EMAIL_CHANGE_VERIFY`) 含一次性明文連結，寄出成功轉 SENT 時改寫為固定字串「[已遮罩：本信含一次性連結，寄出後清除原文]」；PENDING 保留原文供重試、FAILED（終態）依 SA 裁示保留原文（#50）|
 | STATUS | VARCHAR(10) | Y | PENDING | PENDING / SENT / FAILED |
 | RETRY_COUNT | INT | Y | 0 | 已重試次數（上限為平台級 `MAIL` 參數）|
 | ERROR_MSG | VARCHAR(500) | N | — | 最後失敗原因 |
