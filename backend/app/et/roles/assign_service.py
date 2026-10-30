@@ -190,7 +190,8 @@ class EtAssignService:
         **目標帳號須存在**（#188）：DP 端 `_require_usable_target` 對查無帳號刻意放行
         （模組角色表無 FK 至 `DP_USER`），本轉接層既為權威寫入口，便不為不存在之帳號建列，
         以免留下孤兒授權列。經 `AccountQueryService` 判定、不直接查 `DP_USER`（模組邊界）。
-        撤權同樣擋——`assign` 為目標集覆寫、不區分提權 / 降權（比照 DP 該檢核）。
+        撤權同樣擋——`assign` 為目標集覆寫、不區分提權 / 降權（與 DP 對停用帳號的做法一致；
+        但 DP 對**查無**帳號是放行的，這道檢核只在 ET 這一側）。
 
         Raises:
             AppError: 自我保護（403 `ET_ROLE_001`）、標籤無效 / 未啟用（422 `ET_ROLE_002`）、
@@ -202,8 +203,9 @@ class EtAssignService:
         ensure_not_self_admin_removal(operator_id, user_id, roles)
         # 輸入檢核（純函式）之後、讀現況之前：查無帳號不必再碰 ET 任何表
         if not await self._accounts.exists(db, user_id):
-            # 正常 UI 只列既有帳號，走到這裡多為竄改請求或競態——留痕（USER_ID 為隨機內部碼，非個資）
-            logger.warning("ET 角色指派目標帳號不存在 user_id=%s operator=%s", user_id, operator_id)
+            # 正常 UI 只列既有帳號，走到這裡多為竄改請求或競態——留痕。此 user_id 來自請求 path、
+            # 不可信（可含換行或極長），故以 %r 輸出，避免偽造 log 行
+            logger.warning("ET 角色指派目標帳號不存在 user_id=%r operator=%s", user_id, operator_id)
             raise _user_not_found()
 
         current = (await self.get_users_assignments(db, [user_id]))[user_id]

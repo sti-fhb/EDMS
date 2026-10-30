@@ -47,7 +47,11 @@ async def test_查無帳號_拒絕指派且不碰_db():
 
 
 async def test_查無帳號_撤權同樣拒絕():
-    """`assign` 為目標集覆寫，不區分提權 / 降權——查無帳號一律擋（比照 DP `_require_usable_target`）。"""
+    """`assign` 為目標集覆寫，不區分提權 / 降權——查無帳號一律擋。
+
+    「不區分提權 / 降權」與 DP `_require_usable_target` 對停用帳號的做法一致；但 DP 對查無帳號放行，
+    故本檢核只在 ET 這一側。
+    """
     svc = EtAssignService(accounts=_accounts(exists=False), audit=AsyncMock())
 
     with pytest.raises(AppError) as e:
