@@ -36,8 +36,10 @@ class DpEmailLog(BaseModelNoDelete):
     """寄件 outbox（DP_EMAIL_LOG）。
 
     一列一收件人，單筆失敗獨立重試。新增後只更新狀態（STATUS / RETRY_COUNT /
-    ERROR_MSG / SENT_DATE），保留全部紀錄、永不刪除（故用 BaseModelNoDelete）。
+    ERROR_MSG / SENT_DATE；下述 #50 例外另改 BODY），保留全部紀錄、永不刪除（故用 BaseModelNoDelete）。
     SUBJECT / BODY 為渲染後快照。worker 以 (STATUS, CREATED_DATE) 索引輪詢待寄件。
+    例外（#50）：(DP, PWD_RESET) / (DP, EMAIL_CHANGE_VERIFY) 含一次性明文連結，寄出成功轉 SENT
+    時 BODY 改寫為 worker.REDACTED_BODY；PENDING 保留原文供重試，FAILED（終態）依 SA 裁示保留。
     """
 
     __tablename__ = "DP_EMAIL_LOG"
