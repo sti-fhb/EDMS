@@ -11,11 +11,11 @@
 # 「能推一個映像到 edms-image」。詳見 docs/infra/deployment.md。
 #
 # 流程：
-#   1. 取得 origin/main 的最新 commit short SHA
-#   2. 確認 Artifact Registry 已有對應的映像 tag（沒有代表 CI 還在跑／失敗，
-#      本輪跳過——避免拉到與程式碼不一致的半成品）
-#   3. 與已部署的 SHA 比對，相同即結束
-#   4. checkout 該 commit → pull 映像 → 起 DB → 備份 → migration → up -d
+#   1. 取得 origin/main 的最新 commit，與已部署的 SHA 比對，相同即結束
+#   2. 在「已部署 → origin/main」之間由新到舊找第一個 Artifact Registry 已有
+#      映像的 commit（只動 docs／.github 等的 commit 不會觸發 CD、永遠沒有映像，
+#      不能只看 origin/main）；都沒有代表 CI 還在跑／失敗，本輪跳過
+#   3. checkout 該 commit → pull 映像 → 起 DB → 備份 → migration → up -d
 #      → 內部 health check → 記錄已部署 SHA
 #
 # 任一步失敗即中止並保留現狀（已部署 SHA 不更新），下一輪會重試。
@@ -33,7 +33,11 @@ set -euo pipefail
 
 REPO_DIR="/opt/edms/repo"
 STATE_FILE="/opt/edms/deployed.sha"
+# 已記過「等待映像」的 origin/main SHA，同一個 HEAD 只寫一次 log
+PENDING_FILE="/opt/edms/pending.sha"
 LOG_FILE="/opt/edms/deploy.log"
+# 已部署 SHA 不在 origin/main 歷史上（首次部署、force-push）時，往回找的上限
+MAX_LOOKBACK=20
 AR_HOST="asia-east1-docker.pkg.dev"
 AR_BASE="${AR_HOST}/blood-system-dev/edms-image"
 # -p edms：專案名稱預設取自目錄名（/opt/edms/repo → "repo"），會產出 repo_edms-net
@@ -44,6 +48,10 @@ log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "${LOG_FILE}"
 }
 
+image_exists() {
+  gcloud artifacts docker images describe "${AR_BASE}/$1" >/dev/null 2>&1
+}
+
 # ⚠️ 整段包成函式再呼叫：bash 是**逐段讀取**腳本檔的，而本腳本執行中會
 # `git checkout` 自己所在的 repo——若該 commit 改到本檔，bash 接下來會從
 # 變動後的檔案讀取剩餘位元組，執行到錯亂的內容。包成函式可讓 bash 在呼叫前
@@ -52,35 +60,61 @@ main() {
 
 cd "${REPO_DIR}"
 
-# ---------- 1. 取得目標 commit ----------
+# ---------- 1. 取得 origin/main ----------
 git fetch --quiet origin main
-TARGET_SHA=$(git rev-parse --short=7 origin/main)
+HEAD_SHA=$(git rev-parse --short=7 origin/main)
 CURRENT_SHA=$(cat "${STATE_FILE}" 2>/dev/null || echo "none")
 
-if [ "${TARGET_SHA}" = "${CURRENT_SHA}" ]; then
+if [ "${HEAD_SHA}" = "${CURRENT_SHA}" ]; then
   # 無變動時不寫 log，避免每輪都灌一行
   exit 0
 fi
 
-log "===== 偵測到新版本：${CURRENT_SHA} → ${TARGET_SHA} ====="
+# ---------- 2. 找出最新一個有映像的 commit ----------
+# cd.yml 的 paths-ignore 會跳過只動 docs／*.md／.claude／.github 的 push，這類
+# commit 永遠不會有映像。若只看 origin/main，HEAD 落在這類 commit 時會一直等
+# 下去，直到下一個改到程式碼的 commit 推上來。故改為由新到舊找第一個兩個映像
+# 都齊全的 commit——它與 HEAD 的差異只在被 paths-ignore 的檔案，部署它即是部署
+# 最新程式碼。
+#
+# 不依 paths-ignore 規則推算「哪個 commit 該有映像」：同一次 push 含多個 commit
+# 時 CD 只建最後一個，依路徑推算會挑到沒有映像的 commit。以 AR 實際有無為準。
+#
+# 仍保證「程式碼與映像一致」：只部署有對應映像的 commit，並 checkout 該 commit。
+if [ "${CURRENT_SHA}" != "none" ] \
+   && git merge-base --is-ancestor "${CURRENT_SHA}" origin/main 2>/dev/null; then
+  CANDIDATES=$(git rev-list --first-parent "${CURRENT_SHA}..origin/main")
+else
+  CANDIDATES=$(git rev-list --first-parent --max-count="${MAX_LOOKBACK}" origin/main)
+fi
 
-# ---------- 2. 確認映像已存在 ----------
-# CI 尚未推完（或已失敗）時 tag 不存在，本輪跳過，等下一輪。
-# 這一步是「程式碼與映像一致」的保證：只部署有對應映像的 commit。
-if ! gcloud artifacts docker images describe \
-      "${AR_BASE}/edms-backend:${TARGET_SHA}" >/dev/null 2>&1; then
-  log "映像 edms-backend:${TARGET_SHA} 尚未就緒（CI 可能仍在執行或已失敗），本輪跳過"
+TARGET_SHA=""
+for sha in ${CANDIDATES}; do
+  short=${sha:0:7}
+  if image_exists "edms-backend:${short}" && image_exists "edms-nginx:${short}"; then
+    TARGET_SHA="${short}"
+    break
+  fi
+done
+
+if [ -z "${TARGET_SHA}" ] || [ "${TARGET_SHA}" = "${CURRENT_SHA}" ]; then
+  # CI 尚未推完（或已失敗）。同一個 HEAD 只記一次，避免每輪灌 log
+  if [ "$(cat "${PENDING_FILE}" 2>/dev/null)" != "${HEAD_SHA}" ]; then
+    log "origin/main 已到 ${HEAD_SHA}，但 ${CURRENT_SHA} 之後尚無可部署的映像（CI 可能仍在執行或已失敗），等待中"
+    echo "${HEAD_SHA}" > "${PENDING_FILE}"
+  fi
   exit 0
 fi
-if ! gcloud artifacts docker images describe \
-      "${AR_BASE}/edms-nginx:${TARGET_SHA}" >/dev/null 2>&1; then
-  log "映像 edms-nginx:${TARGET_SHA} 尚未就緒，本輪跳過"
-  exit 0
+
+if [ "${TARGET_SHA}" = "${HEAD_SHA}" ]; then
+  log "===== 偵測到新版本：${CURRENT_SHA} → ${TARGET_SHA} ====="
+else
+  log "===== 偵測到新版本：${CURRENT_SHA} → ${TARGET_SHA}（origin/main 為 ${HEAD_SHA}，其後的 commit 無映像）====="
 fi
 
 # ---------- 3. 切到該 commit ----------
 # 用 detached checkout：這份 clone 只供部署使用，不做開發
-git checkout --quiet --detach "origin/main"
+git checkout --quiet --detach "${TARGET_SHA}"
 log "已切至 ${TARGET_SHA}"
 
 export EDMS_IMAGE_TAG="${TARGET_SHA}"
@@ -164,6 +198,8 @@ if [ "${OK}" -ne 1 ]; then
 fi
 
 echo "${TARGET_SHA}" > "${STATE_FILE}"
+# HEAD 之後的 commit 本就沒有映像，標記為已記過，下一輪不再寫「等待中」
+echo "${HEAD_SHA}" > "${PENDING_FILE}"
 log "===== 部署完成：${TARGET_SHA} ====="
 
 docker image prune -f >/dev/null 2>&1 || true
