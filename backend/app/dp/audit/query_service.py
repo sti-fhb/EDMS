@@ -15,6 +15,7 @@ from datetime import date, datetime
 from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResult
 from app.core.request_context import get_client_ip
 from app.core.utils import format_taipei
@@ -172,6 +173,20 @@ def _display_from_values(before_value: str | None, after_value: str | None) -> s
     return None
 
 
+# 單次匯出筆數上限（#102）：匯出不分頁，整份在記憶體組成 CSV；`DP_AUDIT_LOG` 只增不減，
+# 不設上限時不帶條件即全表載入。前端 `useAuditLogs.ts` 以同值先擋，兩邊須一起改。
+EXPORT_MAX_ROWS = 10_000
+
+
+def _export_too_many() -> AppError:
+    """匯出筆數超過上限（`DP_AUDIT_001`）。"""
+    return AppError(
+        status_code=422,
+        detail=f"匯出筆數超過 {EXPORT_MAX_ROWS:,} 筆，請縮小查詢範圍",
+        error_code="DP_AUDIT_001",
+    )
+
+
 # CSV 欄位（欄位名 → 標頭）：操作時間 / 操作者帳號(email) / 功能 / 操作類別 / 執行結果 / 對象 / 來源 IP / 前後值。
 _CSV_COLUMNS: list[tuple[str, str]] = [
     # 標頭標明時區（#519）：這份檔案是調查證據，而 2026-10-05 之前匯出的版本內容是 UTC、
@@ -291,7 +306,15 @@ class AuditQueryService:
         date_from: date | None,
         date_to: date | None,
     ) -> str:
-        """依查詢條件全量匯出 CSV（無分頁）；回含 UTF-8 BOM 的字串（Excel 中文相容）。
+        """依查詢條件匯出 CSV（無分頁，上限 `EXPORT_MAX_ROWS` 筆）；回含 UTF-8 BOM 的字串（Excel 中文相容）。
+
+        ## 筆數上限（#102）
+
+        先 count 再撈明細：超過上限即回 `DP_AUDIT_001`（422），不查明細、不組 CSV、不寫
+        `EXPORT` 稽核（檔案沒送出，不屬 FR-DP-US10-07 的匯出行為）。
+        明細查詢另帶 `LIMIT 上限 + 1` 當硬上限：本表持續寫入，count 與撈明細之間可能多出
+        新紀錄；撈回超過上限同樣回 `DP_AUDIT_001`，不悄悄截斷。不拿掉 count 只靠 LIMIT，
+        是因為超量時 LIMIT 仍要把上限筆數的完整列（含異動前後值）讀進來，count 只回一個數。
 
         ## 匯出本身寫一筆 `EXPORT` 稽核（#675）
 
@@ -320,7 +343,11 @@ class AuditQueryService:
             date_from=date_from,
             date_to=date_to,
         )
-        rows = await self._repo.fetch_for_export(db, conditions=conditions)
+        if await self._repo.count_logs(db, conditions=conditions) > EXPORT_MAX_ROWS:
+            raise _export_too_many()
+        rows = await self._repo.fetch_for_export(db, conditions=conditions, limit=EXPORT_MAX_ROWS + 1)
+        if len(rows) > EXPORT_MAX_ROWS:
+            raise _export_too_many()
         responses = await self._build_responses(db, rows)
 
         buffer = io.StringIO()
