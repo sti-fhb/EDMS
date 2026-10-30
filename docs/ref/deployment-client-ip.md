@@ -2,6 +2,7 @@
 
 > 來源：Issue #23（#16 T015 Security Review HIGH-1，CWE-348 / CWE-290 / OWASP A04）。
 > 對應程式碼：`backend/app/core/client_ip.py`、`backend/main.py` 之 `client_ip_middleware`。
+> 另載 request body 總量上限之部署前提（#289，見「前提：request body 總量上限由反向代理負責」）。
 
 ## 為什麼這件事屬於部署層
 
@@ -193,6 +194,35 @@ UDS（`proxy_pass http://unix:/…`）下 `request.client` 為 `None` → client
 → 限流 key 塌縮成單一 `unknown` 桶（全站共用門檻）、稽核 `SOURCE_IP` 全為 NULL。
 若確有 UDS 需求，必須搭配 `TRUSTED_PROXY_COUNT >= 1`，使 IP 由 XFF 取得。
 
+## 前提：request body 總量上限由反向代理負責（#289）
+
+FastAPI 在跑 dependency（含身分驗證）**之前**就把整個 body 讀進記憶體：`fastapi/routing.py`
+的 `body_bytes = await request.body()` 早於 `solve_dependencies`。故 schema 層的
+`max_length` / `max_items` 擋不住「以超大 body 佔記憶體」，而且**未登入者即可觸發**。
+
+應用層**沒有** body 總量上限（`main.py` 無對應 middleware；app 層的第二道防線列於 #263 M1，
+尚未實作），**唯一防線是反向代理的 `client_max_body_size`**。後端只跑一個 worker（見前提 2），
+單一行程記憶體撐爆就是 DM 與 ET 全站中斷。
+
+現行設定在 `nginx/nginx.conf`（#806），數值由來與調整方式見 `docs/infra/deployment.md` §6：
+
+| 範圍 | 上限 | 對齊的 app 端設定 |
+|---|---|---|
+| DM 上傳（文件建立／加版／改草稿、廢止附件，共 4 支） | 51m | `DM_FILE_MAX_MB`（50）＋ multipart 信封餘裕 |
+| ET 教材影片上傳 | 501m | `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`（500）＋ 信封餘裕 |
+| 其餘 `/api/` | 2m | 最大的單一 JSON 欄位（教材說明 HTML）中文約 150 KB |
+
+- ⚠️ **換反向代理或改部署形態時必須一併搬過去**。少了它，連未登入可呼叫的 `POST /api/login`
+  都收得下任意大小的 body（#806 之前即是全站 501m）。
+- ⚠️ **上傳端點不能一刀切成小值**：上限量的是整個 multipart body（含 boundary 與 part header），
+  必須比 app 端的檔案上限略大，否則剛好等於上限的檔案會被擋。新增上傳端點時要加進上傳 regex，
+  否則落到 2m。
+- ⚠️ **「超限時後端完全不讀」只對一般 `/api/` 成立**：該 location 由 nginx 收完整 body 才轉送。
+  上傳路徑設了 `proxy_request_buffering off`（`nginx/api-upload.conf`）串流轉送，以 chunked 送出、
+  未宣告 `Content-Length` 的請求要等累計超限才被 413 擋下，此時後端最多已收到上限量（51m / 501m）。
+- 上傳路徑另有 `UploadAuthPrecheckMiddleware` 在解析 body 前擋未登入者（#810），但它管的是
+  「誰能送」，不是「送多大」，不能取代本項。
+
 ## 本機制未涵蓋的範圍
 
 - **IPv6 位址輪替**：限流分桶用完整位址，持有 IPv6 /64 的攻擊者可每個請求換一個
@@ -209,6 +239,8 @@ UDS（`proxy_pass http://unix:/…`）下 `request.client` 為 `None` → client
 - [ ] 反向代理依情境 A／B 設定 `X-Forwarded-For`
 - [ ] 應用連接埠未對不信任網路開放；情境 B 另確認 nginx 不可繞過 CF 直達
 - [ ] 未使用 UDS 作為代理通道（或已搭配 `TRUSTED_PROXY_COUNT >= 1`）
+- [ ] 反向代理設有 request body 上限：一般 API 2m、DM 上傳 51m、ET 影片上傳 501m（`nginx/nginx.conf`），
+      超限回 413
 - [ ] **驗證「太低」**：帶 `X-Forwarded-For: 9.9.9.9` 打一次登入失敗，
       `DP_AUDIT_LOG.SOURCE_IP` 應為真實來源、**不是** `9.9.9.9`
 - [ ] **驗證「太高」**：帶 `X-Forwarded-For: 9.9.9.9, 8.8.8.8`（前置 N−1 段偽造）

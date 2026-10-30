@@ -77,7 +77,7 @@ async def learn_structure(
 
     非在籍且非擁有者回 **403 `ET_LEARN_002`**——課程的存在對學員不是秘密（他可能正要
     加入），而「你尚未加入此課程」是可行動的訊息。**以 id 定址的資源端點則一律 404**
-    （見 service 之 `_FILE_NOT_FOUND`）。
+    （見 service 之 `_file_not_found`）。
     """
     return await _service.structure(db, course_id, user_id=ctx.user_id, roles=ctx.roles)
 
