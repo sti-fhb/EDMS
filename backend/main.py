@@ -21,7 +21,7 @@ from app.core.exceptions import AppError
 from app.core.log_redaction import format_exception_for_log
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
-from app.core.request_context import get_client_ip, set_client_ip
+from app.core.request_context import set_client_ip
 from app.core.upload_auth_precheck import UploadAuthPrecheckMiddleware
 from app.dm.access.router import router as dm_access_router
 from app.dm.bootstrap import register_dm_module
@@ -102,11 +102,6 @@ async def lifespan(app: "FastAPI"):
 
 class VersionResponse(BaseModel):
     version: str
-
-
-class ClientInfoResponse(BaseModel):
-    ip: str | None
-    is_ipv6: bool
 
 
 # 啟動時讀取一次版本號，避免每次請求都讀檔
@@ -388,14 +383,3 @@ async def health_check() -> JSONResponse:
 async def get_version() -> VersionResponse:
     """回傳目前系統版本號（來源：pyproject.toml）。"""
     return VersionResponse(version=_APP_VERSION)
-
-
-@app.get("/api/client-info", response_model=ClientInfoResponse)
-async def get_client_info() -> ClientInfoResponse:
-    """回傳呼叫者的連線資訊（IP + IPv4/IPv6 協定）。
-
-    公開端點不需 JWT，回傳資訊僅含請求者自身 IP，無資訊洩漏疑慮。
-    IP 由 client_ip_middleware 寫入 contextvar；is_ipv6 以「IP 字串含冒號」判斷。
-    """
-    ip = get_client_ip()
-    return ClientInfoResponse(ip=ip, is_ipv6=":" in ip if ip else False)

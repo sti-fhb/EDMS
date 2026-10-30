@@ -35,7 +35,6 @@ _NO_AUTH_ALLOWLIST: dict[tuple[str, str], str] = {
     ("POST", "/api/reset-password"): "以信中 token 重設，未登入",
     ("POST", "/api/reset-password/policy"): "重設頁依信中 token 取適用密碼門檻，未登入（#623）",
     ("GET", "/api/version"): "版本資訊，無敏感內容",
-    ("GET", "/api/client-info"): "回顯 client IP，供部署期排查",
     ("GET", "/api/password-policy"): "公開密碼政策，供註冊 / 重設頁渲染提示（登入前即需要）",
     ("POST", "/api/activate-account"): "帳號啟用：匿名、持邀請信連結 token",
     ("POST", "/api/verify-email-change"): "完成 Email 變更：公開、持信中連結 token",
