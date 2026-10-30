@@ -290,19 +290,21 @@ jobs:
           echo "資源路徑與 API base 均帶 /edms 前綴"
 
       # 上一步只驗前端產物；nginx 設定檔有語法錯誤時映像照樣 build 成功，部署後容器起不來，
-      # 且 vm-deploy.sh 先換容器才做健康檢查、無回滾——故在 push 之前以 nginx -t 擋下（#444）。
+      # 且 vm-deploy.sh 先換容器才做健康檢查、無回滾——故在 push edms-nginx 之前以 nginx -t 擋下（#444）。
       # 與 build-release-images.yml 用同一條指令。
+      # 註：edms-backend 已於前面的步驟推送；此處失敗時只有 edms-nginx 不推，vm-deploy.sh 要求
+      #   backend 與 nginx 的 :<sha> 映像皆存在才部署，故該 commit 不會被部署。
       #
       # --add-host：設定檔的 proxy_pass 寫死 edms-backend，nginx -t 會解析此主機名稱；
       #   CI 上無此容器，不給假位址則設定正確也會報 host not found。nginx -t 不實際連線，假位址無妨。
       # ⚠️ nginx -t 只抓「載不起來」（漏分號、指令拼錯、include 不存在），抓不到「語法合法但行為錯」
-      #   （如 add_header 遮蔽 server 層安全標頭，見 #441）——後者由 test_security_invariants.py
+      #   （如 add_header 遮蔽 server 層安全標頭，見 #441）——後者由 backend/tests/unit/test_security_invariants.py
       #   的設定檔契約測試負責，兩者不可互相取代。
       - name: 驗證 nginx 設定檔語法
         run: |
           IMG="${{ env.AR_BASE }}/edms-nginx:${{ env.SHORT_SHA }}"
           docker run --rm --add-host edms-backend:127.0.0.1 --entrypoint nginx "$IMG" -t \
-            || { echo "::error::nginx 設定檔語法檢查失敗（nginx -t），錯誤位置見上方輸出；映像不推送。"; exit 1; }
+            || { echo "::error::nginx 設定檔語法檢查失敗（nginx -t），錯誤位置見上方輸出；edms-nginx 不推送。"; exit 1; }
 
       # 驗證通過才推。:latest 與 :<sha> 一起打，語意與改動前相同。
       - name: Push edms-nginx

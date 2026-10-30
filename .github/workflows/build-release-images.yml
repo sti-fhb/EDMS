@@ -265,7 +265,7 @@ jobs:
       # --add-host：設定檔的 proxy_pass 寫死 edms-backend，nginx -t 會解析此主機名稱；
       #   CI 上無此容器，不給假位址則設定正確也會報 host not found。nginx -t 不實際連線，假位址無妨。
       # ⚠️ nginx -t 只抓「載不起來」（漏分號、指令拼錯、include 不存在），抓不到「語法合法但行為錯」
-      #   （如 add_header 遮蔽 server 層安全標頭，見 #441）——後者由 test_security_invariants.py
+      #   （如 add_header 遮蔽 server 層安全標頭，見 #441）——後者由 backend/tests/unit/test_security_invariants.py
       #   的設定檔契約測試負責，兩者不可互相取代。
       - name: 驗證 nginx 設定檔語法
         run: |
