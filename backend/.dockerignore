@@ -1,0 +1,60 @@
+# 後端映像的 build context 為 ./backend（cd.yml、build-release-images.yml、
+# docker-compose.override.yml），repo 根目錄的 .dockerignore 只作用於 nginx（context = root），
+# 對本映像無效。少了本檔，Dockerfile 的 `COPY . .` 會把整個 backend/ 原樣複製進映像（#872）。
+#
+# ⚠️ 語法提醒：.dockerignore 的樣式一律從 context 根目錄比對，**不會**像 .gitignore 那樣自動
+#    比對任意層級；要涵蓋子目錄必須寫 `**/` 前綴（例如 `__pycache__/` 只會排除根目錄那一層）。
+#
+# 執行期需要、**不得排除**的檔案（新增排除項前先對照）：
+#   - main.py、app/、entrypoint.sh：應用程式本體與啟動腳本
+#   - pyproject.toml、uv.lock：builder 階段 `uv sync --frozen` 的輸入；pyproject.toml 另於執行期
+#     由 main.py 讀取版本號（讀不到不會報錯，只會讓版本號變成 unknown，不易察覺）
+#   - alembic/、alembic.ini：部署以 `docker compose run --rm` 在映像內執行 `alembic upgrade head`，
+#     cd.yml 與 build-release-images.yml 也會在映像內執行 `alembic heads`
+
+# 環境變數：本機 backend/.env 含真實 DB 密碼、JWT_SECRET_KEY、SMTP 帳密，包進映像後
+# 只要映像被推送或分享，機密就跟著外流。執行期設定一律由部署端注入（env_file / -e）。
+# .env.example 只有範本值，保留無妨。
+# `prod.env` 這類 *.env 命名與 direnv 的 .envrc 不會被 .env／.env.* 匹配到，另外列出。
+**/.env
+**/.env.*
+!.env.example
+**/*.env
+**/.envrc
+
+# Claude Code 專案設定：在 backend/ 下開 session 會產生 .claude/settings*.json，
+# 其中可能含 PGPASSWORD 等 dev 連線字串（同根目錄 .gitignore 的理由）
+.claude/
+
+# 測試：app 不會 import，放進映像只增加體積與攻擊面
+tests/
+
+# 本機落盤根：DM_FILE_STORAGE_ROOT / ET_VIDEO_STORAGE_ROOT 預設 ./var/...，本機開發上傳的
+# 文件與影片會留在這裡。Dockerfile 會在映像內自行建立並 chown /app/var 下的兩個落盤根。
+var/
+
+# Python 虛擬環境：映像的 .venv 由 builder 階段 uv sync 產生後整個複製過來；
+# 若帶入本機 .venv，`COPY . .` 會蓋掉它，換成指向本機 python 路徑、含 dev 依賴的版本
+.venv/
+venv/
+
+# Bytecode：Dockerfile 會在映像內以 compileall 重新編譯，本機產物可能來自不同 python 版本
+**/__pycache__/
+**/*.py[cod]
+
+# 工具快取與覆蓋率報告
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.uv/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+**/*.swp
+**/.DS_Store
+**/Thumbs.db
