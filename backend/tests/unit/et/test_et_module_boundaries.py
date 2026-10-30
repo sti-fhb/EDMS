@@ -19,6 +19,10 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 _BACKEND = Path(__file__).resolve().parents[3]
 _ET_ROOT = _BACKEND / "app" / "et"
 _VERSIONS = _BACKEND / "alembic" / "versions"
