@@ -161,8 +161,9 @@ Migration 執行完成後，會自動建立以下 seed 資料：
 > 已刪除，事後移除也救不回來，只能輪替密碼（`18489e30023b_dp_demo_accounts_rotate_password`
 > 即為一次輪替）。密碼僅以 bcrypt 雜湊存在於 migration 中。
 >
-> 帳號由 `7b24b5dea3ad_common_seed_demo_accounts` 建立，受 `SEED_DEMO_ACCOUNTS`（預設開啟）
-> 控制；不需要示範帳號的環境將該設定設為 `false` 即不會種入。
+> 帳號由 `7b24b5dea3ad_common_seed_demo_accounts` 建立，受 `SEED_DEMO_ACCOUNTS` 控制：
+> `DEBUG=true` 時預設開啟；`DEBUG=false`（production）時必須明示設定，未設定啟動即擋。
+> 不需要示範帳號的環境將該設定設為 `false` 即不會種入。
 
 ---
 

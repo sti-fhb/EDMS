@@ -89,6 +89,7 @@ def test_mail_plaintext_allowed_in_production() -> None:
         DEBUG=False,
         FRONTEND_BASE_URL="https://edms.example.com",  # DEBUG=false 下需正式網域，避開 prod frontend 護欄
         TRUSTED_PROXY_COUNT=0,  # DEBUG=false 下需明示（見 _validate_trusted_proxy_count_explicit）
+        SEED_DEMO_ACCOUNTS=False,  # 同上（見 _validate_seed_demo_accounts_explicit）
         DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,  # DEBUG=false 下須絕對路徑（見 _validate_storage_roots_absolute）
         ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
         MAIL_SERVER="smtp.example.com",
@@ -109,6 +110,7 @@ def _settings_with_frontend(url: str, *, debug: bool) -> Settings:
         DEBUG=debug,
         FRONTEND_BASE_URL=url,
         TRUSTED_PROXY_COUNT=0,  # 聚焦 FRONTEND_BASE_URL 驗證，避開 production 明示設定護欄
+        SEED_DEMO_ACCOUNTS=False,
         DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,  # 同上，避開 storage root 絕對路徑護欄
         ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
     )
@@ -200,7 +202,8 @@ def _settings_for_proxy_count(**overrides: object) -> Settings:
         "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
         "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
         "FRONTEND_BASE_URL": "https://edms.example.com",
-        # 聚焦 TRUSTED_PROXY_COUNT 驗證，避開 storage root 絕對路徑護欄（#233）
+        # 聚焦 TRUSTED_PROXY_COUNT 驗證，避開 storage root 絕對路徑護欄（#233）與示範帳號明示護欄
+        "SEED_DEMO_ACCOUNTS": False,
         "DM_FILE_STORAGE_ROOT": _ABS_DM_ROOT,
         "ET_VIDEO_STORAGE_ROOT": _ABS_ET_ROOT,
     }
@@ -230,6 +233,48 @@ def test_trusted_proxy_count_not_required_in_debug() -> None:
     assert s.TRUSTED_PROXY_COUNT == 0
 
 
+def _settings_for_seed(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "FRONTEND_BASE_URL": "https://edms.example.com",
+        # 聚焦 SEED_DEMO_ACCOUNTS 驗證，避開其餘 production 護欄
+        "TRUSTED_PROXY_COUNT": 0,
+        "DM_FILE_STORAGE_ROOT": _ABS_DM_ROOT,
+        "ET_VIDEO_STORAGE_ROOT": _ABS_ET_ROOT,
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def _no_seed_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「未設定」須連環境變數一併排除——`_env_file=None` 只隔離 .env 檔，不隔離 os.environ。"""
+    monkeypatch.delenv("SEED_DEMO_ACCOUNTS", raising=False)
+
+
+@pytest.mark.usefixtures("_no_seed_env")
+def test_seed_demo_accounts_required_in_production() -> None:
+    """production 未明示 SEED_DEMO_ACCOUNTS → 啟動即擋，不沿用預設 true。"""
+    with pytest.raises(ValueError, match="SEED_DEMO_ACCOUNTS"):
+        _settings_for_seed(DEBUG=False)
+
+
+@pytest.mark.parametrize("value", [False, True])
+def test_seed_demo_accounts_explicit_accepted_in_production(value: bool) -> None:
+    """production 明示 false 或 true 皆通過——護欄要的是表態，不限定值。"""
+    s = _settings_for_seed(DEBUG=False, SEED_DEMO_ACCOUNTS=value)
+    assert s.SEED_DEMO_ACCOUNTS is value
+
+
+@pytest.mark.usefixtures("_no_seed_env")
+def test_seed_demo_accounts_defaults_true_in_debug() -> None:
+    """dev（DEBUG=true）維持免設定便利，預設種入示範帳號。"""
+    s = _settings_for_seed(DEBUG=True)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
 def test_trusted_proxy_count_upper_bound() -> None:
     """上限 8：明顯誤設（如把毫秒數填進來）於啟動即擋。"""
     with pytest.raises(ValueError):
@@ -252,6 +297,7 @@ def _prod_settings(**overrides) -> Settings:
         DEBUG=False,
         FRONTEND_BASE_URL="https://edms.example.com",
         TRUSTED_PROXY_COUNT=0,
+        SEED_DEMO_ACCOUNTS=False,
         DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
         ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
     )
@@ -282,6 +328,7 @@ def test_prod_default_storage_root_rejected() -> None:
         DEBUG=False,
         FRONTEND_BASE_URL="https://edms.example.com",
         TRUSTED_PROXY_COUNT=0,
+        SEED_DEMO_ACCOUNTS=False,
     )
     with pytest.raises(ValueError):
         Settings(**base)
