@@ -92,3 +92,23 @@ def test_storage_root_is_absolute(tmp_path, monkeypatch):
     """storage_root() 回正規化絕對路徑（相對設定值依 CWD 解析，見 #239）。"""
     _set_root(tmp_path, monkeypatch)
     assert os.path.isabs(storage_root())
+
+
+# ── 空設定值 fail-closed（#240 A4）───────────────────────────
+# `os.path.realpath("")` 回 CWD——空設定會讓圍籬範圍變成整個後端原始碼目錄；孤兒清理
+# （#775）以 `storage_root()` 為掃描根，空設定時更會把原始碼當成孤兒檔刪掉。
+
+
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_empty_storage_root_fail_closed(monkeypatch, empty):
+    """空 / 全空白之 ET_VIDEO_STORAGE_ROOT → storage_root() 拒絕，不得回 CWD。"""
+    monkeypatch.setattr(settings, "ET_VIDEO_STORAGE_ROOT", empty)
+    with pytest.raises(RuntimeError):
+        storage_root()
+
+
+def test_empty_storage_root_blocks_reads_into_cwd(monkeypatch):
+    """空設定下讀取 CWD 內真實存在之原始碼檔，不得通過圍籬。"""
+    monkeypatch.setattr(settings, "ET_VIDEO_STORAGE_ROOT", "")
+    with pytest.raises(RuntimeError):
+        resolve_within_root("pyproject.toml", not_found=_NF)

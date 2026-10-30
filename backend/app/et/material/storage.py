@@ -44,6 +44,9 @@ MAX_FILE_NAME_LEN = 200
 #: 放在系統暫存區再搬進來會退化成複製，500 MB 的檔案等於多讀寫一次。
 TMP_DIRNAME = ".tmp"
 
+#: 目錄名（`str(abs(material_id))`）之位數上限：`MATERIAL_ID` / `STAGE_ID` 皆為 BigInteger，最大 19 位。
+MAX_ID_DIGITS = 19
+
 _TOO_LARGE_OR_BAD_FORMAT = AppError(
     status_code=422,
     detail="影片格式或大小不符",
@@ -54,6 +57,13 @@ _NAME_TOO_LONG = AppError(
     status_code=422,
     detail=f"影片檔名過長（上限 {MAX_FILE_NAME_LEN} 字元），請縮短檔名後再上傳",
     error_code="ET_MATERIAL_006",
+)
+
+
+_BAD_STORAGE_PATH = AppError(
+    status_code=422,
+    detail="影片儲存位置不合法",
+    error_code="ET_MATERIAL_007",
 )
 
 
@@ -79,8 +89,16 @@ def ensure_file_name_acceptable(file_name: str) -> None:
 
 
 def storage_root() -> str:
-    """影片儲存根目錄之正規化絕對路徑（單一事實來源：`settings.ET_VIDEO_STORAGE_ROOT`）。"""
-    return os.path.realpath(settings.ET_VIDEO_STORAGE_ROOT)
+    """影片儲存根目錄之正規化絕對路徑（單一事實來源：`settings.ET_VIDEO_STORAGE_ROOT`）。
+
+    空設定值 fail-closed（#240 A4）：`os.path.realpath("")` 回 CWD，圍籬範圍會變成整個後端
+    原始碼目錄，孤兒清理（#775）更會把原始碼當成孤兒檔刪掉。production 由 config 護欄於啟動
+    即擋，dev（DEBUG=true）則靠此處。
+    """
+    value = settings.ET_VIDEO_STORAGE_ROOT
+    if not value or not value.strip():
+        raise RuntimeError("ET_VIDEO_STORAGE_ROOT 未設定，拒絕以工作目錄作為影片儲存根目錄")
+    return os.path.realpath(value)
 
 
 def _resolved_within_root(path: str) -> str | None:
@@ -121,6 +139,11 @@ def resolve_within_root(file_path: str, *, not_found: AppError) -> str:
     `except ValueError: return False`，能把它收斂成統一 404，但若直接 `open(resolved)`
     則會拋 `ValueError` 冒成 500。POSIX 端 `realpath` 本身就會拋、由此處 fail-closed
     接住，兩平台行為因而一致。此為 #233 security review INFO-6。
+
+    ⚠️ **只圈到 root，尚未驗檔案歸屬**（不同於 DM 之 `expect_prefix`，#240 A1）：暫存模式上傳的影片
+    目錄名是 `abs(暫存 material id)`，與正式 `MATERIAL_ID` 不同、且兩者共用同一個數字命名空間，以
+    目錄前綴判定歸屬會同時誤擋與誤放。目前歸屬由播放票（以 `video_id` 查 DB）承擔；待暫存區改用
+    獨立命名空間後再補。
     """
     resolved = _resolved_within_root(file_path)
     if resolved is None:
@@ -185,6 +208,26 @@ async def save_video_stream(upload, *, ext: str, max_size_bytes: int) -> tuple[s
     return tmp_path, written
 
 
+def _is_canonical_id(value: str) -> bool:
+    """value 是否為 BigInteger id 的正規字串形式（純 ASCII 數字、無前導零、至多 19 位），即 `str(abs(id))`。
+
+    位數上限不可省：超長數字字串在 `int()` 撞上位數上限拋 `ValueError`、在 `makedirs` 撞上檔名長度
+    上限拋 `OSError`，兩者都會冒成 500。比對亦不經 `int()` 轉換，同一理由。
+    """
+    return value.isascii() and value.isdigit() and len(value) <= MAX_ID_DIGITS and (value == "0" or value[0] != "0")
+
+
+def _is_staged_upload(root: str, path: str) -> bool:
+    """path 是否為 `{root}/.tmp/` 下的一般檔（非 symlink、非目錄）——`promote` 唯一合法的來源。"""
+    target = _entry_within(root, path) if isinstance(path, str) and os.path.isabs(path) else None
+    if target is None or os.path.dirname(target) != os.path.join(root, TMP_DIRNAME):
+        return False
+    try:
+        return stat.S_ISREG(os.lstat(target).st_mode)
+    except (OSError, ValueError):
+        return False
+
+
 def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
     r"""把暫存檔搬到正式路徑，回 `(絕對路徑, 相對於 root 之片段)`。
 
@@ -197,8 +240,8 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
     | 用途 | 要哪一個 | 拿錯的後果 |
     |------|---------|-----------|
     | 寫入 `ET_MATERIAL_VIDEO.FILE_PATH` | 相對片段 | 存絕對路徑 → 換 root / 清 worktree 即永久失聯 |
-    | 失敗時 `discard()` 回滾刪檔 | 絕對路徑 | 傳相對片段 → `os.remove` 依 CWD 解析而找不到，`discard`
-    | | | 吞掉 `OSError` 只留 warning，**靜默留下孤兒檔** |
+    | 失敗時 `discard()` 回滾刪檔 | 絕對路徑 | 傳相對片段 → `discard` 拒收（非絕對路徑，#240 A3），
+    | | | 只留 warning，**靜默留下孤兒檔** |
 
     不讓 `discard` 自行 join root 的理由：它同時被 `save_video_stream` 以 `.tmp/` 下的
     **暫存絕對路徑**呼叫，改成吃相對片段會讓它變成「有時絕對、有時相對」的雙語意函式。
@@ -218,11 +261,30 @@ def promote(tmp_path: str, *, video_id_hint: str, ext: str) -> tuple[str, str]:
     故先落檔再寫紀錄，把風險留給無害的那一邊。外層交易若在 router 回傳後才
     rollback（`get_db` 於此時 commit），結果就是一個孤兒檔案——不阻塞任何人，
     亦可日後以清理作業回收。
+
+    ## 寫入端圍籬（#240 A3）
+
+    - **來源**須是 `{root}/.tmp/` 下的一般檔（非 symlink）——即 `save_video_stream` 的產出。只圈到
+      root 不夠：root 內另一支被引用中的影片同樣在 root 內，搬走它即讓原教材失聯。
+    - **目的地**目錄名須為 `str(abs(material_id))` 的正規形式（純數字、無前導零）——`..` 即寫入端
+      穿越，空字串 / `.tmp` 則會落在 root 頂層或暫存區，`007` 會與 `7/` 分成兩個目錄。
+
+    攔截時暫存檔原地不動（由孤兒清理回收），不在此處刪——來源既已不可信，就不該拿它去 `os.remove`。
+
+    ⚠️ 已知限制：來源檢查與 `os.replace` 之間有 TOCTOU 空窗（期間 `.tmp/` 內的檔可被換成 symlink）。
+    `.tmp/` 為伺服器自建、外部無寫入途徑，在此威脅模型下接受；若日後 `.tmp/` 可被他方寫入須改以
+    fd 為基準搬移。
+
+    Raises:
+        AppError: 422 `ET_MATERIAL_007`——來源或目的地不合上述條件。
     """
     root = storage_root()
+    if not (_is_staged_upload(root, tmp_path) and _is_canonical_id(video_id_hint)):
+        logger.warning("ET 影片落盤圍籬攔截一筆非暫存區來源 / 不合法目錄名（不記路徑）")
+        raise _BAD_STORAGE_PATH
     final_dir = os.path.join(root, video_id_hint)
-    os.makedirs(final_dir, exist_ok=True)
     final_path = os.path.join(final_dir, f"{uuid.uuid4().hex}.{ext}")
+    os.makedirs(final_dir, exist_ok=True)
     os.replace(tmp_path, final_path)
     # 相對片段由實際落地的絕對路徑反推，而非另行組字串——避免「落地的」與「入 DB 的」
     # 是兩個各自組出來的東西，日後任一端重構即可能靜默產生落差
@@ -281,6 +343,25 @@ def path_key(root: str, path: str) -> str:
     return os.path.normcase(os.path.join(parent, os.path.basename(joined)))
 
 
+def _entry_within(real_root: str, path: str) -> str | None:
+    """刪除用圍籬：父目錄以 `realpath` 解析後仍落在 `real_root` 內 → 回目標路徑，否則 `None`。
+
+    ⚠️ **只解析父目錄、檔名原樣接回**——若解析檔名，一個指向他處的 symlink 會讓刪除落在它指向的
+    檔上（security review L1）。`.` / `..` / 空檔名不是檔案，一律回 `None`。
+    """
+    joined = os.path.join(real_root, path)
+    name = os.path.basename(joined)
+    if name in ("", ".", ".."):
+        return None
+    try:
+        parent = os.path.realpath(os.path.dirname(joined))
+        if os.path.commonpath([real_root, parent]) != real_root:
+            return None
+    except (ValueError, OSError):  # 內嵌 NUL（POSIX realpath 拋 ValueError）、Windows 跨磁碟
+        return None
+    return os.path.join(parent, name)
+
+
 def remove_stored_file(root: str, rel_path: str) -> bool:
     """刪除儲存根目錄下的一個一般檔案（#775 孤兒清理），回是否真的刪掉。
 
@@ -289,14 +370,8 @@ def remove_stored_file(root: str, rel_path: str) -> bool:
     會讓被引用的那支被刪掉（security review L1）。失敗（已不存在、權限）不拋錯：清理是盡力
     而為，一支刪不掉不該讓整批中止。
     """
-    real_root = os.path.realpath(root)
-    joined = os.path.join(real_root, rel_path)
-    parent = os.path.realpath(os.path.dirname(joined))
-    target = os.path.join(parent, os.path.basename(joined))
-    try:
-        if os.path.commonpath([real_root, parent]) != real_root:
-            return False
-    except ValueError:  # Windows 跨磁碟
+    target = _entry_within(os.path.realpath(root), rel_path)
+    if target is None:
         return False
     try:
         if not stat.S_ISREG(os.lstat(target).st_mode):
@@ -309,8 +384,25 @@ def remove_stored_file(root: str, rel_path: str) -> bool:
 
 
 def discard(path: str) -> None:
-    """刪除檔案，失敗不拋錯（清理路徑上的失敗不該蓋掉原本的錯誤）。"""
+    """刪除 storage root 內的一支檔（**絕對路徑**），失敗不拋錯（清理路徑上的失敗不該蓋掉原本的錯誤）。
+
+    ## 圍籬（#240 A3）
+
+    本函式原本「傳什麼就刪什麼」——目前呼叫端只傳伺服器自建路徑而安全，但日後任何人把 DB 值
+    餵進來就是任意刪檔漏洞。故對非絕對路徑、root 外路徑（含 `..` 繞道、父目錄 symlink 逃逸）
+    一律拒刪並記安全事件（**不記路徑**）。檔名本身是 symlink 時只刪連結、不碰其指向的檔。
+
+    只吃絕對路徑的理由見 `promote` docstring（避免「有時絕對、有時相對」的雙語意）。
+
+    ⚠️ **只圈到 root，不保護被引用中的檔**——root 內任何一支影片都刪得掉。目前呼叫端只傳
+    `save_video_stream` 的暫存檔與 `promote` 剛回傳的絕對路徑；**不可把 DB 之 `FILE_PATH`
+    換算後餵進來**，要刪被引用檔請走孤兒清理（`remove_stored_file`，有白名單比對）。
+    """
+    target = _entry_within(storage_root(), path) if isinstance(path, str) and os.path.isabs(path) else None
+    if target is None:
+        logger.warning("ET 影片刪除圍籬拒絕一筆非絕對或逃出 storage root 之路徑（不記路徑）")
+        return
     try:
-        os.remove(path)
-    except OSError:
+        os.remove(target)
+    except (OSError, ValueError):  # ValueError：檔名段內嵌 NUL
         logger.warning("ET 影片暫存檔清理失敗（不記路徑）")

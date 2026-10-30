@@ -8,16 +8,32 @@ worktree 一被清掉即永久失聯（#233 任務說明）。
 反之若存 `\` 則 POSIX 讀不到（`\` 在 POSIX 是合法檔名字元、不作分隔符）。
 """
 
+import json
+import logging
 import os
 
 import pytest
+from starlette.requests import Request
 
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.dm.document.file_paths import is_within_root, storage_root
 from app.dm.editor.storage import generate_file_id, save_upload
+from main import app_error_handler
 
 _DOC_ID = "DM-MANUAL-900010"
 _DATA = b"%PDF-1.4 fake"
+_REQUEST = Request(
+    {
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "server": ("test", 80),
+        "path": "/api/dm/documents",
+        "query_string": b"",
+        "headers": [],
+    }
+)
 
 
 @pytest.fixture
@@ -66,10 +82,49 @@ def test_illegal_extension_chars_dropped(root):
     assert rel == f"{_DOC_ID}/abc123"
 
 
-def test_path_traversal_doc_id_rejected(root):
-    """受污染之 doc_id 仍須擋下（寫入端圍籬，既有行為）。"""
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    ("doc_id", "file_id"),
+    [("../evil", "abc123"), (_DOC_ID, "../../evil")],
+)
+def test_path_traversal_rejected_with_app_error(root, tmp_path, doc_id, file_id):
+    """受污染之 doc_id / file_id 須擋下，且以 `AppError` + `error_code` 回報（#240 A2）。
+
+    原本拋裸 `ValueError`，會冒成 500——違反「錯誤一律 `AppError` 帶 `error_code`」。
+    """
+    with pytest.raises(AppError) as e:
+        save_upload(doc_id=doc_id, file_id=file_id, filename="a.pdf", data=_DATA)
+    assert e.value.status_code == 422 and e.value.error_code == "DM_FILE_004"
+    assert not (tmp_path.parent / "evil.pdf").exists() and not (tmp_path / "evil.pdf").exists()
+
+
+def test_doc_id_detouring_into_other_doc_rejected(root, tmp_path):
+    """`DM-A/../DM-B` 仍在 root 內，但會落進他份文件目錄——寫入端即擋（對齊讀取端 A1 歸屬圍籬）。"""
+    with pytest.raises(AppError) as e:
+        save_upload(doc_id=f"{_DOC_ID}/../DM-MANUAL-900999", file_id="abc123", filename="a.pdf", data=_DATA)
+    assert e.value.error_code == "DM_FILE_004"
+    assert not (tmp_path / "DM-MANUAL-900999").exists()
+
+
+def test_path_traversal_logged_without_path(root, caplog):
+    """攔截時記安全事件，但 log 不含落盤路徑或受污染片段（sti-backend-logging）。"""
+    with caplog.at_level(logging.WARNING), pytest.raises(AppError):
         save_upload(doc_id="../evil", file_id="abc123", filename="a.pdf", data=_DATA)
+    assert caplog.records, "穿越攔截須記安全事件"
+    assert "evil" not in caplog.text and root not in caplog.text
+
+
+async def test_path_traversal_maps_to_422_via_app_error_handler(root):
+    """攔截結果經全域 `app_error_handler` 轉為 422 標準錯誤格式，而非 500；回應不含路徑。
+
+    直接呼叫 handler 而非打路由：`doc_id` / `file_id` 皆由伺服器產生，無從經 HTTP 注入受污染值。
+    """
+    with pytest.raises(AppError) as e:
+        save_upload(doc_id="../evil", file_id="abc123", filename="a.pdf", data=_DATA)
+    resp = await app_error_handler(_REQUEST, e.value)
+    assert resp.status_code == 422
+    body = json.loads(resp.body)
+    assert body["error_code"] == "DM_FILE_004"
+    assert "evil" not in body["error_message"] and root not in body["error_message"]
 
 
 def test_relative_stays_valid_after_root_moves(root, tmp_path):
