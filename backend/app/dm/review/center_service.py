@@ -221,8 +221,9 @@ class ReviewCenterService:
         version = await self._repo.get_version(db, version_id)
         if version is None or not version.file_path:
             raise _NOT_FOUND
-        # storage-root 圍籬（#160）：待審版為最新上傳、最貼近受污染路徑之威脅面，串流前一律過圍籬防逃逸
-        safe_path = resolve_within_root(version.file_path, not_found=_NOT_FOUND)
+        # storage-root 圍籬（#160）：待審版為最新上傳、最貼近受污染路徑之威脅面，串流前一律過圍籬防逃逸；
+        # 白名單內的版本皆屬本送審之文件，故另驗檔案落在該 DOC_ID 目錄下（#240 A1）
+        safe_path = resolve_within_root(version.file_path, not_found=_NOT_FOUND, expect_prefix=review.doc_id)
         return ReviewFile(
             path=safe_path,
             mime=version.file_mime or "application/octet-stream",
@@ -245,7 +246,8 @@ class ReviewCenterService:
             raise AppError(status_code=403, detail="無權下載此廢止附件", error_code="DM_REVIEW_005")
         if not review.obsolete_file_path:
             raise _NOT_FOUND
-        safe_path = resolve_within_root(review.obsolete_file_path, not_found=_NOT_FOUND)
+        # 廢止附件落盤於該送審之 DOC_ID 目錄（obsolete/service 之 save_upload），歸屬以此判定（#240 A1）
+        safe_path = resolve_within_root(review.obsolete_file_path, not_found=_NOT_FOUND, expect_prefix=review.doc_id)
         return ReviewFile(
             path=safe_path,
             mime=review.obsolete_file_mime or "application/octet-stream",
