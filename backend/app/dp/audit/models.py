@@ -14,7 +14,8 @@ class DpAuditLog(AuditLogBaseModel):
     BEFORE_VALUE / AFTER_VALUE 以 TEXT 存 JSON 字串（非 JSONB，見 research §6）。
     不設 DB-level FK：CREATED_USER 可為 SYSTEM，且稽核紀錄採保留原則。
 
-    落地要求（部署 / ops 層，非本 migration）：應用 DB 帳號對本表僅 GRANT INSERT / SELECT。
+    DB 層防護（#22）：app 執行期角色僅 GRANT INSERT / SELECT（部署層，`scripts/db-app-role.sql`）；
+    trigger `TRG_DP_AUDIT_LOG_DENY_MODIFY` 拒絕 UPDATE / DELETE / TRUNCATE（migration 7ade05c26fd8）。
     """
 
     __tablename__ = "DP_AUDIT_LOG"
