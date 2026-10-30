@@ -175,11 +175,10 @@ class SlidingWindowRateLimiter:
 
     @property
     def _hits(self) -> dict[str, deque[float]]:
-        """內部桶。**測試用的清理點**（13 處 `_hits.clear()` / `.pop()` 分散於 6 個測試檔）。
+        """內部桶（代理至 `self._counter._hits`），供測試觀察。
 
-        抽出 `SlidingWindowCounter` 後儲存下移一層，本屬性代理回去，使既有清理點不必跟著搬——
-        它們清的是同一份 dict。少了這個代理，一次內部重構就要改 6 個無關檔案，
-        而下一次重構再改一輪。
+        測試間的狀態重置已統一由 `tests/_process_singletons.py` 直接清 `SlidingWindowCounter`（#654），
+        不經本屬性；原本分散於 6 個測試檔的 `_hits.clear()` / `.pop()` 已移除。
         """
         return self._counter._hits
 

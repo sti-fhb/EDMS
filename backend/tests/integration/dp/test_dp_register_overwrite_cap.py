@@ -40,16 +40,12 @@ _CAP = 2  # 測試用的小上限（正式預設 5）；每多一次就多一輪
 
 
 @pytest.fixture(autouse=True)
-async def _reset_and_shrink_cap(db):
-    """清掉單例狀態，並把每日上限調小以免每條測試都要跑 5 輪。
+async def _shrink_cap(db):
+    """把每日上限調小以免每條測試都要跑 5 輪。
 
-    ⚠️ **不清 `_overwrite_counter`** 以外的那一句是重點：本 fixture 之所以逐測試清它，
-    是為了隔離測試間污染；而**單一測試之內**它必須跨冷卻重置存活，見本檔 docstring。
+    單例狀態（含 `_overwrite_counter`）的測試間隔離由 integration conftest 統一處理（#654）；
+    **單一測試之內** `_overwrite_counter` 必須跨冷卻重置存活，見本檔 docstring。
     """
-    auth_router._verify_send_cooldown._last.clear()
-    auth_router._register_limiter._hits.clear()
-    auth_router._resend_limiter._hits.clear()
-    auth_router._overwrite_counter._hits.clear()
     await db.execute(
         update(DpParamDetail)
         .where(DpParamDetail.param_id == "LOGIN", DpParamDetail.param_key == "REGISTER_OVERWRITE_MAX_PER_DAY")

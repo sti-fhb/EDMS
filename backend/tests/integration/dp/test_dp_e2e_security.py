@@ -19,7 +19,6 @@ from app.core.utils import utcnow
 from app.dp.notify.schemas import SendResult
 from app.dp.user.forgot_service import ForgotPasswordService
 from app.dp.user.models import DpPendingRegistration
-from app.dp.user.router import _login_limiter
 from app.dp.user.service import AuthService
 from app.dp.user.token import generate_reset_token, hash_token
 from app.dp.users.models import DpUser
@@ -36,14 +35,6 @@ class _NotifyStub:
     async def send_email(self, db, *, recipients, template_code, module, params, caller_module):
         self.calls.append({"recipients": recipients})
         return SendResult(queued_count=len(recipients), skipped_reason=None)
-
-
-@pytest.fixture
-def reset_login_limiter():
-    """清空登入限流器行程內狀態，隔離其他測試對同 IP 桶的污染。"""
-    _login_limiter._hits.clear()
-    yield
-    _login_limiter._hits.clear()
 
 
 async def _make_user(db, *, user_id, email, status="ACTIVE"):
@@ -81,7 +72,7 @@ async def _seed_pending(db, *, email):
     await db.flush()
 
 
-async def test_login_rate_limited_after_threshold(client, reset_login_limiter):
+async def test_login_rate_limited_after_threshold(client):
     """同 IP 連續登入逾門檻（10/分）→ 第 11 次 429（限流器已接到 /api/login）。"""
     body = {"email": "nobody@edms.local", "password": "whatever1"}
     # 前 10 次：非 429（帳號不存在 → 401），不觸發限流

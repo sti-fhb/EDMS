@@ -180,6 +180,31 @@ def app_imported():
 
 
 @pytest.fixture(scope="session")
+def process_singletons(app_imported):
+    """`import main` 後行程內所有限流器 / 冷卻器 / 計數器（#654）。
+
+    相依 `app_imported`：router 的模組層單例要等 `import main` 才存在。每個 session 只掃一次 gc
+    （約 50ms）；收集範圍與「為何用反射」見 `tests/_process_singletons.py`。
+    """
+    from tests._process_singletons import collect
+
+    return collect()
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_singletons(process_singletons):
+    """每條測試開始前清空所有單例狀態，「清哪些」只在此一處定義（#654）。
+
+    這些單例是行程內記憶體，**不在** `db` fixture 的 savepoint + rollback 射程內。
+    測試檔不需要、也不應再自寫 reset fixture；單一測試之內若需要部分清除（如模擬冷卻過後），
+    在測試本體內處理。
+    """
+    from tests._process_singletons import reset
+
+    reset(process_singletons)
+
+
+@pytest.fixture(scope="session")
 async def test_engine(apply_migrations):
     """Session 級別測試 engine（NullPool，不維持連線池）。
 

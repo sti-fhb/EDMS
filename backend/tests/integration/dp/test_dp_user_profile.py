@@ -181,18 +181,14 @@ async def test_change_password_endpoint_rate_limited(client, db):
 
     await _make_user(db, user_id="rl", email="rl@edms.local")  # operator 依賴先於限流解析，需存在 user
     key = "pwd-change:ip:127.0.0.1"  # ASGITransport 測試恆為 127.0.0.1（見 rate_limit_by_ip）
-    _pwd_change_limiter._hits.pop(key, None)
-    try:
-        for _ in range(_pwd_change_limiter._max):
-            _pwd_change_limiter.hit(key)
-        r = await client.put(
-            "/api/dp/user/me/password",
-            json={"old_password": _GOOD_PWD, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
-            headers=_bearer("rl"),
-        )
-        assert r.status_code == 429
-    finally:
-        _pwd_change_limiter._hits.pop(key, None)
+    for _ in range(_pwd_change_limiter._max):
+        _pwd_change_limiter.hit(key)
+    r = await client.put(
+        "/api/dp/user/me/password",
+        json={"old_password": _GOOD_PWD, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+        headers=_bearer("rl"),
+    )
+    assert r.status_code == 429
 
 
 # --- GET /me（含 pending_email） ---
@@ -317,18 +313,11 @@ async def test_verify_email_change_endpoint(client, db):
 
 async def test_email_change_cooldown(client, db):
     """寄驗證信有冷卻（#74）：成功寄一次後，冷卻內再寄 → 429（防狂發）。"""
-    from app.dp.user.router import _email_change_cooldown
-
     await _make_user(db, user_id="cd", email="cd@edms.local")
-    key = "email-change-send:acct:cd"
-    _email_change_cooldown._last.pop(key, None)
-    try:
-        r1 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new@edms.local"}, headers=_bearer("cd"))
-        assert r1.status_code == 202
-        r2 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new2@edms.local"}, headers=_bearer("cd"))
-        assert r2.status_code == 429
-    finally:
-        _email_change_cooldown._last.pop(key, None)
+    r1 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new@edms.local"}, headers=_bearer("cd"))
+    assert r1.status_code == 202
+    r2 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new2@edms.local"}, headers=_bearer("cd"))
+    assert r2.status_code == 429
 
 
 # --- 公開密碼政策（併 #77） ---
