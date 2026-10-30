@@ -2,7 +2,7 @@
 # ============================================================
 # EDMS VM 側部署腳本（pull-based）
 #
-# 安裝於 bms-prod-02，由 edms-deploy.timer 定期執行。
+# 安裝於 <PROD_VM>，由 edms-deploy.timer 定期執行。
 #
 # 為何是 pull-based 而非由 GitHub 推：本 repo 為 public，若讓其 workflow 取得
 # 這台機器的存取權，等於讓 public repo 的 CD 身分握有 root 等級權限（部署必需的
