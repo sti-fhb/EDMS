@@ -168,13 +168,15 @@ sudo systemctl enable --now edms-deploy.timer
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
 DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
-TRUSTED_PROXY_COUNT=3
+TRUSTED_PROXY_COUNT=2
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
 DM_FILE_STORAGE_ROOT=/app/var/dm_files
 ET_VIDEO_STORAGE_ROOT=/app/var/et_videos
 EDMS_BACKUP_BUCKET=gs://...
 ```
+
+`TRUSTED_PROXY_COUNT=2` 的來由：front-proxy 以單一值覆寫 `X-Forwarded-For`、edms-nginx 再追加一段，抵達後端固定為 2 段（判定規則見 [deployment-client-ip.md](../ref/deployment-client-ip.md)）。front-proxy 改動 XFF 處理方式時，本值須同步調整，且須先改本值、再上線 front-proxy 的變更——段數少於本值時後端退回連線對端，全站會被算成同一個來源。
 
 完整欄位以 [`.env.example`](../../.env.example) 為準。production（`DEBUG=false`）另有數項會在啟動時擋下的護欄：`FRONTEND_BASE_URL` 不得指向 localhost、`TRUSTED_PROXY_COUNT` 必須明示、兩個儲存根目錄必須為絕對路徑。
 
