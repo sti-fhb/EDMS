@@ -58,10 +58,11 @@ flowchart TD
 
 `vm-deploy.sh` 每 5 分鐘：
 
-1. `git fetch origin main`，取最新 commit short SHA
-2. **確認 AR 已有對應的 `:<sha>` 映像**——沒有代表 CI 還在跑或已失敗，本輪跳過。這一步保證「只部署有對應映像的 commit」，不會拉到與程式碼不一致的半成品
-3. 與 `/opt/edms/deployed.sha` 比對，相同即結束（不寫 log）
-4. checkout 該 commit → pull → 起 DB → **備份** → migration → `up -d` → 內部 health check → 記錄已部署 SHA
+1. `git fetch origin main`，與 `/opt/edms/deployed.sha` 比對，相同即結束（不寫 log）
+2. **在「已部署 → origin/main」之間，由新到舊找第一個 AR 已有 `:<sha>` 映像（backend 與 nginx 皆有）的 commit**——都沒有代表 CI 還在跑或已失敗，本輪跳過；「等待中」對同一個 origin/main 只記一次 log（以 `/opt/edms/pending.sha` 去重）。這一步保證「只部署有對應映像的 commit」，不會拉到與程式碼不一致的半成品
+3. checkout 該 commit → pull → 起 DB → **備份** → migration → `up -d` → 內部 health check → 記錄已部署 SHA
+
+為何要往回找而非只看 origin/main：`cd.yml` 的 `paths-ignore` 會跳過只動 `docs/`、`*.md`、`.claude/`、`.github/` 的 push，這類 commit **永遠不會有映像**。若只看 origin/main，HEAD 落在這類 commit（例如 Dependabot 升級 workflow）時 VM 會一直「本輪跳過」，直到下一個改到程式碼的 commit 推上來。往回找到的 commit 與 HEAD 的差異只在被忽略的檔案，部署它即是部署最新程式碼。已部署 SHA 不在 origin/main 歷史上（首次部署、force-push）時，最多往回找 20 個 commit。
 
 任一步失敗即中止並保留現狀，下一輪重試。
 
