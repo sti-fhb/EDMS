@@ -23,6 +23,8 @@ savepoint + rollback 只隔離**資料**，管不到它們。漏清的症狀不�
   `UploadAuthPrecheckMiddleware._in_flight` 於請求結束即遞減歸零，不跨請求累積
 - 只持有**標量**狀態（`int` / `float`）的型別、`__slots__` 型別
 - 模組層的**裸容器**（如 `_inflight: set = set()`），它不是 app 類別的實例
+- 放在**類別層**的可變狀態（`ClassVar` / 類別屬性 dict）：護欄只看實例的 `vars(obj)`
+- 定義在 **`app.` 以外模組**的型別（如 `main.py`）：護欄以 `__module__.startswith("app.")` 過濾
 
 日後若以上述形狀實作限流 / 計數，須自行加入 `RESETTERS`（或改為既有型別），護欄不會提醒。
 """
