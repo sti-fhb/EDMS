@@ -21,7 +21,7 @@
 # 詳見 TBMS repo 的 docs/infra/edms-coexistence-plan.md §1.4 與 edge/README.md §1。
 #
 # ── 資源上限（#810 第 4 項）─────────────────────────────────────────────
-# EDMS 與 TBMS（血庫系統）共用 bms-prod-02（4 vCPU / 16 GB）。不設上限的話，EDMS 一次失控
+# EDMS 與 TBMS（血庫系統）共用 <PROD_VM>（4 vCPU / 16 GB）。不設上限的話，EDMS 一次失控
 # （記憶體暴增、查詢塞爆）就能把 TBMS 擠掉；後端只有 1 個 worker，被系統 OOM 砍掉時若挑中的是
 # DB，影響更大。數值照 TBMS repo docs/infra/edms-coexistence-plan.md §6.3 的建議配置。
 #
