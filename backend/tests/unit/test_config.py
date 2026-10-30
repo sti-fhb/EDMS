@@ -268,6 +268,13 @@ def test_seed_demo_accounts_explicit_accepted_in_production(value: bool) -> None
     assert s.SEED_DEMO_ACCOUNTS is value
 
 
+def test_seed_demo_accounts_from_env_counts_as_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """部署以環境變數 / env_file 注入（非 kwargs），該來源同樣算明示設定。"""
+    monkeypatch.setenv("SEED_DEMO_ACCOUNTS", "false")
+    s = _settings_for_seed(DEBUG=False)
+    assert s.SEED_DEMO_ACCOUNTS is False
+
+
 @pytest.mark.usefixtures("_no_seed_env")
 def test_seed_demo_accounts_defaults_true_in_debug() -> None:
     """dev（DEBUG=true）維持免設定便利，預設種入示範帳號。"""

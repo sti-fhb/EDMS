@@ -223,8 +223,10 @@ class TestProductionStartupGuards:
             # MAIL_STARTTLS=false 已非護欄（#585 撤銷強制 TLS），見 TestMailTransportSecurity
         ],
     )
-    def test_單項設錯即拒絕啟動(self, field: str, bad_value, why: str) -> None:
+    def test_單項設錯即拒絕啟動(self, field: str, bad_value, why: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """其餘欄位全部合法，只壞一項——證明擋下來的確實是這一項。"""
+        # 「未設定」案例須連環境變數一併排除：`_env_file=None` 只隔離 .env 檔，不隔離 os.environ
+        monkeypatch.delenv(field, raising=False)
         settings = self._base()
         if bad_value is None:
             settings.pop(field)
