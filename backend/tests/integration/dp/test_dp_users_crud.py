@@ -310,6 +310,21 @@ async def test_list_invites_only_admin_invite(db):
     assert "self@edms.local" not in emails
 
 
+async def test_list_invites_keyword_treats_underscore_literally(db):
+    """#275：邀請清單關鍵字含 `_` 時視為字面；對照組姓名 / Email 皆只差 `_` 一字。"""
+    svc = _svc()
+    await svc.create_user(
+        db, data=UserCreate(email="admin_01_t275@edms.local", user_name="admin_01_t275"), operator=_OP
+    )
+    await svc.create_user(
+        db, data=UserCreate(email="adminX01_t275@edms.local", user_name="adminX01_t275"), operator=_OP
+    )
+
+    res = await svc.list_invites(db, keyword="admin_01_t275", page=1, limit=20)
+
+    assert [r.email for r in res["data"]] == ["admin_01_t275@edms.local"]
+
+
 async def test_resend_invite_rotates_token_keeps_invite_id_and_resends(db):
     notify = _FakeNotify()
     svc = _svc(notify)
@@ -364,6 +379,16 @@ async def test_list_filters_by_keyword_and_status(db):
     assert {u.user_id for u in locked["data"]} == {"c1"}
     active = await svc.list_users(db, keyword=None, status="active", page=1, limit=20)
     assert {u.user_id for u in active["data"]} == {"a1"}
+
+
+async def test_list_users_keyword_treats_underscore_literally(db):
+    """#275：使用者清單關鍵字含 `_` 時視為字面；對照組姓名 / Email 皆只差 `_` 一字。"""
+    await _make_user(db, "u_t275a", email="admin_01_t275@edms.local", name="admin_01_t275")
+    await _make_user(db, "u_t275b", email="adminX01_t275@edms.local", name="adminX01_t275")
+
+    res = await _svc().list_users(db, keyword="admin_01_t275", status=None, page=1, limit=20)
+
+    assert [u.user_id for u in res["data"]] == ["u_t275a"]
 
 
 # ---- 停用 / 啟用（AC3/4/7）----
