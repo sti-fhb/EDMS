@@ -44,6 +44,9 @@ MAX_FILE_NAME_LEN = 200
 #: 放在系統暫存區再搬進來會退化成複製，500 MB 的檔案等於多讀寫一次。
 TMP_DIRNAME = ".tmp"
 
+#: 目錄名（`str(abs(material_id))`）之位數上限：`MATERIAL_ID` / `STAGE_ID` 皆為 BigInteger，最大 19 位。
+MAX_ID_DIGITS = 19
+
 _TOO_LARGE_OR_BAD_FORMAT = AppError(
     status_code=422,
     detail="影片格式或大小不符",
@@ -206,8 +209,12 @@ async def save_video_stream(upload, *, ext: str, max_size_bytes: int) -> tuple[s
 
 
 def _is_canonical_id(value: str) -> bool:
-    """value 是否為非負整數的正規字串形式（純 ASCII 數字、無前導零），即 `str(abs(id))` 的輸出。"""
-    return value.isascii() and value.isdigit() and value == str(int(value))
+    """value 是否為 BigInteger id 的正規字串形式（純 ASCII 數字、無前導零、至多 19 位），即 `str(abs(id))`。
+
+    位數上限不可省：超長數字字串在 `int()` 撞上位數上限拋 `ValueError`、在 `makedirs` 撞上檔名長度
+    上限拋 `OSError`，兩者都會冒成 500。比對亦不經 `int()` 轉換，同一理由。
+    """
+    return value.isascii() and value.isdigit() and len(value) <= MAX_ID_DIGITS and (value == "0" or value[0] != "0")
 
 
 def _is_staged_upload(root: str, path: str) -> bool:

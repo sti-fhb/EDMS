@@ -148,6 +148,28 @@ def test_promote_rejects_non_numeric_hint(root, hint):
     assert os.path.isfile(staged)
 
 
+def test_promote_rejects_oversized_numeric_hint_without_500(root):
+    """超長純數字目錄名須回 `ET_MATERIAL_007`，不可讓 `int()` 位數上限或 OS 檔名長度上限冒成 500。"""
+    staged = _make_tmp_video(root)
+    with pytest.raises(AppError) as e:
+        storage.promote(staged, video_id_hint="1" * 5000, ext="mp4")
+    assert e.value.error_code == "ET_MATERIAL_007"
+    assert os.path.isfile(staged)
+
+
+def test_promote_accepts_max_bigint_hint(root):
+    """BigInteger 上限（19 位）仍須放行——位數上限不可誤擋合法 id。"""
+    hint = str(2**63 - 1)
+    _, rel = storage.promote(_make_tmp_video(root), video_id_hint=hint, ext="mp4")
+    assert rel.startswith(f"{hint}/")
+
+
+def test_promote_accepts_zero_hint(root):
+    """`0` 是 `str(abs(0))` 之正規形式，不可被「無前導零」規則誤擋。"""
+    abs_path, rel = storage.promote(_make_tmp_video(root), video_id_hint="0", ext="mp4")
+    assert rel.startswith("0/") and os.path.isfile(abs_path)
+
+
 def test_promote_rejects_source_in_root_but_not_staging(root):
     """root 內、但不在 `.tmp/` 的檔（如另一份教材被引用中的影片）不得被搬走——否則原教材失聯。"""
     referenced = os.path.join(root, "7", "ref.mp4")
