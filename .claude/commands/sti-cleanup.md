@@ -55,6 +55,25 @@ gh pr list --state merged --search "#{編號}" --json number,title,state,mergedA
     1. 仍要繼續清理
     2. 取消
   ```
+  - 選 `1` → 先做下方「未合併分支的 dev DB 檢查」，通過才進步驟 3
+
+#### 未合併分支的 dev DB 檢查（worktree / branch 模式皆適用）
+
+**為什麼**：dev DB 跨 worktree 共用（#239 SA 裁示）。分支若曾把 dev DB 推到自己的 revision（`/sti-implement` 守則 2）卻沒合併，worktree／分支一刪，那些 revision 的 versions 檔就從所有人手上消失，dev DB 永遠停在一個沒人認得的 revision——所有 session 對 dev DB 跑 alembic 都會 `Can't locate revision`。ET #204 曾因此鎖住其餘三個 session 約 2 小時，那次是靠 PR 合併才解開；**不合併的分支沒有這個出口**。
+
+1. 在本分支的工作目錄（worktree 模式為 `{WORKTREE_PATH}`，branch 模式為主 repo 切到該分支）執行 `/sti-implement`「共用 dev 環境守則」守則 1 的檢查
+2. 判定：
+   - 沒有任何一列「屬於本分支」→ 檢查通過，進步驟 3
+   - 有「屬於本分支」的列 → **停下來問使用者，不自行降版**：
+     ```
+     dev DB 停在本分支（未合併）的 revision {REV}。刪掉分支後就沒人能降版，所有 session 會被鎖住。
+       1. 降版：先 pg_dump 備份 dev DB、通知其他在線 session，再 alembic downgrade 到 {TARGET}
+       2. 停止清理，由使用者處理
+     ```
+     - `{TARGET}` = 本分支第一支 migration 的 `down_revision`，且必須是 `origin/main` 已含的 revision（以守則 1 的 `git grep` 確認）；算不出來或不在 main 上 → 只能選 2
+     - 降版會在共用 DB 上 DROP 欄位／表，其他 session 的手測資料可能一併消失，所以要先備份、先通知（通知方式同守則 2）
+     - ⚠️ 降版可能失敗（部分 migration 不可逆，見守則 2）→ **停止清理、回報使用者，不得繼續移除 worktree／分支**
+     - 若有其他分支的 revision 疊在本分支之上（守則 1 同時出現「屬於其他分支」）→ 降版會連對方一起降，只能選 2
 
 ---
 
@@ -90,11 +109,40 @@ git worktree list --porcelain
 
 ---
 
+### 步驟 3.5：檢查 worktree 內的上傳檔案（僅 worktree 模式）
+
+⚠️ **僅在 Worktree 模式執行；Branch 模式跳過本步驟。** 放在步驟 4（DROP test DB）之前，是為了讓使用者選「停止」時還沒有任何不可逆的動作。
+
+**為什麼**：`var/` 在 `.gitignore` 裡，`git worktree remove`（步驟 5）不會因它擋下、會直接連同刪除。落盤根沒設成共用絕對路徑時（`/sti-implement` 守則 3），手測上傳的檔案就落在 worktree 底下——DM 曾因此 46 個版本死掉 36 個、ET 12 支影片（含 4 支各 329MB）一天內全滅，全是在移除 worktree 時消失的。
+
+後端從哪個目錄啟動，相對路徑就落在哪裡（`backend/var/`、或從 worktree 根啟動時的 `var/`），所以整個 worktree 都要掃：
+
+```bash
+find "{WORKTREE_PATH}" \( -name node_modules -o -name .git -o -name .venv \) -prune -o \
+  -type f \( -path '*/var/dm_files/*' -o -path '*/var/et_videos/*' \) -print | head -5
+```
+
+- 無輸出 → 繼續步驟 4
+- 有檔案 → 詢問使用者：
+  ```
+  worktree 內有上傳檔案，移除 worktree 會一併刪除，dev DB 中對應的檔案記錄將失聯。
+    1. 先搬到共用落盤根，再繼續清理
+    2. 確認不需要，繼續清理
+    3. 停止
+  ```
+  - 搬移對應：`.../var/dm_files/` → 主 repo `backend/.env` 的 `DM_FILE_STORAGE_ROOT`、`.../var/et_videos/` → `ET_VIDEO_STORAGE_ROOT`，保留其下子目錄結構。主 repo 若也沒設絕對路徑，先依 `/sti-implement` 步驟 2.5b-2 設好再搬
+  - **不得覆蓋共用根已有的同名檔**：用 `rsync -a --ignore-existing --remove-source-files {舊}/ {新}/`，搬完舊目錄仍有剩的就是撞名，列給使用者決定
+  - DB 存相對於落盤根的路徑（#233），搬完即可讀到
+
+---
+
 ### 步驟 4：DROP 隔離 Test DB（僅 worktree 模式）
 
 ⚠️ **僅在 Worktree 模式執行；Branch 模式跳過本步驟。**
 
 `/sti-implement` 步驟 2.5 為 worktree 配發了獨立 test DB（`test_edms_{DB_SLUG}`），本步驟對應地清掉。
+
+> ⚠️ **只清 test DB，dev DB（`edms`）絕對不動**：dev DB 刻意跨 worktree 共用（#239 SA 裁示，見 `/sti-implement`「共用 dev 環境守則」），其他 session 正在用。未合併分支的 dev DB 處理見步驟 2。
 
 #### 4a 推導 DB 名稱
 

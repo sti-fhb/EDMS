@@ -32,6 +32,113 @@
 - **Worktree 路徑規則**（worktree 模式）：`../worktrees/{slug}`，slug = 分支名稱中 `/` 替換為 `-`
 - **WORKTREE 絕對路徑**（worktree 模式）：步驟 2 由 `pwd` 輸出，Claude 必須記住此值並在後續所有步驟以實際路徑替換 `{WORKTREE}`，不可使用變數
 
+## 共用 dev 環境守則（多 session 平行開發）
+
+步驟 2.5 **只**隔離 test DB。**dev DB（`edms`）與兩個檔案落盤根刻意跨 worktree 共用**——SA 於 2026-10-29 裁示（#239）：per-worktree dev DB 會讓跨模組手測（DP 建帳號 → DM 用該帳號送簽）做不到，而手動 UI 測試是唯一涵蓋「真瀏覽器 + 真後端 + 真 DB」交集的一層（前端測試走 MSW、integration 測試走隔離 test DB，都碰不到這個交集），不值得為了消除工具層互撞而拆掉它。
+
+代價是下列三條守則落在人身上。**每一條都對應一次真實事故**——理由寫在旁邊，是因為沒有理由的檢查會被當成可跳過的例行公事，而止血的唯一失效模式正是「有人覺得這次可以跳過」。
+
+| # | 守則 | 時機 | 為什麼（實際發生的事故與損害） |
+|---|------|------|------------------------------|
+| 1 | 先確認 dev DB 的 `alembic_version` 屬於**哪條分支** | 手測前、對 dev DB 跑 `alembic upgrade` / `alembic revision --autogenerate`（`backend/alembic/env.py` 連的是 `.env` 的 dev DB）前 | 平行分支會把版本表推到你 versions 目錄裡沒有的 revision。DM #222 因此 `Can't locate revision`、被迫手動 DDL；DP PR #235 merge main 後 `upgrade` 撞上別人「已套用未入帳」的 DDL 炸 `DuplicateColumnError`，誤判成自己的 migration 有問題、白花時間。**這些錯誤訊息沒有一個會指向共用 dev DB**，不先查只能瞎猜 |
+| 2 | 要把 dev DB 推到 `origin/main` **尚未包含**的 revision 之前，**先問使用者、並通知其他在線 session** | 自己分支有新 migration、要手測時；`/sti-alembic-check` 建完 merge revision 要 `upgrade head` 驗證時 | ET #204 把共用 dev DB 推到分支 head（含補的 merge revision `1a85b7fe2cff`）後，**其餘三個 session 的 alembic 全數 `Can't locate revision`，被鎖約 2 小時**，直到 PR #237 合併才自動解除 |
+| 3 | `backend/.env` 的 `DM_FILE_STORAGE_ROOT` / `ET_VIDEO_STORAGE_ROOT` 必須是 **repo 外的固定絕對路徑**，主 repo 與所有 worktree 指向同一處 | 步驟 2.5b 複製 `.env` 之後（檢查見 2.5b-2） | 預設值 `./var/...` 依「啟動後端時的工作目錄」解析 → 從 worktree 啟動，檔案就落在 worktree 底下，`/sti-cleanup` 移除 worktree 時一併刪掉。**DM 46 個版本死掉 36 個（橫跨 5 個已刪 worktree）、ET 12 支影片（含 4 支各 329MB）一天內全滅**——四種表徵裡唯一造成永久資料損失的一項 |
+
+### 守則 1：查 dev DB 版本表屬於哪條分支
+
+⚠️ **不要用 `alembic current` 查**：版本表若停在別人分支的 revision，它會直接 `Can't locate revision`，什麼都看不到。改用 psql 直接讀版本表，再拿 revision 回 git 比對：
+
+```bash
+cd {WORKTREE}/backend || exit 1
+# 從 backend/.env 的 DATABASE_URL 解析 dev DB 連線資訊（與步驟 2.5d 同法，多取 DB 名）。
+# 先收進變數再 eval：python 失敗時 exit code 不會被 `eval "$(...)"` 吞掉，不會帶著空的連線資訊往下查錯庫
+OUT=$(python3 -I - .env <<'PYEOF'
+import re, shlex, sys
+from urllib.parse import unquote, urlparse
+url = None
+with open(sys.argv[1]) as f:
+    for line in f:
+        m = re.match(r'^\s*DATABASE_URL=(.*)$', line.rstrip('\n'))
+        if m:
+            url = m.group(1).strip().strip('"').strip("'")
+            break
+if not url: sys.exit('❌ backend/.env 找不到 DATABASE_URL')
+p = urlparse(url)
+try:
+    port = p.port or 5432
+except ValueError:
+    sys.exit('❌ DATABASE_URL 格式無法解析（密碼含 # / ? 等字元須 percent-encode）')  # 不帶值，免洩漏密碼片段
+print(f'DB_USER={shlex.quote(unquote(p.username or ""))}')
+print(f'DB_PASS={shlex.quote(unquote(p.password or ""))}')
+print(f'DB_HOST={shlex.quote(p.hostname or "localhost")}')
+print(f'DB_PORT={port}')
+print(f'DB_NAME={shlex.quote(p.path.lstrip("/"))}')
+PYEOF
+) || exit 1
+eval "$OUT"
+if ! REVS=$(PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+    "SELECT version_num FROM alembic_version"); then
+  echo "❌ 查不到 dev DB 版本表（連線失敗，或 $DB_NAME 從未跑過 migration），先確認 backend/.env 的 DATABASE_URL"
+  exit 1
+fi
+[ -z "$REVS" ] && { echo "ℹ️ dev DB 尚無 alembic_version（從未 upgrade 過），無分支歸屬可言"; exit 0; }
+git fetch origin main -q || echo "⚠️ fetch origin main 失敗，以下判定依據的 origin/main 可能過期"
+
+# 版本表在多 head 時有多列，必須逐列判定：整批丟給 grep，換行會被當成「或」，一列屬 main 就把別人的 head 吃掉
+FOREIGN=0
+while IFS= read -r REV; do
+  # REV 來自 DB、會被帶進 git grep：先擋白名單，否則以 - 開頭的值會被當成選項（-O<cmd> 可執行任意指令）
+  if ! [[ "$REV" =~ ^[A-Za-z0-9_]{1,32}$ ]]; then
+    echo "❌ alembic_version 含非預期值：$(printf %q "$REV")，停止判定"; exit 1
+  fi
+  if git grep -qFw -e "$REV" origin/main -- alembic/versions; then
+    echo "✅ $REV 屬於 origin/main"
+  elif grep -rqFw --include='*.py' -e "$REV" -- alembic/versions; then
+    echo "✅ $REV 屬於本分支（origin/main 尚未包含）"
+  else
+    FOREIGN=1
+    echo "⚠️ $REV 屬於其他分支，候選 commit："
+    git log --all --oneline -S"$REV" -- alembic/versions | head -3
+  fi
+done <<< "$REVS"
+if [ "$FOREIGN" = 1 ]; then echo "⚠️ dev DB 停在其他分支的 revision，見下表處置"; fi
+```
+
+| 結果 | 意義 | 動作 |
+|------|------|------|
+| 全部屬於 origin/main | 正常；自己分支若落後就先 merge main | 可照常 `upgrade`（推到 main 已含的 revision 不需通知，其他 session merge main 即可跟上） |
+| 含屬於本分支者 | 自己先前推上去的 | 照常；記得 PR 合併前其他 session 都被擋著（見守則 2） |
+| ⚠️ 任一列屬於其他分支 | 另一個 session 把 dev DB 推到它的分支 head | **不要 `upgrade`、不要 autogenerate、不要手動 DDL**（手動 DDL 正是表徵 2「已套用未入帳」的來源）。以 `git branch -a --contains {commit}` 找出分支，回報使用者，等該分支合併或由使用者協調對方 |
+
+### 守則 2：推 dev DB 到未合併 revision 之前
+
+自己分支含 `origin/main` 沒有的 migration、又必須手測時，**先停下來問使用者**：
+
+```
+dev DB 目前在 {REV}，要推到本分支 head {NEW_REV}（origin/main 尚未包含）。
+推上去之後，其他 worktree 對 dev DB 跑 alembic 會 Can't locate revision，直到本 PR 合併。
+  1. 推上去，並通知其他在線 session
+  2. 不推，改以 integration test 驗證／等合併後再手測
+```
+
+- 選 `1` → 通知其他在線 session：要推到哪個 revision、屬哪支 PR、預計何時解除、以及**什麼不受影響**（見下節，免得對方誤以為要停工）
+  - 有 `ListAgents` / `SendMessage` 工具 → 列出在線 session 逐一發送
+  - 工具不可用、或無法確認對方收得到 → 把上述通知內容交給使用者轉告，**等使用者回覆「已通知」才執行 `upgrade`**
+  - ⛔ 通知這一步沒完成就不推。「這次應該沒人在用」正是本守則要擋的那個判斷
+- ⚠️ **「先推上去、需要時再降版」不是可靠退路**：例如「唯一約束改部分唯一索引」這型 migration，一旦手測產生了「已刪除列與現存列共用同一組合」的資料，就再也反轉不回全表唯一約束，只能等合併
+- PR 若最後**不合併**（關閉或放棄），清理前要處理 dev DB 停在本分支 revision 的情況——worktree／分支一刪，versions 檔跟著消失，就沒人能降版了（見 `/sti-cleanup` 步驟 2）
+
+### dev DB 被鎖住時，什麼**不受影響**
+
+⚠️ 2026-08-28 曾有 session 誤判這點，告訴使用者「要等解鎖才能開工」。實際上被擋的只有連 dev DB 的動作：
+
+| ✅ 不受影響（照常進行） | ⛔ 被擋 |
+|------------------------|--------|
+| 隔離 test DB 與 integration 測試（走 `.env.test` 的 `test_edms_{slug}`） | 手動 UI 測試（後端連的是 dev DB） |
+| `alembic heads`（只讀 versions 目錄、不連 DB） | 對 dev DB 跑 `alembic upgrade` / `alembic current` |
+| unit 測試、lint、type-check、`pnpm ci:local` | `alembic revision --autogenerate`（比對對象是 dev DB）——要先寫 migration 就手寫，或等解鎖後再產生 |
+| 開新一批（`/sti-implement` 開新 worktree、寫程式） | |
+
 ## Issue 格式引用
 
 若流程中需要建立 Issue（如補建遺漏的 Issue），必須依照 `/sti-issue-create` 的「Issue 內容模板」格式。
@@ -128,6 +235,8 @@ git checkout -b {分支名稱} origin/main
 
 **目的**：避免多個 worktree 並行跑 integration test 時，`apply_migrations` fixture 互相 DROP SCHEMA 造成測試假性失敗。每個 worktree 配發獨立的 test DB（`test_edms_{DB_SLUG}`），對應的 `backend/.env.test` 改寫指向自己的 DB。
 
+> ⚠️ **本步驟不隔離 dev DB 與檔案落盤根**——兩者刻意跨 worktree 共用（#239 SA 裁示），風險由上方「共用 dev 環境守則」控管。2.5b-2 是守則 3 的落地檢查，不可跳過。
+
 #### 2.5a 推導 DB 名稱
 
 依分支名稱推導 `DB_SLUG` 與 `TEST_DB_NAME`：
@@ -167,6 +276,79 @@ for f in backend/.env backend/.env.test frontend/.env; do
   fi
 done
 ```
+
+#### 2.5b-2 確認檔案落盤根是 repo 外的共用絕對路徑（守則 3）
+
+**為什麼不能跳過**：落盤根預設 `./var/...`，從 worktree 啟動後端，上傳檔案就寫進 worktree 底下；`/sti-cleanup` 移除 worktree 時檔案一併刪除。DM 曾因此 46 個版本死掉 36 個、ET 12 支影片（含 4 支各 329MB）一天內全滅。而主 repo 的 `backend/.env` 是每個 worktree 的複製來源——**主 repo 沒設，這個缺陷就隨每個新 worktree 再複製一次**。
+
+```bash
+python3 -I - "{WORKTREE}" "{主 repo 絕對路徑}" <<'PYEOF'
+import os, re, subprocess, sys
+worktree, main_repo = (os.path.realpath(p) for p in sys.argv[1:3])
+KEYS = ('DM_FILE_STORAGE_ROOT', 'ET_VIDEO_STORAGE_ROOT')
+# 主 repo 與所有 worktree 都是「會被整個刪掉或 git clean」的目錄，落盤根不得位於任何一個之內
+REPOS = [os.path.realpath(line[9:]) for line in subprocess.run(
+    ['git', '-C', main_repo, 'worktree', 'list', '--porcelain'],
+    capture_output=True, text=True, check=True).stdout.splitlines() if line.startswith('worktree ')]
+
+def read_roots(repo):
+    path = os.path.join(repo, 'backend', '.env')
+    if not os.path.isfile(path):
+        return None
+    vals = {}
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            m = re.match(rf'^\s*({"|".join(KEYS)})\s*=(.*)$', line.rstrip('\n'))
+            if m:
+                v = m.group(2).strip()
+                # 比照 python-dotenv：未加引號的值，空白後的 # 起為行內註解
+                v = v[1:-1] if v[:1] in '"\'' and v[-1:] == v[:1] else re.sub(r'\s+#.*$', '', v)
+                vals[m.group(1)] = v.strip()
+    return vals
+
+def inside_repo(v):
+    rp = os.path.realpath(v)
+    return next((r for r in REPOS if rp == r or rp.startswith(r + os.sep)), None)
+
+wt, main = read_roots(worktree), read_roots(main_repo)
+if wt is None:
+    print('ℹ️ worktree 無 backend/.env（2.5b 已提示），建立時務必設定兩個落盤根為共用絕對路徑')
+    sys.exit(2)
+bad = False
+for k in KEYS:
+    v = wt.get(k)
+    if os.environ.get(k):
+        print(f'⚠️ shell 環境變數 {k} 已設定，會蓋過 .env 的值——以實際啟動後端的環境為準')
+    if not v:
+        print(f'❌ {k} 未設定（預設 ./var/... 為相對路徑）'); bad = True
+    elif not os.path.isabs(v):
+        print(f'❌ {k}={v} 是相對路徑'); bad = True
+    elif inside_repo(v):
+        print(f'❌ {k}={v} 位於 {inside_repo(v)} 之內，清理該 worktree 或 git clean 時會被刪除'); bad = True
+    elif main is not None and main.get(k) != v:
+        print(f'⚠️ {k}={v} 與主 repo（{main.get(k)!r}）不一致，請使用者確認哪一個才是共用根'); bad = True
+    else:
+        print(f'✓ {k}={v}')
+sys.exit(1 if bad else 0)
+PYEOF
+```
+
+- exit 0（全部 `✓`）→ 繼續 2.5c
+- exit 2（worktree 無 `backend/.env`）→ 繼續 2.5c，2.5e 落盤根一行改顯示 `⚠️ 無 backend/.env，未檢查`
+- exit 1（有 `❌` / `⚠️`）→ 詢問使用者。建議路徑放在主 repo 上層目錄（與 `worktrees/` 目錄同層，不屬於任何一個 repo）：
+
+```
+backend/.env 的檔案落盤根不是 repo 外的共用絕對路徑。建議：
+  DM_FILE_STORAGE_ROOT={主 repo 上層目錄}/edms-storage/dm_files
+  ET_VIDEO_STORAGE_ROOT={主 repo 上層目錄}/edms-storage/et_videos
+  1. 採用建議路徑（寫入主 repo 與本 worktree 的 backend/.env）
+  2. 自訂路徑（直接輸入落盤根的上層目錄）
+```
+
+- **主 repo 與本 worktree 都要改**：只改 worktree，下一個新 worktree 又會從主 repo 複製到錯的值。寫入方式：該 key 已有一行（含被 `#` 註解掉的範本行）就取代那一行，沒有就附加在檔尾
+- 只有「與主 repo 不一致」（兩邊都是合法絕對路徑）時**不要直接覆蓋**：列出兩個值與各自底下的檔案數，由使用者決定以哪個為準
+- 改之前先看舊落盤根（`{主 repo 絕對路徑}/backend/var/`、`{WORKTREE}/backend/var/`）有沒有檔案；有就依對應關係搬過去：`var/dm_files/` → `DM_FILE_STORAGE_ROOT`、`var/et_videos/` → `ET_VIDEO_STORAGE_ROOT`，保留其下子目錄結構。**不得覆蓋新根已有的同名檔**——用 `rsync -a --ignore-existing --remove-source-files {舊}/ {新}/`，搬完舊目錄仍有剩的就是撞名，列給使用者決定。DB 存的是相對於落盤根的路徑（#233），**搬目錄 + 改設定即可，DB 不必動**
+- 其他既有 worktree 的 `backend/.env` 不在本步驟範圍：回報使用者哪些 worktree 仍是相對路徑，由使用者決定是否一併改（那些 worktree 可能正被其他 session 使用）
 
 #### 2.5c 改寫 worktree 的 backend/.env.test 中 DATABASE_URL
 
@@ -239,6 +421,8 @@ fi
 ✅ 隔離測試 DB：{TEST_DB_NAME}
    .env.test 位置：{WORKTREE}/backend/.env.test
    清理時機：PR 合併後執行 /sti-cleanup #{Issue 編號} 會自動 DROP 此 DB
+✅ 檔案落盤根：{DM_FILE_STORAGE_ROOT} / {ET_VIDEO_STORAGE_ROOT}（跨 worktree 共用；2.5b-2 未全 ✓ 時改顯示 ⚠️ 與原因）
+ℹ️ dev DB 跨 worktree 共用：手測或對 dev DB 跑 alembic upgrade 前，先過「共用 dev 環境守則」守則 1、2
 ```
 
 ---
@@ -432,6 +616,8 @@ git rev-parse HEAD
 **前端測試執行**（提示使用者執行）：
 - Worktree 模式：`cd ../worktrees/{slug}/frontend && pnpm test`
 - Branch 模式：`cd frontend && pnpm test`
+
+**要對 dev DB 跑 `alembic upgrade` 或手測時**（例如新增了 migration 想在瀏覽器上看效果）：先過「共用 dev 環境守則」守則 1（查版本表屬哪條分支）、守則 2（要推到未合併 revision 前先問使用者並通知其他 session）。TDD 本身走隔離 test DB，不需要動 dev DB。
 
 **中間備份**：每完成一個驗收條件的 IMPROVE 階段（重構完成、測試仍通過），立即建立 checkpoint commit：
 ```bash
@@ -629,6 +815,8 @@ rm -f /tmp/review-local-${BRANCH_SLUG}-meta.json /tmp/review-local-${BRANCH_SLUG
 - **跳過**：純後端 API、設定頁、簡單 CRUD 無複雜互動
 
 若需要，使用 **e2e-runner** agent 以 Playwright 撰寫並執行測試，涵蓋正常操作與邊界情況。
+
+⚠️ 手動 UI 測試、以及打真後端的 E2E，連的都是**共用 dev DB**：開跑前先過「共用 dev 環境守則」守則 1、2。
 
 ---
 
