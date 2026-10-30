@@ -169,13 +169,15 @@ sudo systemctl enable --now edms-deploy.timer
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
 DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
-TRUSTED_PROXY_COUNT=3
+TRUSTED_PROXY_COUNT=2
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
 DM_FILE_STORAGE_ROOT=/app/var/dm_files
 ET_VIDEO_STORAGE_ROOT=/app/var/et_videos
 EDMS_BACKUP_BUCKET=gs://...
 ```
+
+`TRUSTED_PROXY_COUNT=2` 的來由：front-proxy 以單一值覆寫 `X-Forwarded-For`、edms-nginx 再追加一段，抵達後端固定為 2 段（判定規則見 [deployment-client-ip.md](../ref/deployment-client-ip.md)）。front-proxy 改動 XFF 處理方式時，本值須同步調整，且須先改本值、再上線 front-proxy 的變更——段數少於本值時後端退回連線對端，全站會被算成同一個來源。改值後的套用步驟見 §2.5「修改 `/opt/edms/.env.prod` 後套用」。
 
 完整欄位以 [`.env.example`](../../.env.example) 為準。production（`DEBUG=false`）另有數項會在啟動時擋下的護欄：`FRONTEND_BASE_URL` 不得指向 localhost、`TRUSTED_PROXY_COUNT` 必須明示、兩個儲存根目錄必須為絕對路徑。
 
@@ -213,6 +215,28 @@ journalctl -u edms-deploy.service -n 30
 
 `MAIL_*` 一組設定於 `/opt/edms/.env.prod`，見 §2.6。
 
+#### 修改 `/opt/edms/.env.prod` 後套用
+
+`env_file` 只在容器建立時讀取，改值後**必須重建容器**。另有兩點容易漏：
+
+- compose 讀的是 **`/opt/edms/repo/.env.prod`**（部署時由 `vm-deploy.sh` 從 `/opt/edms/.env.prod` 複製），只改正本要等下次部署才生效——須手動同步一次
+- 映像 tag 來自 `EDMS_IMAGE_TAG`，未帶時退回 `:latest`，重建出的版本可能與 `/opt/edms/deployed.sha` 不一致——須帶入已部署的 SHA
+
+```bash
+cd /opt/edms/repo
+sudo cp /opt/edms/.env.prod .env.prod && sudo chmod 600 .env.prod
+sudo EDMS_IMAGE_TAG="$(cat /opt/edms/deployed.sha)" \
+  docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml \
+  up -d --no-deps --force-recreate edms-backend
+
+# 驗證
+sudo docker exec edms-backend printenv <改動的變數名>
+sudo docker inspect edms-backend --format '{{.Config.Image}}'   # tag 應等於 deployed.sha
+sudo docker exec edms-nginx wget -q -O /dev/null http://127.0.0.1/health && echo "✅ health ok"
+```
+
+> health check 用 `127.0.0.1` 而非 `localhost`，原因見 `vm-deploy.sh` 的 Health check 段落。改的是 `POSTGRES_*` 等 DB 變數時不適用本段——那需要連 DB 帳密一併調整，不是單純重建容器。
+
 本機開發起手（在**開發者自己的電腦**上，不是 bms-prod-02）：
 
 ```bash
@@ -245,12 +269,7 @@ sudo chmod 600 /opt/edms/.env.prod
 
 > `MAIL_FROM` 加 `head -1`：`/opt/tbms/.env.prod` 有重複行。
 
-改完**必須重建容器**——`env_file` 是容器啟動時讀取的：
-
-```bash
-cd /opt/edms/repo
-sudo docker compose -p edms -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate edms-backend
-```
+改完**必須重建容器**，步驟見 §2.5「修改 `/opt/edms/.env.prod` 後套用」。
 
 #### 共用帳號的三個已知代價
 
