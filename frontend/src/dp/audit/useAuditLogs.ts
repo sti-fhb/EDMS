@@ -4,7 +4,7 @@ import { useCallback, useState } from "react"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
-import { toApiError } from "../../services/http"
+import { toBlobApiError } from "../../services/http"
 import { auditApi } from "./auditService"
 import type { AuditFilterParams, AuditLogRow, AuditOption } from "./auditService"
 
@@ -95,7 +95,8 @@ export function useAuditLogs() {
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (err) {
-      message.error(toApiError(err).errorMessage)
+      // blob 請求失敗時 body 也是 Blob，`toApiError` 讀不到後端訊息（限流 429 會變成「系統連線異常」）
+      message.error((await toBlobApiError(err)).errorMessage)
     } finally {
       setExporting(false)
     }

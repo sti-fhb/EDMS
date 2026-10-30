@@ -3,6 +3,7 @@ from datetime import date
 from sqlalchemy import ColumnElement, Row, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.utils import taipei_day_start
 from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
@@ -92,8 +93,21 @@ class AuditLogRepository:
         巢狀交易 / savepoint 或改用非阻塞的鏈接策略。
         並行不分岔之正確性以 advisory lock 語意 + code review 保證，未做並發實測
         （現行 per-test rollback fixture 難以模擬多 committed 交易並發）。
+
+        ## 等鎖上限（#833 B2）
+
+        等超過 `DB_AUDIT_LOCK_TIMEOUT_MS` 即以 SQLSTATE 55P03 失敗，`main.db_busy_response` 回 503
+        （理由見該設定的註解）。取到鎖之後 `lock_timeout` 還原成取鎖前的值：本上限**只管這把鎖**，
+        同一交易接下來等課程行鎖等其他鎖時不受影響。等鎖失敗時不必還原——交易已中止，`set_config`
+        的 `is_local` 設定隨交易一起結束。
+        `tests/integration/test_core_db_busy_timeouts.py` 守門。
         """
+        previous = (await db.execute(text("SELECT current_setting('lock_timeout')"))).scalar_one()
+        await db.execute(
+            text("SELECT set_config('lock_timeout', :t, true)").bindparams(t=str(settings.DB_AUDIT_LOCK_TIMEOUT_MS))
+        )
         await db.execute(text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_AUDIT_CHAIN_LOCK_KEY))
+        await db.execute(text("SELECT set_config('lock_timeout', :t, true)").bindparams(t=previous))
 
     async def get_last_row_hash(self, db: AsyncSession) -> str | None:
         """取最新一列的 ROW_HASH；無資料（genesis）回 None。"""

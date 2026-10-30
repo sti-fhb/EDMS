@@ -48,10 +48,13 @@
 | COMMON_503 | 503 | 系統忙碌中，請稍後再試 |
 
 > **`COMMON_503`**：系統暫時忙碌的負載卸除。屬**暫時性**錯誤，前端可提示稍後重試；
-> 勿用於一般系統錯誤（那是 `COMMON_500`）。目前兩個來源：
+> 勿用於一般系統錯誤（那是 `COMMON_500`）。目前四個來源：
 > - 密碼運算（bcrypt）之併發閘（#214）：同時進行中的運算達門檻時立即拒絕，避免請求在等待期間持續佔用 DB 連線。
-> - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`（含等鎖時間）被 PostgreSQL 中止（SQLSTATE 57014），
->   由 `main.py` 的 `query_timeout_response` 轉成本碼。
+> - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`（含等鎖時間）被 PostgreSQL 中止（SQLSTATE 57014）。
+> - 等稽核鎖逾時（#833）：寫稽核的動作（含登入）等全平台稽核鎖超過 `DB_AUDIT_LOCK_TIMEOUT_MS`（SQLSTATE 55P03）。
+> - 連線池等候逾時（#833）：連線池滿，等超過 `DB_POOL_TIMEOUT` 仍拿不到連線（`sqlalchemy.exc.TimeoutError`）。
+>
+> 後三者由 `main.py` 的 `db_busy_response` 轉成本碼。
 
 > **`COMMON_413`**：**由 nginx 產生，不是後端**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）。
 > 請求 body 超過該路徑的 `client_max_body_size`（一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，
@@ -62,6 +65,11 @@
 >   `app/core/upload_form_limits.py`。發生在解析 body 時，早於身分與角色檢查
 > - `COMMON_429`「同時上傳的檔案過多，請待目前的上傳完成後再試」：同一位使用者同時進行中的
 >   上傳超過上限，`app/core/upload_auth_precheck.py`
+
+> **匯出端點**（#833）的 `COMMON_429` 有兩種訊息：
+> - 「操作過於頻繁，請稍後再試」：每分鐘次數超過門檻（每人 10、每 IP 60）
+> - 「已有匯出正在進行，請待完成後再試」：同一位使用者已有一支匯出在跑，全部匯出端點共用名額，
+>   `app/core/rate_limit.limit_concurrent_exports`
 
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
 

@@ -152,6 +152,23 @@ describe("AuditPage 操作記錄查詢（唯讀）", () => {
     expect(clickSpy).toHaveBeenCalled()
   })
 
+  it("匯出被限流時顯示後端訊息，不是「系統連線異常」（#833）", async () => {
+    // `responseType: "blob"` 的請求失敗時 `response.data` 是 Blob，一般的錯誤解析讀不到 error_message
+    vi.spyOn(auditApi, "exportCsv").mockRejectedValueOnce({
+      response: {
+        status: 429,
+        data: new Blob([JSON.stringify({ error_code: "COMMON_429", error_message: "操作過於頻繁，請稍後再試" })]),
+      },
+    })
+    const user = userEvent.setup()
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("成功")
+
+    await user.click(screen.getByRole("button", { name: "匯出" }))
+
+    expect(await screen.findByText("操作過於頻繁，請稍後再試")).toBeInTheDocument()
+  })
+
   it("查無資料時匯出停用，篩選改變後跟著當下查詢結果（#660，對齊 DM）", async () => {
     // 查無資料仍可按，只會下載一份只有表頭的 CSV。篩選是即時（防抖）套用，按鈕狀態要
     // 跟著**已套用的那次查詢**——匯出用的也是它

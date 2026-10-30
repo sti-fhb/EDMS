@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
     DB_POOL_RECYCLE: int = Field(default=1800, ge=60)
+    # 連線池滿時，新請求等一條連線的上限（秒；#833 B1）。SQLAlchemy 預設 30 秒：池滿時每個新請求都在
+    # 後端掛 30 秒才失敗，畫面一直轉圈，排隊的請求越積越多。等滿即回 503「系統忙碌」（`main.db_busy_response`）。
+    DB_POOL_TIMEOUT: float = Field(default=10, gt=0)
     # 單一 SQL 查詢的逾時（毫秒；0 = 不限），以 session 的 `statement_timeout` 套用到所有連線（#810）。
     # 連線池只有 POOL_SIZE + MAX_OVERFLOW 條；一個失控的查詢若無上限，可佔住連線到它跑完為止。nginx
     # 逾時回 504 之後後端仍會把請求跑完，那層保護不了連線池。
@@ -55,7 +58,8 @@ class Settings(BaseSettings):
     #    - 課程「發布／更新」交易：持課程行鎖到 commit（含對大量學員寫入加入紀錄、寄通知），
     #      同一門課的其他編輯要排隊（`et/course/stage_repository.lock_course`）
     #    - 稽核鏈的全平台 advisory lock：任何寫稽核的動作（含登入）都排在持鎖交易後面
-    #      （`dp/audit/repository.acquire_chain_lock`，ET 批次核可單一交易最多 100 筆）
+    #      （`dp/audit/repository.acquire_chain_lock`，ET 批次核可單一交易最多 100 筆）。
+    #      #833 起這把鎖另有較短的等鎖上限，見下方 `DB_AUDIT_LOCK_TIMEOUT_MS`
     #    正常情況兩者都在數秒內完成；等到 60 秒代表系統已出問題。2026-10-27 使用者確認此取捨。
     #    （⛔ 不要引用「上傳影片期間課程被鎖住」當例子：上傳是檔案落地後才取鎖，見 `material/service.upload_video`。）
     #
@@ -63,6 +67,16 @@ class Settings(BaseSettings):
     # ⚠️ 稽核鏈驗證 CLI（`dp/audit/verify.py`）目前**仍受此限**：稽核表大到單句逾時，CLI 回退出碼 2
     #    「執行錯誤」（不會誤報斷鏈）。屆時再比照 migration 處理。
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
+    # 等稽核鏈 advisory lock 的上限（毫秒；#833 B2），等滿回 503「系統忙碌」。
+    #
+    # 這把鎖全平台共用一個 key，持有到交易結束；寫稽核的動作（**含登入**）都排在它後面，每個排隊者各佔
+    # 一條連線。只靠上面 60 秒的查詢逾時兜底，一筆卡住的交易就能讓排隊者把連線池佔滿，連不寫稽核的頁面
+    # 也拿不到連線。代價是卡住期間登入與寫入直接收到「系統忙碌」，而不是等久一點後成功。
+    #
+    # ⚠️ **只套用在這把鎖**（`dp/audit/repository.acquire_chain_lock`，取到後還原）。不設成全站的
+    #    `lock_timeout`：課程「發布／更新」持課程行鎖時要對大量學員寫入，可能持鎖數秒以上，
+    #    全站設 10 秒會讓同一門課的其他編輯被誤擋。2026-10-29 使用者裁示。
+    DB_AUDIT_LOCK_TIMEOUT_MS: int = Field(default=10_000, ge=1)
 
     # 認證（簡單 JWT）
     # 各環境獨立產生、不進 git；缺少時 fail-fast（見 _build_settings）。
