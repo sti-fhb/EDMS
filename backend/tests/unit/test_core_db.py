@@ -63,6 +63,24 @@ def test_查詢逾時預設為_60_秒():
     assert Settings.model_fields["DB_STATEMENT_TIMEOUT_MS"].default == 60_000
 
 
+def test_應用程式的連線池套用等候上限():
+    """連線池滿時最多等 `DB_POOL_TIMEOUT` 秒就放棄（#833 B1）。不設則沿用 SQLAlchemy 預設 30 秒：
+    池滿時每個新請求都在後端掛 30 秒才失敗，期間使用者只看到畫面轉圈，nginx 也在等。"""
+    from app.core.db import engine
+
+    assert engine.pool.timeout() == settings.DB_POOL_TIMEOUT
+
+
+def test_連線池等候上限預設為_10_秒():
+    """預設值本身釘住，理由同 `DB_STATEMENT_TIMEOUT_MS`：要有意識地改。"""
+    assert Settings.model_fields["DB_POOL_TIMEOUT"].default == 10
+
+
+def test_稽核鎖的等鎖上限預設為_10_秒():
+    """2026-10-29 使用者裁示（#833 B2）：只對稽核鏈的 advisory lock 設 10 秒。"""
+    assert Settings.model_fields["DB_AUDIT_LOCK_TIMEOUT_MS"].default == 10_000
+
+
 def test_呼叫端顯式指定的查詢逾時優先():
     """migration 靠這條關掉逾時（見下一條）。"""
     merged = _build_connect_args({"server_settings": {"statement_timeout": "0"}})
