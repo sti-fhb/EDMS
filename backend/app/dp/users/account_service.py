@@ -41,3 +41,18 @@ class AccountQueryService:
         if account is None:
             return False
         return is_account_usable(status=account.status, locked_until=account.locked_until, now=utcnow())
+
+    async def exists(self, db: AsyncSession, user_id: str) -> bool:
+        """帳號是否存在（未軟刪除）；**不看帳號狀態**（#188）。
+
+        與 `is_usable` 之差別：停用 / 鎖定中仍回 True。供「不得為不存在之帳號建立資料」
+        之檢核（如 ET 角色指派防孤兒列），帳號可用性另由呼叫端或 DP 自行把關。
+
+        Args:
+            db: DB session。
+            user_id: 目標帳號 USER_ID。
+
+        Returns:
+            存在 True；查無（含軟刪除）False。
+        """
+        return await self._users.get_account_status(db, user_id) is not None

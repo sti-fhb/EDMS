@@ -15,6 +15,7 @@ from sqlalchemy import text
 from app.core.exceptions import AppError
 from app.core.module_assign import module_assign_registry
 from app.core.utils import utcnow
+from app.dp.users.models import DpUser
 from app.et import constants as c
 from app.et.bootstrap import register_et_module
 from app.et.constants import ROLE_ADMIN, ROLE_STUDENT, ROLE_TEACHER
@@ -24,6 +25,28 @@ from app.services import NotifyService
 from tests.integration.et._tag_pairs import new_tag, pair_user, tag_id
 
 pytestmark = pytest.mark.integration
+
+
+async def _dp_user(db, user_id: str, *, deleted: int = 0) -> str:
+    """建立 `DP_USER` 帳號——ET `assign` 自 #188 起拒絕為不存在之帳號建立角色列。"""
+    now = utcnow()
+    db.add(
+        DpUser(
+            user_id=user_id,
+            email=f"{user_id.lower()}@edms.local",
+            pwd_hash="x",  # 本檔不走登入，雜湊值無意義
+            user_name=f"姓名{user_id}",
+            status="ACTIVE",
+            login_fail_count=0,
+            pwd_changed_date=now,
+            must_change_pwd=False,
+            created_user="SYSTEM",
+            created_date=now,
+            deleted=deleted,
+        )
+    )
+    await db.flush()
+    return user_id
 
 
 @pytest.fixture
@@ -178,6 +201,7 @@ class TestAc4AdminCanAssign:
         assert provider is not None
 
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "護理師"})
+        await _dp_user(db, "ET_AC4_TARGET")
         await provider.assign(
             db,
             user_id="ET_AC4_TARGET",
@@ -210,9 +234,25 @@ class TestAc4AdminCanAssign:
         tag_id = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "軍人"})
         await db.execute(text('UPDATE "ET_TAG" SET "IS_ACTIVE" = false WHERE "TAG_ID" = :t'), {"t": tag_id})
         await db.flush()
+        await _dp_user(db, "ET_AC4_Y")
         with pytest.raises(AppError) as e:
             await provider.assign(db, user_id="ET_AC4_Y", roles=set(), groups={f":{tag_id}"}, operator_id="ET_AC4_OP")
         assert e.value.error_code == "ET_ROLE_002"
+
+    @pytest.mark.parametrize("deleted", [None, 1], ids=["查無帳號", "已軟刪除帳號"])
+    async def test_不存在之帳號不可指派_不留孤兒列(self, db, et_registered, deleted) -> None:
+        """#188 A2：原本可為任意字串建立 `ET_USER_ROLE`（含 ADMIN），留下孤兒授權列。
+
+        軟刪除帳號同樣視為不存在——`DP_USER` 查詢濾 `DELETED=0`，此處以真 DB 釘住該語意。
+        """
+        if deleted is not None:
+            await _dp_user(db, "ET_AC4_GHOST", deleted=deleted)
+        provider = module_assign_registry.get("ET")
+        with pytest.raises(AppError) as e:
+            await provider.assign(db, user_id="ET_AC4_GHOST", roles={ROLE_ADMIN}, groups=set(), operator_id="ET_AC4_OP")
+        assert e.value.error_code == "ET_ROLE_004"
+        count = await db.scalar(text('SELECT count(*) FROM "ET_USER_ROLE" WHERE "USER_ID" = :u'), {"u": "ET_AC4_GHOST"})
+        assert count == 0
 
     async def test_全體標籤不可停用(self, db, et_registered) -> None:
         """ET 業務規則之伺服器端保護——DP 端旗標與前端隱藏僅為 UX。"""
@@ -314,6 +354,7 @@ class TestCatalogMaintenance:
         """
         provider = module_assign_registry.get("ET")
         await provider.create_controlled(db, "TAG", code="", name="營養師", operator_id="ET_CAT_AUD")
+        await _dp_user(db, "ET_CAT_TARGET")
         await provider.assign(db, user_id="ET_CAT_TARGET", roles={ROLE_STUDENT}, groups=set(), operator_id="ET_CAT_AUD")
         rows = await db.execute(
             text('SELECT DISTINCT "FUNC_NAME" FROM "DP_AUDIT_LOG" WHERE "CREATED_USER" = :u'),
@@ -374,6 +415,7 @@ class TestLastModifiedFallback:
         角色全取消後甚至回 None（DP02 顯示「—」）。
         """
         provider = module_assign_registry.get("ET")
+        await _dp_user(db, "ET_LM1")
         await provider.assign(db, user_id="ET_LM1", roles={ROLE_TEACHER}, groups=set(), operator_id="GRANTER")
         await provider.assign(db, user_id="ET_LM1", roles=set(), groups=set(), operator_id="REVOKER")
 
@@ -389,6 +431,7 @@ class TestLastModifiedFallback:
         """
         provider = module_assign_registry.get("ET")
         tid = await db.scalar(text('SELECT "TAG_ID" FROM "ET_TAG" WHERE "TAG_NAME" = :n'), {"n": "軍人"})
+        await _dp_user(db, "ET_LM2")
         await provider.assign(db, user_id="ET_LM2", roles={ROLE_TEACHER}, groups={f":{tid}"}, operator_id="GRANTER")
         await provider.assign(db, user_id="ET_LM2", roles={ROLE_TEACHER}, groups=set(), operator_id="REMOVER")
 

@@ -117,6 +117,7 @@ class RolesService:
         （模組角色表無 FK 至 `DP_USER`），本 issue 不改變該行為。軟刪除之帳號同樣回 None
         （`get_by_id` 濾 `DELETED=0`）故一併放行——目前 DP 無「刪除既有帳號」入口
         （離職走 DISABLED），若日後新增則需重新檢視此分支語意。
+        ⚠️ 此處放行不代表模組會收：ET 之 provider 自行拒絕查無帳號（`ET_ROLE_004`，#188），DM 則照收。
 
         Raises:
             AppError: 帳號已停用或鎖定中（403 DP_ROLE_004）。

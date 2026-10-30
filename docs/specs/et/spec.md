@@ -250,6 +250,24 @@ ET 之資安稽核統一寫入平台 `DP_AUDIT_LOG`（經 `AuditLogService`）�
 >
 > **`ET-REPORT` 為何寫稽核**（2026-09-15 新增；判準見上方「匯出稽核判準」）：唯讀查詢原則上不寫稽核（逐筆瀏覽已由各表標準欄位承載），但週報明細 CSV 是**整批帶走**——一次一個檔案，含全站（管理者）或全班（教師）學員的姓名、Email、進度與最後活動時間，是 ET 個資輸出密度最高的動作。名單一旦外流，沒有這筆紀錄就無法回答「誰在什麼時候拉過這份檔」。記錄的是**範圍與人次**（`target_id` 為課程 id 或 `ALL`），不記內容。
 
+#### Bootstrap 授予刻意不入稽核鏈（2026-10-29 SA 裁示，#188）
+
+**缺的是什麼**：ET 上線時由 migration 授予的兩類角色**不在 `DP_AUDIT_LOG` 裡**——依 `ET_BOOTSTRAP_ADMIN_EMAIL` 授予之**首位 ET 管理者**，以及回填全體存量帳號之**學員角色**。在 `DP_AUDIT_LOG` 查「誰在何時成為 ET 管理者」，最早那一位查不到，屬預期結果，不是遺漏。
+
+**去哪裡查**：
+
+| 來源 | 內容 |
+|------|------|
+| `backend/alembic/versions/20260820_1730_d5f9a2b8e614_et_seed_roles_bootstrap.py` | 授予邏輯本身（依哪個設定、挑哪些帳號、冪等條件）|
+| 部署當下執行 migration 的 log（logger `alembic.runtime.migration`）| `ET bootstrap：已授予首位管理者角色（USER_ID=…）`、`ET bootstrap：存量帳號回填學員角色 N 筆`；未授予時另有 warning 說明原因 |
+| `ET_USER_ROLE` 列本身 | `CREATED_USER = 'SYSTEM'`、`CREATED_DATE` 為 migration 執行時間 |
+
+⚠️ `CREATED_USER = 'SYSTEM'` 不能單獨判定「來自 bootstrap」：帳號啟用時 `grant_default_student_role` 自動授予之學員角色同樣是 `SYSTEM`。首位管理者（`ROLE = 'ADMIN'` 且 `CREATED_USER = 'SYSTEM'`）只會來自 bootstrap。撤權只切 `IS_ACTIVE`、不改 `CREATED_*`，故查到的列仍須看 `IS_ACTIVE` / `UPDATED_*` 判斷目前是否有效、之後是否被異動過（之後的異動皆在 `DP_AUDIT_LOG` 的 `ET-ROLES`）。
+
+**為什麼刻意不補**：`DP_AUDIT_LOG` 採鏈式 `ROW_HASH`，每筆的雜湊接在前一筆之後。在 migration 內以原生 INSERT 接鏈（繞過 `AuditLogService`），一旦算錯，**毀損的是整條稽核鏈**——全平台唯一的稽核寫入口，既有紀錄的可驗證性會一起失效，且該表 append-only、無法事後修補。這個失敗模式比它要解決的問題（缺一筆紀錄）嚴重一個量級；而那筆紀錄並沒有消失，只是不在稽核鏈上，從上表來源仍查得到。
+
+> 🔴 **請勿「幫忙補上」**：日後若有人想在 migration 或排程中補寫這兩類授予的稽核，須先重開本裁示，不得逕行實作。bootstrap 之後的所有角色異動（DP 後台「權限管理」）一律經 `AuditLogService` 寫入 `ET-ROLES`，不受本例外影響。
+
 ---
 
 ### 受訓對象規則（2026-10-06 由 #538 新增，取代下方「受訓單位標籤規則」）
