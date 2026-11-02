@@ -63,9 +63,7 @@ class Settings(BaseSettings):
     #    正常情況兩者都在數秒內完成；等到 60 秒代表系統已出問題。2026-10-27 使用者確認此取捨。
     #    （⛔ 不要引用「上傳影片期間課程被鎖住」當例子：上傳是檔案落地後才取鎖，見 `material/service.upload_video`。）
     #
-    # 不受此限的連線：migration（`alembic/env.py`）顯式設 0。
-    # ⚠️ 稽核鏈驗證 CLI（`dp/audit/verify.py`）目前**仍受此限**：稽核表大到單句逾時，CLI 回退出碼 2
-    #    「執行錯誤」（不會誤報斷鏈）。屆時再比照 migration 處理。
+    # 不受此限的連線：migration（`alembic/env.py`）、稽核鏈驗證 CLI（`dp/audit/verify._cli_session`，#833 C3）顯式設 0。
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
     # 等稽核鏈 advisory lock 的上限（毫秒；#833 B2），等滿回 503「系統忙碌」。
     #

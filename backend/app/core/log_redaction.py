@@ -15,10 +15,18 @@ log 的流向通常比 DB 寬鬆（複製到開發機、送入收集服務、貼
 5. 以「例外型別 + 遮罩後訊息 + `traceback.format_tb` 堆疊」表達位置——`format_tb`
    只輸出檔案 / 行號 / 原始碼行，不含例外訊息、不含區域變數
 
+**`logger.exception()` 等帶 `exc_info` 的紀錄**（#833 C2）：由 `install_exception_redaction()`
+全域處理，各呼叫點不必改寫，見該函式說明。
+
 **本模組未涵蓋的既有暴露面**（非本次修正範圍，各自另案追蹤）：
-- 各模組自行的 `logger.exception()` 呼叫點：其 `exc_info` 一樣會帶出未遮罩的
-  `str(exc)`（含 `[parameters: …]`）。遮罩要全面生效需下沉為 root logger 的
-  `logging.Filter`／`Formatter`。
+- 訊息本體（`msg % args`）不經遮罩：呼叫端把例外或個資當參數傳進訊息時照樣寫出。
+  2026-11-02 盤點全庫只有 `main.py` 讀 `pyproject.toml` 失敗那一處（`OSError`，不含個資）；
+  要刻意記 Email 時用 `mask_email`。
+- Starlette 的 lifespan 啟動 / 關閉失敗以 `traceback.format_exc()` 組成**訊息本體**交給 uvicorn 記錄，
+  不帶 `exc_info`，`install_exception_redaction` 管不到。
+- 值出現在**主訊息**裡的 DB 錯誤：asyncpg 編碼參數失敗的 `invalid input for query argument $N: '值'`、
+  PostgreSQL 的 `invalid input syntax for type …: "值"` 等。它們在 `[SQL:` 之前、也不是 `DETAIL` 行，
+  只有 Email／JWT 樣式會被遮罩，姓名、身分證號會留下（#833 security review M3，待另案擴充規則）。
 - `app/core/db.py` 的 `echo=settings.DEBUG`：dev 環境下 SQLAlchemy 引擎自己的
   echo log 會明文輸出每次查詢的參數值，走獨立的 `sqlalchemy.engine` logger，
   不經本模組。
@@ -26,9 +34,10 @@ log 的流向通常比 DB 寬鬆（複製到開發機、送入收集服務、貼
   僅及於上列 1~4 的結構化位置。
 """
 
+import logging
 import re
 import traceback
-from typing import Optional
+from typing import Any, Optional
 
 _MARK = "[敏感內容已遮罩]"
 
@@ -127,3 +136,53 @@ def format_exception_for_log(exc: BaseException) -> str:
         frames = "".join(traceback.format_tb(current.__traceback__)).rstrip()
         blocks.append(f"{header}\n{frames}" if frames else header)
     return "\n".join(blocks)
+
+
+def install_exception_redaction() -> None:
+    """全域安裝：帶 `exc_info` 的 log 紀錄一律以 `format_exception_for_log` 輸出例外（#833 C2）。
+
+    ## 為什麼掛在 LogRecordFactory，而不是 root 的 Filter／Formatter
+
+    正式環境 root logger **沒有 handler**——uvicorn 只替自己的 logger 設 handler，應用程式的紀錄一路
+    傳到 root 之後由 `logging.lastResort` 輸出到 stderr。掛在 root 的 handler 上等於沒掛；另加 handler
+    又會讓原本被 lastResort 濾掉的 INFO 突然出現，改變 log 量。Logger 層的 Filter 則只對「直接記在該
+    logger 上」的紀錄生效，子 logger 傳上來的不經過它。
+
+    Factory 在紀錄**產生時**就預先填好 `exc_text`：標準 `Formatter.format` 只在 `exc_text` 為空時才自己
+    呼叫 `formatException`，所以不論最後由哪個 handler、哪個 logger（含 apscheduler、uvicorn）輸出，
+    印出來的都是去識別化的版本。
+
+    ⚠️ 刻意**保留 `exc_info`**：caplog 與讀 `record.exc_info` 的既有程式照常運作。
+
+    ## 會繞過本層的寫法（目前全庫皆無，引入時要處理）
+
+    - 自訂 Formatter 直接讀 `exc_info`（而非 `exc_text`）
+    - 之後安裝的套件以 `setLogRecordFactory` **覆蓋**而非包住本 factory（Sentry、structlog 等整合要確認）
+    - `logging.makeLogRecord(dict)`（QueueHandler / socket 轉送）：先建紀錄再補欄位，factory 看不到 `exc_info`
+    - 子行程：factory 是行程內狀態，新行程沒 import `main` 就沒裝，要自行呼叫本函式
+
+    ## 格式化失敗不可往外拋
+
+    factory 跑在呼叫 `logger.exception()` 的那一行（通常在 `except` 區塊裡）。原本格式化出錯發生在
+    handler、由 `Handler.handleError` 吞掉；搬到這裡若不攔，例外的 `__str__` 本身會拋時，**記 log 就讓
+    呼叫端中斷**——發信 worker 的迴圈因此結束（code / security review）。失敗時只留型別，⛔ 不可退回
+    `Formatter.formatException`：那會把未遮罩的內容寫出去。
+
+    重複呼叫不會包兩層。
+    """
+    current = logging.getLogRecordFactory()
+    if getattr(current, "redacts_exceptions", False):
+        return
+
+    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        record = current(*args, **kwargs)
+        if record.exc_info and record.exc_info[1] is not None and not record.exc_text:
+            exc = record.exc_info[1]
+            try:
+                record.exc_text = format_exception_for_log(exc)
+            except Exception:
+                record.exc_text = f"{type(exc).__module__}.{type(exc).__qualname__}: [例外訊息格式化失敗，已省略]"
+        return record
+
+    factory.redacts_exceptions = True  # type: ignore[attr-defined]
+    logging.setLogRecordFactory(factory)

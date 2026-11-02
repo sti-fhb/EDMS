@@ -19,7 +19,7 @@ from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
-from app.core.log_redaction import format_exception_for_log
+from app.core.log_redaction import format_exception_for_log, install_exception_redaction
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
 from app.core.request_context import set_client_ip
@@ -70,6 +70,8 @@ logger = logging.getLogger(__name__)
 # 遮罩 access log 中的憑證型 query 參數（#255：ET 影片播放票只能放 query string）。
 # 於 module-level 執行，確保在第一個請求進來之前就掛上。
 install_access_log_redaction()
+# `logger.exception()` 帶出的 SQL 綁定參數等一律去識別化（#833 C2）；排程與發信 worker 同行程，一併涵蓋
+install_exception_redaction()
 
 
 @asynccontextmanager
