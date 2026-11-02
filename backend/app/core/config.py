@@ -48,6 +48,20 @@ class Settings(BaseSettings):
     # 讀取一律經 `migration_database_url`，不要直接讀本欄位。
     MIGRATION_DATABASE_URL: str | None = None
 
+    # SQLAlchemy 引擎的 echo：開啟後**每一次查詢連同綁定參數值**都會印進 log（#197 AC 5）。
+    #
+    # 🔴 **刻意與 `DEBUG` 解耦，請勿改回 `echo=settings.DEBUG`。** 原本兩者共用一個開關，而
+    # `DEBUG` 同時閘住三道 production 護欄（見下方三個 `_validate_*`）。本檔自己記錄過 `DEBUG`
+    # 被當逃生門用的情境（「現場只能以 DEBUG=true 繞過」，見 `_validate_mail_tls_exclusive`）
+    # ——真有人在正式環境開 `DEBUG` 救火，就會連帶把病人／員工個資印進 log。
+    #
+    # ⚠️ 而且那層**不受 `core/log_redaction` 保護**：echo 走獨立的 `sqlalchemy.engine` logger、
+    # 參數值在訊息本體而非 `exc_info`，`install_exception_redaction` 管不到（該檔「未涵蓋的既有
+    # 暴露面」有明文）。
+    #
+    # dev 要看 SQL 時在 `.env` 設 `DB_ECHO=true` 即可，不需要連帶打開 production 護欄的逃生門。
+    DB_ECHO: bool = False
+
     # 連線池
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
@@ -114,6 +128,10 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = False
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
+    # 發信 worker 輪距（秒）。E2E 設 1，否則每封信最壞要等滿一輪才寄出（#57）。
+    # ⚠️ worker 每輪最多寄 DP_PARAM MAIL.RATE_PER_MIN 封——那個「每分鐘」是靠本值 = 60 撐起來的，
+    # 調短等於把發信速率上限放大，故 production 不得低於 60（見 _validate_mail_worker_poll_interval）。
+    MAIL_WORKER_POLL_INTERVAL_SECONDS: int = Field(default=60, ge=1, le=3600)
 
     # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（invite_id）重寄的最小間隔秒數，
     # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
@@ -170,6 +188,21 @@ class Settings(BaseSettings):
         """
         if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
             raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_mail_worker_poll_interval(self) -> "Settings":
+        """production（非 DEBUG）護欄：發信 worker 輪距不得低於 60 秒。
+
+        worker 每輪最多寄 `MAIL.RATE_PER_MIN` 封（`dp/notify/worker.py`），該參數的「每分鐘」
+        語意建立在輪距 = 60 秒之上。輪距縮成 1 秒，實際上限就變成 60 倍，可能超出郵件主機的
+        寄信額度而被擋信。縮短輪距只為 E2E 不必每封信等一分鐘（#57），production 用不到。
+        """
+        if not self.DEBUG and self.MAIL_WORKER_POLL_INTERVAL_SECONDS < 60:
+            raise ValueError(
+                "MAIL_WORKER_POLL_INTERVAL_SECONDS 在 production（DEBUG=false）不得低於 60："
+                "worker 每輪最多寄 MAIL.RATE_PER_MIN 封，縮短輪距會放大發信速率上限"
+            )
         return self
 
     @model_validator(mode="after")

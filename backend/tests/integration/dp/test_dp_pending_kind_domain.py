@@ -28,9 +28,9 @@ _CONSTRAINT = "CK_DP_PENDING_REGISTRATION_KIND"
 # 是另一件事（而 #215 的立論正是「繞過 repository 的路徑」）。
 _INSERT = text(
     'INSERT INTO "DP_PENDING_REGISTRATION" '
-    '("TOKEN_HASH", "EMAIL", "USER_NAME", "PWD_HASH", "KIND", "EXPIRES_DATE", '
+    '("TOKEN_HASH", "EMAIL", "USER_NAME", "KIND", "EXPIRES_DATE", '
     ' "INVITE_ID", "CREATED_USER", "CREATED_DATE") '
-    "VALUES (:token_hash, :email, :user_name, NULL, :kind, :expires_date, "
+    "VALUES (:token_hash, :email, :user_name, :kind, :expires_date, "
     " NULL, :created_user, :created_date)"
 )
 

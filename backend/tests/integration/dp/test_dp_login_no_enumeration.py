@@ -67,7 +67,6 @@ async def _pending(db, *, email: str, kind: str = KIND_SELF_REGISTER, minutes: i
             token_hash=hash_token(generate_reset_token()),
             email=email,
             user_name="待驗證",
-            pwd_hash=None,
             kind=kind,
             expires_date=now + timedelta(minutes=minutes),
             created_user="SYSTEM",

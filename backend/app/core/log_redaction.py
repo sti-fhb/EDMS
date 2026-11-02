@@ -27,9 +27,11 @@ log 的流向通常比 DB 寬鬆（複製到開發機、送入收集服務、貼
 - 值出現在**主訊息**裡的 DB 錯誤：asyncpg 編碼參數失敗的 `invalid input for query argument $N: '值'`、
   PostgreSQL 的 `invalid input syntax for type …: "值"` 等。它們在 `[SQL:` 之前、也不是 `DETAIL` 行，
   只有 Email／JWT 樣式會被遮罩，姓名、身分證號會留下（#833 security review M3，待另案擴充規則）。
-- `app/core/db.py` 的 `echo=settings.DEBUG`：dev 環境下 SQLAlchemy 引擎自己的
-  echo log 會明文輸出每次查詢的參數值，走獨立的 `sqlalchemy.engine` logger，
-  不經本模組。
+- `app/core/db.py` 的 `echo=settings.DB_ECHO`：開啟後 SQLAlchemy 引擎自己的 echo log 會
+  明文輸出每次查詢的參數值，走獨立的 `sqlalchemy.engine` logger，不經本模組。
+  ⚠️ 本項原為 `echo=settings.DEBUG`，#197 AC 5 已**與 `DEBUG` 解耦**（預設關閉、需明示
+  `DB_ECHO=true`）——理由是 `DEBUG` 另外閘住三道 production 護欄，共用一個開關會讓
+  「為了繞過護欄而開 DEBUG」連帶打開全量 SQL 參數記錄。
 - 無固定樣式的個資（如中文姓名）落在訊息本體時無法以規則辨識；本模組的保證
   僅及於上列 1~4 的結構化位置。
 """

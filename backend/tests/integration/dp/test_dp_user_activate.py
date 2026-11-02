@@ -54,7 +54,6 @@ async def _make_invite(db, *, token="invite-tok", email="invitee@edms.local", na
         token_hash=hash_token(token),
         email=email,
         user_name=name,
-        pwd_hash=None,
         expires_date=now + timedelta(minutes=ttl_min),
         now=now,
         kind="ADMIN_INVITE",
@@ -98,7 +97,6 @@ async def test_activate_rejects_self_register_token(db, et_stub):
         token_hash=hash_token("self-tok"),
         email="self@edms.local",
         user_name="自助",
-        pwd_hash="x",
         expires_date=now + timedelta(minutes=30),
         now=now,
     )

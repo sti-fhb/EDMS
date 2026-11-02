@@ -3,7 +3,7 @@
 「建 DP_USER(ACTIVE) + 首筆 PWD_HIST + 授 ET 學員 + 雙稽核 + 刪待驗證列」是兩條流程共同的
 啟用副作用（#67 抽出）。
 
-2026-08-25（#212）起，兩條流程的**密碼來源也統一**了：US2 原本用 pending.pwd_hash（註冊當下
+2026-08-25（#212）起，兩條流程的**密碼來源也統一**了：US2 原本用待驗證列的 PWD_HASH（註冊當下
 所填），而那正是 pre-hijack 的根源——任何人可用他人 Email 註冊並填自己的密碼，受害者點下
 （來自組織網域、格式正確的）驗證信後，帳號就以攻擊者的密碼建立。改為與 US4 一致：pending 列
 不存密碼，密碼由**點連結者當場設定**。因此 `activate_with_new_password` 也抽為共用，兩條流程
@@ -53,7 +53,7 @@ async def activate_pending_account(
     Args:
         pending: 待驗證 / 待邀請列
         pwd_hash: 密碼雜湊。**US2 / US4 皆為使用者於本步當場設定並雜湊**——#212 之後
-            待驗證列不存密碼，`pending.pwd_hash` 恆為 None，該來源已不存在
+            待驗證列不存密碼（#668 起本表已無 PWD_HASH 欄位）
         func_name: 稽核 func_name（US2「DP-REGISTER」/ US4「DP-USERS」）
         create_desc: 建帳號稽核描述
 
