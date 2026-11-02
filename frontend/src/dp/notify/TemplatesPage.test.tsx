@@ -73,6 +73,54 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     await waitFor(() => expect(screen.queryByText("範本已更新")).not.toBeInTheDocument())
   })
 
+  it("主旨含一次性連結變數 → 前端 Zod 擋下、不送出（#50）", async () => {
+    let putCalled = false
+    server.use(
+      http.put("/api/dp/notify/templates/:module/:code", () => {
+        putCalled = true
+        return HttpResponse.json({})
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<TemplatesPage />)
+    await user.click(await screen.findByRole("button", { name: "編輯" }))
+
+    const subject = await screen.findByLabelText("主旨")
+    await user.clear(subject)
+    await user.click(subject)
+    await user.paste("密碼重設 {reset_link}")
+    await user.click(screen.getByRole("button", { name: "儲存" }))
+
+    expect(
+      await screen.findByText("主旨不得使用重設、驗證或啟用連結等一次性連結變數，請改放於內文"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(putCalled).toBe(false)
+  })
+
+  it("後端擋下主旨連結變數（422 DP_MAIL_013）→ 顯示可讀錯誤訊息", async () => {
+    server.use(
+      http.put("/api/dp/notify/templates/:module/:code", () =>
+        HttpResponse.json(
+          {
+            error_code: "DP_MAIL_013",
+            error_message: "主旨不得使用重設、驗證或啟用連結等一次性連結變數，請改放於內文",
+          },
+          { status: 422 },
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<TemplatesPage />)
+    await user.click(await screen.findByRole("button", { name: "編輯" }))
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
+
+    expect(
+      await screen.findByText("主旨不得使用重設、驗證或啟用連結等一次性連結變數，請改放於內文"),
+    ).toBeInTheDocument()
+  })
+
   it("編輯儲存遇版本衝突（409 DP_MAIL_004）→ 顯示錯誤訊息", async () => {
     server.use(
       http.put("/api/dp/notify/templates/:module/:code", () =>

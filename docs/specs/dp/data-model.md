@@ -116,7 +116,7 @@ erDiagram
         VARCHAR CALLER_MODULE
         VARCHAR RECIPIENT
         VARCHAR SUBJECT "渲染快照"
-        TEXT BODY "渲染快照（敏感系統信SENT後遮罩）"
+        TEXT BODY "渲染快照（一次性連結信SENT後或FAILED逾時效後遮罩）"
         VARCHAR STATUS "PENDING/SENT/FAILED"
         INT RETRY_COUNT
         VARCHAR ERROR_MSG
@@ -297,7 +297,7 @@ erDiagram
 | CALLER_MODULE | VARCHAR(5) | Y | — | 呼叫方模組（DP / ET / DM）|
 | RECIPIENT | VARCHAR(255) | Y | — | 收件人（一列一收件人，單筆失敗獨立重試）|
 | SUBJECT | VARCHAR(200) | Y | — | 渲染後主旨快照 |
-| BODY | TEXT | Y | — | 渲染後內文快照。例外：(DP, `PWD_RESET`) / (DP, `EMAIL_CHANGE_VERIFY`) 含一次性明文連結，寄出成功轉 SENT 時改寫為固定字串「[已遮罩：本信含一次性連結，寄出後清除原文]」；PENDING 保留原文供重試、FAILED（終態）依 SA 裁示保留原文（#50）|
+| BODY | TEXT | Y | — | 渲染後內文快照。例外：(DP, `PWD_RESET`) / (DP, `EMAIL_CHANGE_VERIFY`) / (DP, `ACCOUNT_VERIFY`) / (DP, `ACCOUNT_INVITE`) 含一次性明文連結，寄出成功轉 SENT 時改寫為固定字串「[已遮罩：本信含一次性連結，寄出後清除原文]」；FAILED（終態）於建立後超過該範本對應之連結時效參數時由 `SCHDP001` 改寫為同一字串（渲染失敗之空 BODY 不改寫）；PENDING 保留原文供重試（#50）|
 | STATUS | VARCHAR(10) | Y | PENDING | PENDING / SENT / FAILED |
 | RETRY_COUNT | INT | Y | 0 | 已重試次數（上限為平台級 `MAIL` 參數）|
 | ERROR_MSG | VARCHAR(500) | N | — | 最後失敗原因 |
@@ -414,7 +414,7 @@ erDiagram
 
 | JOB_ID | MODULE | 說明 |
 |--------|--------|------|
-| SCHDP001 | DP | 每日：閒置帳號禁用 + 密碼到期提醒 |
+| SCHDP001 | DP | 每日：閒置帳號禁用 + 密碼到期提醒 + 清理逾期待驗證列 + 遮罩逾連結時效之寄送失敗信件 |
 | SCHET001 / SCHET002 | ET | ET 週報 / 提醒、到期關閉 + 加急提醒（handler 由 ET 提供）|
 | SCHDM001 | DM | DM KPI 週報 + 未讀提醒（handler 由 DM 提供）|
 

@@ -7,7 +7,8 @@ from sqlalchemy import select
 
 from app.core.utils import utcnow
 from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
-from app.dp.notify.worker import REDACTED_BODY, EmailWorker
+from app.dp.notify.redaction import REDACTED_BODY
+from app.dp.notify.worker import EmailWorker
 from app.services import NotifyService
 
 pytestmark = pytest.mark.integration
