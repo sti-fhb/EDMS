@@ -108,6 +108,14 @@ BEGIN
     IF has_table_privilege(app_role, 'public."DP_AUDIT_LOG"', 'UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES') THEN
         RAISE EXCEPTION 'app_role (%) 對 DP_AUDIT_LOG 仍有 INSERT / SELECT 以外的權限，請檢查授予 PUBLIC 的權限', app_role;
     END IF;
+    IF NOT (has_table_privilege(app_role, 'public."DP_AUDIT_LOG"', 'INSERT')
+            AND has_table_privilege(app_role, 'public."DP_AUDIT_LOG"', 'SELECT')) THEN
+        RAISE EXCEPTION 'app_role (%) 對 DP_AUDIT_LOG 缺 INSERT / SELECT，app 將無法寫入稽核', app_role;
+    END IF;
+    IF to_regclass('public.alembic_version') IS NOT NULL
+       AND has_table_privilege(app_role, 'public.alembic_version', 'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+        RAISE EXCEPTION 'app_role (%) 仍可寫入 alembic_version，請檢查授予 PUBLIC 的權限', app_role;
+    END IF;
     IF has_schema_privilege(app_role, 'public', 'CREATE') OR has_database_privilege(app_role, current_database(), 'CREATE') THEN
         RAISE EXCEPTION 'app_role (%) 仍可在 public schema / 資料庫建立物件（多半是授予 PUBLIC 的 CREATE），'
             '請由 owner 執行 REVOKE CREATE ON SCHEMA public FROM PUBLIC 後重跑', app_role;

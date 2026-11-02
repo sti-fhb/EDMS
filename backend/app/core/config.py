@@ -1,7 +1,7 @@
 import ipaddress
 import os
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -211,7 +211,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_migration_url_same_database(self) -> "Settings":
-        """MIGRATION_DATABASE_URL 只能換帳號，不能換庫：host / port / 資料庫名須與 DATABASE_URL 相同（#22）。
+        """MIGRATION_DATABASE_URL 只能換帳號，不能換庫：host / port / 資料庫名（含 query 的 host / port）
+        須與 DATABASE_URL 相同（#22）。
 
         兩者指向不同庫時 migration 會套到 app 沒在用的那個庫——部署表面成功、app 卻 schema 不符；
         本機則可能讓「只覆寫 DATABASE_URL」的 alembic 指令打到 `.env` 裡的另一個庫。
@@ -221,13 +222,21 @@ class Settings(BaseSettings):
         if not migration:
             return self
 
-        def _target(url: str) -> tuple[str | None, int, str]:
+        def _target(url: str) -> tuple[str | None, int, str, list[str], list[str]]:
             p = urlparse(url)
             try:
                 port = p.port or 5432
             except ValueError:
                 port = -1  # 格式錯誤：讓比對失敗，交由連線時報錯
-            return ((p.hostname or "").lower() or None, port, p.path.lstrip("/"))
+            # query 的 host / port（如 `?host=/run/postgresql`）會覆寫實際連線目標，一併比對
+            query = parse_qs(p.query)
+            return (
+                (p.hostname or "").lower() or None,
+                port,
+                p.path.lstrip("/"),
+                query.get("host", []),
+                query.get("port", []),
+            )
 
         if _target(migration) != _target(self.DATABASE_URL):
             raise ValueError("MIGRATION_DATABASE_URL 的 host / port / 資料庫名須與 DATABASE_URL 相同（只能換帳號密碼）")

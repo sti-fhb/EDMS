@@ -441,8 +441,9 @@ def test_alembic_env_uses_migration_url() -> None:
         "postgresql+asyncpg://owner:p@otherhost/edms",
         "postgresql+asyncpg://owner:p@localhost:5433/edms",
         "postgresql+asyncpg://owner:p@localhost/edms_dev",
+        "postgresql+asyncpg://owner:p@localhost/edms?host=/run/postgresql",
     ],
-    ids=["host", "port", "database"],
+    ids=["host", "port", "database", "query-host"],
 )
 def test_migration_url_must_target_same_database(migration_url: str) -> None:
     """只能換帳號、不能換庫：指向別的 host / port / 庫時啟動即擋，訊息不回顯連線字串。"""
@@ -463,3 +464,15 @@ def test_migration_url_same_database_explicit_default_port_accepted() -> None:
     """同一個庫、只差在有沒有寫出預設埠 5432 → 視為相同。"""
     s = _settings_with_db_urls(MIGRATION_DATABASE_URL="postgresql+asyncpg://owner:p@LOCALHOST:5432/edms")
     assert s.migration_database_url.startswith("postgresql+asyncpg://owner:p@")
+
+
+def test_pytest_ignores_migration_url_from_dotenv() -> None:
+    """tests/conftest.py 把 MIGRATION_DATABASE_URL 清空：backend/.env 設了指向 dev 庫的值也不影響測試。
+
+    少了這一步，那個值會被 Settings 從 .env 補讀，與測試庫不同庫而在 import 時被 validator 擋下，
+    整批測試在 collection 階段失敗（CI 沒有 .env，看不到）。
+    """
+    from app.core.config import settings
+
+    assert os.environ["MIGRATION_DATABASE_URL"] == ""
+    assert settings.migration_database_url == settings.DATABASE_URL

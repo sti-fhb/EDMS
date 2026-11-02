@@ -179,7 +179,18 @@ log "執行 migration..."
 # 檔案不存在時與先前相同——alembic 退回 DATABASE_URL。
 # 以 `-e 變數名`（不帶值）從本指令的環境帶入，連線字串不會出現在指令列 / ps。
 if [ -f /opt/edms/.env.migrate ]; then
-  MIGRATION_URL=$(sed -n 's/^MIGRATION_DATABASE_URL=//p' /opt/edms/.env.migrate | tr -d '"'"'"'"' | head -1)
+  # 內含 owner 密碼：權限須為 root 擁有、群組與其他人無任何權限（如 600 / 400）
+  MIGRATE_PERM=$(stat -c '%U %a' /opt/edms/.env.migrate)
+  if [ ! -r /opt/edms/.env.migrate ]; then
+    log "❌ /opt/edms/.env.migrate 無法讀取，中止"
+    exit 1
+  fi
+  if [[ ! "${MIGRATE_PERM}" =~ ^root\ [0-7]00$ ]]; then
+    log "❌ /opt/edms/.env.migrate 的擁有者 / 權限為 ${MIGRATE_PERM}，須為 root 且 600，中止"
+    exit 1
+  fi
+  # 去掉引號與 CRLF 行尾（在 Windows 編輯過的檔案，\r 會被帶進連線字串）
+  MIGRATION_URL=$(sed -n 's/^MIGRATION_DATABASE_URL=//p' /opt/edms/.env.migrate | tr -d "\"'\r" | head -1)
   if [ -z "${MIGRATION_URL}" ]; then
     log "❌ /opt/edms/.env.migrate 存在但沒有 MIGRATION_DATABASE_URL，中止"
     exit 1
