@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dp.user.kinds import KIND_ADMIN_INVITE, KIND_SELF_REGISTER, PendingKind
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
 from app.dp.users.models import DpUser
@@ -326,10 +327,10 @@ class AuthRepository:
         """
         conditions = [DpPendingRegistration.kind == KIND_ADMIN_INVITE]
         if keyword:
-            pattern = f"%{keyword}%"
+            pattern = contains(keyword)
             conditions.append(
-                func.lower(DpPendingRegistration.user_name).like(func.lower(pattern))
-                | func.lower(DpPendingRegistration.email).like(func.lower(pattern))
+                DpPendingRegistration.user_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR)
+                | DpPendingRegistration.email.ilike(pattern, escape=LIKE_ESCAPE_CHAR)
             )
         return (
             select(DpPendingRegistration)

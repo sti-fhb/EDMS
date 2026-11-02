@@ -1,0 +1,6 @@
+# 一律以 LF 取出，不受 Windows 的 core.autocrlf 影響（#833 B3）：
+# - 建置腳本在映像內以 busybox sh 執行，CRLF 會讓 `set -eu\r` 等每一行都壞掉；在 Windows 上 checkout 後建映像時
+#   （例如院內交付版的打包）建置會失敗
+# - 官方主設定的副本是腳本的測試輸入，腳本以整行比對（grep -x），行尾多出 \r 就比對不到
+nginx/tune-main-conf.sh text eol=lf
+backend/tests/fixtures/nginx_official_main.conf text eol=lf

@@ -4,6 +4,7 @@ from sqlalchemy import ColumnElement, Row, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.core.utils import taipei_day_start
 from app.dp.audit.models import DpAuditLog
 from app.dp.users.models import DpUser
@@ -33,15 +34,20 @@ def build_audit_conditions(
     conditions: list[ColumnElement[bool]] = []
 
     if operator:
-        pattern = f"%{operator}%"
+        pattern = contains(operator)
         matching_users = select(DpUser.user_id).where(
             or_(
-                DpUser.user_id.ilike(pattern),
-                DpUser.user_name.ilike(pattern),
-                DpUser.email.ilike(pattern),
+                DpUser.user_id.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                DpUser.user_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                DpUser.email.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
             )
         )
-        conditions.append(or_(DpAuditLog.created_user.ilike(pattern), DpAuditLog.created_user.in_(matching_users)))
+        conditions.append(
+            or_(
+                DpAuditLog.created_user.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                DpAuditLog.created_user.in_(matching_users),
+            )
+        )
     if module:
         conditions.append(DpAuditLog.module == module)
     if func_name:
@@ -65,8 +71,9 @@ def build_audit_conditions(
 class AuditLogRepository:
     """DP_AUDIT_LOG 資料存取（append-only）。
 
-    刻意**不提供** update / delete 方法：append-only 於應用層落地（research §6）；
-    DB 帳號僅 GRANT INSERT / SELECT 屬部署層（見 issue #22）。
+    刻意**不提供** update / delete 方法：append-only 於應用層落地（research §6）。
+    DB 層另有兩道（#22）：app 執行期角色僅 GRANT INSERT / SELECT（`scripts/db-app-role.sql`），
+    以及 trigger `TRG_DP_AUDIT_LOG_DENY_MODIFY` 拒絕 UPDATE / DELETE / TRUNCATE。
     """
 
     async def acquire_chain_lock(self, db: AsyncSession) -> None:

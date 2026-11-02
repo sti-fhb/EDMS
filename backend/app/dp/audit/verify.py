@@ -12,12 +12,18 @@ ops 例行稽核 / CI 可直接執行：
 退出碼：0＝完好（OK / 空表 EMPTY）、1＝斷鏈（BROKEN）、2＝執行錯誤（如 DB 連線失敗，非斷鏈）。
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.pool import NullPool
 
+from app.core.config import settings
+from app.core.db import create_app_engine
+from app.core.log_redaction import redact_sensitive
 from app.dp.audit.models import DpAuditLog
 from app.dp.audit.service import _compute_row_hash
 
@@ -97,19 +103,44 @@ def render_result(result: ChainVerifyResult) -> tuple[str, int]:
     )
 
 
+@asynccontextmanager
+async def _cli_session() -> AsyncIterator[AsyncSession]:
+    """CLI 專用的 session：**不受 `DB_STATEMENT_TIMEOUT_MS` 限制**（#833 C3）。
+
+    驗鏈是一句走訪全表的查詢；稽核表只增不減，大到單句超過 60 秒時，用應用程式的連線會被中止成
+    退出碼 2「執行錯誤」，例行稽核從此跑不完。比照 migration（`alembic/env.py`）顯式設 0。
+    一次性工具不需要連線池，用 `NullPool`，結束即釋放。
+
+    ⚠️ 整段走訪在同一個交易內：表很大時會長時間持有快照（VACUUM 推進不了）與 `DP_AUDIT_LOG` 的讀鎖。
+    **不要與部署（migration 對此表 ALTER）同時執行**，否則 ALTER 排在它後面、之後所有寫稽核的請求又排在
+    ALTER 後面。`application_name` 讓維運能從 `pg_stat_activity` 認出它（security review L2）。
+    """
+    engine = create_app_engine(
+        settings.DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"statement_timeout": "0", "application_name": "edms-audit-verify"}},
+    )
+    try:
+        async with AsyncSession(engine) as session:
+            yield session
+    finally:
+        await engine.dispose()
+
+
 async def _amain() -> int:
     """CLI 進入點：開 session → 驗鏈 → 印結果 → 回退出碼。
 
     退出碼：0＝完好（OK/EMPTY）、1＝斷鏈（BROKEN）、2＝執行錯誤（如 DB 連線失敗）。
     以 2 區隔「執行錯誤」與「斷鏈」，避免 ops/CI 僅看退出碼時把連線失敗誤判為稽核鏈遭竄改。
     """
-    from app.core.db import AsyncSessionLocal
-
     try:
-        async with AsyncSessionLocal() as db:
+        async with _cli_session() as db:
             result = await verify_chain(db)
     except Exception as exc:
-        print(f"⚠️ 驗鏈執行錯誤（非斷鏈）：{exc}")
+        # 去識別化：SQLAlchemy 例外的訊息帶 `[parameters: …]`，CLI 輸出常進排程 log（#833 C2）
+        message = " ".join(redact_sensitive(str(exc)).split())
+        detail = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+        print(f"⚠️ 驗鏈執行錯誤（非斷鏈）：{detail}")
         return 2
     message, code = render_result(result)
     print(message)
