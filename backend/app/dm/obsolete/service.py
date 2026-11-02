@@ -69,7 +69,7 @@ class ObsoleteService:
         Raises:
             AppError: 缺原因（422 DM_DOC_014）、缺審核者（422 DM_DOC_015）、文件不存在（404 DM_DOC_001）、
                 文件非已發布（409 DM_DOC_016）、審核者為本人（422 DM_REVIEW_001）、附件格式 / 大小違規
-                （422 DM_FILE_001/002）、已有進行中送審（409 DM_REVIEW_002）。
+                （422 DM_FILE_001/002/005）、已有進行中送審（409 DM_REVIEW_002）。
         """
         reason = (reason or "").strip()
         if not reason:
@@ -86,7 +86,7 @@ class ObsoleteService:
         resolved_mime: str | None = None
         if file_bytes:
             await validate_upload(db, size_bytes=len(file_bytes), filename=file_name or "")
-            # M2：伺服端由副檔名 + magic 判定權威 MIME（可預覽類須相符，否則 DM_FILE_002）；不採用戶端 content_type
+            # M2：伺服端由副檔名 + magic 判定權威 MIME（有固定檔頭者須相符，否則 DM_FILE_005）；不採用戶端 content_type
             resolved_mime = resolve_upload_mime(file_bytes, file_name or "")
         # 建送審週期（OBSOLETE、指向當前發布版）：審核者=本人 → DM_REVIEW_001；
         # 已有進行中送審（含新版本）→ DM_REVIEW_002（一文件一 PENDING，FR-004）

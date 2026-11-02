@@ -2096,16 +2096,12 @@ class TestDiscardUnkeptRateLimit:
         uid = await _user(db, "ZT_RL1")
         cid = await _full_course(client, db, uid)
         await db.commit()
-        try:
-            # 把狀態轉換那個桶吃滿——正向錨點：確認真的滿了，否則下面的 204 不能證明什麼
-            for _ in range(course_router._STATUS_RATE_MAX):
-                await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
-            full = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
-            assert full.status_code == 429, full.text
+        # 把狀態轉換那個桶吃滿——正向錨點：確認真的滿了，否則下面的 204 不能證明什麼
+        for _ in range(course_router._STATUS_RATE_MAX):
+            await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+        full = await client.get(f"{_COURSES}/{cid}/publish-check", headers=_bearer(uid))
+        assert full.status_code == 429, full.text
 
-            r = await client.delete(f"{_COURSES}/{cid}/content/stage/unkept", headers=_bearer(uid))
+        r = await client.delete(f"{_COURSES}/{cid}/content/stage/unkept", headers=_bearer(uid))
 
-            assert r.status_code == 204, r.text
-        finally:
-            course_router._status_limiter._hits.clear()
-            course_router._status_ip_limiter._hits.clear()
+        assert r.status_code == 204, r.text

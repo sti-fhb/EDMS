@@ -15,13 +15,13 @@
 #
 # 本 repo 為 **public**，故：
 #   1. 不使用 self-hosted runner —— fork PR 會在 runner 上執行任意程式碼，
-#      而該 runner 所在的 bms-prod-02 同時跑著 TBMS（血庫，主系統）
-#   2. **不授予本 workflow 任何 bms-prod-02 的存取權** —— 部署必然需要 docker
+#      而該 runner 所在的 <PROD_VM> 同時跑著 TBMS（血庫，主系統）
+#   2. **不授予本 workflow 任何 <PROD_VM> 的存取權** —— 部署必然需要 docker
 #      權限，而 docker group 等同 root，可讀取 /opt/tbms/.env.prod、連上 tbms-db。
 #      讓 public repo 的 workflow 取得主系統正式機的 root 等級存取，違反
 #      「不讓次級系統拉低主系統可用性／安全性」的原則
 #
-# 部署改由 **VM 側主動拉取**：bms-prod-02 上的 systemd timer 執行
+# 部署改由 **VM 側主動拉取**：<PROD_VM> 上的 systemd timer 執行
 # scripts/vm-deploy.sh，偵測到新的 image tag 才進行部署。本 workflow 的最大
 # 爆炸半徑因此收斂為「能推一個映像到 edms-image」。
 #
@@ -240,7 +240,7 @@ jobs:
           docker push "${AR_BASE}/edms-backend:latest"
 
       # 🔴 前綴 build-arg 不可省：線上自 2026-09-22 起改以 URL 路徑分流
-      #   （https://bms.tbsf.tw/edms/），front-proxy 會把 /edms 前綴 rewrite 掉才
+      #   （https://<PUBLIC_HOST>/edms/），front-proxy 會把 /edms 前綴 rewrite 掉才
       #    轉給本系統的 nginx，但**瀏覽器看到的網址仍帶前綴** —— 靜態資源與
       #    API base 若不帶前綴，抓到的會是 /assets/...、/api/...，那是 TBMS 的
       #    位置，全部落到 proxy 的 404。
@@ -300,4 +300,4 @@ jobs:
       # 已有對應的映像 tag，有才部署——確保程式碼與映像一致，不會拉到半成品。
       - name: 部署提示
         run: |
-          echo "::notice::映像已推送（${SHORT_SHA}）。部署由 bms-prod-02 的 edms-deploy.timer 自動拉取，非本 workflow 執行。"
+          echo "::notice::映像已推送（${SHORT_SHA}）。部署由正式環境 VM 的 edms-deploy.timer 自動拉取，非本 workflow 執行。"

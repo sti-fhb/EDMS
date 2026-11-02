@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, DBAPIError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.access_log_redaction import install_access_log_redaction
@@ -21,7 +22,7 @@ from app.core.exceptions import AppError
 from app.core.log_redaction import format_exception_for_log
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
-from app.core.request_context import get_client_ip, set_client_ip
+from app.core.request_context import set_client_ip
 from app.core.upload_auth_precheck import UploadAuthPrecheckMiddleware
 from app.dm.access.router import router as dm_access_router
 from app.dm.bootstrap import register_dm_module
@@ -102,11 +103,6 @@ async def lifespan(app: "FastAPI"):
 
 class VersionResponse(BaseModel):
     version: str
-
-
-class ClientInfoResponse(BaseModel):
-    ip: str | None
-    is_ipv6: bool
 
 
 # 啟動時讀取一次版本號，避免每次請求都讀檔
@@ -216,6 +212,36 @@ async def client_ip_middleware(request: Request, call_next):
 # 各業務模組的 router 於後續 task 開發時在此 include。
 
 
+def _release_tracebacks(exc: BaseException) -> None:
+    """清掉 `exc` 及其串鏈（`__cause__` / `__context__`）上每個例外的 `__traceback__`（#289）。
+
+    各模組慣用**模組層級 `AppError` 常數**再重複 raise。CPython raise 一個已帶
+    `__traceback__` 的既有實例時，會把本次傳播的 frame **附加**上去而非取代，而常數永遠
+    被 module globals 持有 → traceback 只增不減，每筆釘住一個 frame 及其 locals（請求
+    body、含 bearer token 的 `Request`）。被拒絕的請求每一次都永久佔一份記憶體。
+
+    走到 handler 時例外已不再傳播，traceback 沒有任何用途（本 handler 只記 debug log、
+    不印 stack），清掉即可讓常數寫法也安全。
+
+    ⚠️ **要沿串鏈清，不能只清 `exc`**：`raise X from None` 只是不顯示 `__context__`，
+    被攔下的那個例外仍掛在上面（`et/learning/service.py` 的 `_require_access_by_course`
+    即此形狀）；若它也是常數，它的 traceback 在本 handler 看不到的地方照樣成長。
+
+    ⛔ 本函式涵蓋不到「`except AppError` 之後**不重拋**」的路徑——那個例外根本不會走到
+    handler。故未掛限流的匿名可達端點仍應用工廠函式（`sti-backend-modules.md`「模組層級常數 vs
+    工廠函式」）。
+    """
+    seen: set[int] = set()
+    pending: list[BaseException] = [exc]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        current.__traceback__ = None
+        pending.extend(e for e in (current.__cause__, current.__context__) if e is not None)
+
+
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """將 AppError 統一轉換為標準錯誤回應格式。
@@ -223,8 +249,11 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     回傳格式：{"error_code": "...", "error_message": "..."}；限流 / 冷卻類 429 另帶
     retry_after；帶 `extra` 者（如 ET 發布檢核之 blockers 清單）併入同一層。
     debug log 保留完整錯誤細節供後端排查，不對外暴露。
+
+    回應前清掉 traceback（#289），理由見 `_release_tracebacks`。
     """
     logger.debug("AppError %s %s: [%s] %s", request.method, request.url.path, exc.error_code, exc.detail)
+    _release_tracebacks(exc)
     content: dict[str, object] = {"error_code": exc.error_code, "error_message": exc.detail}
     if exc.retry_after is not None:
         content["retry_after"] = exc.retry_after
@@ -315,27 +344,42 @@ async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
     )
 
 
-#: PostgreSQL 的 query_canceled——`statement_timeout` 到期即以此中止查詢。
-_PG_QUERY_CANCELED = "57014"
+#: 刻意設下的 DB 等候上限到期時 PostgreSQL 回的 SQLSTATE：
+#: 57014 query_canceled（`statement_timeout`，#810）、55P03 lock_not_available（稽核鎖的 `lock_timeout`，#833 B2）。
+_PG_BUSY_SQLSTATES = frozenset({"57014", "55P03"})
 
 
-def query_timeout_response(request: Request, exc: Exception) -> JSONResponse | None:
-    """查詢逾時回 503「系統忙碌」；不是查詢逾時回 None（#810 第 2 項）。
+def _is_db_busy(exc: Exception) -> bool:
+    if isinstance(exc, SATimeoutError):  # 連線池等候逾時（#833 B1）：還沒拿到連線，不是 DBAPIError
+        return True
+    return isinstance(exc, DBAPIError) and getattr(exc.orig, "sqlstate", None) in _PG_BUSY_SQLSTATES
 
-    查詢超過 `DB_STATEMENT_TIMEOUT_MS` 時 PostgreSQL 以 57014 中止它，SQLAlchemy 包成 `DBAPIError`
-    ——不是 `DataError`，會落到 `unhandled_exception_handler`。改前那裡回 500 並以 ERROR 印出堆疊；
-    但逾時是刻意設下的上限、代表系統忙碌，不是程式錯誤，記成 ERROR 會在系統最忙、最需要 log 乾淨
-    的時候刷屏。交易與連線不必在這裡處理：`get_db` 遇例外會 rollback，連線回池後可重用。
+
+def db_busy_response(request: Request, exc: Exception) -> JSONResponse | None:
+    """DB 等候上限到期回 503「系統忙碌」；其他例外回 None。
+
+    三種來源，都是刻意設下的上限：
+    - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`，PostgreSQL 以 57014 中止
+    - 等稽核鎖逾時（#833 B2）：超過 `DB_AUDIT_LOCK_TIMEOUT_MS`，PostgreSQL 以 55P03 中止
+    - 連線池等候逾時（#833 B1）：池滿等超過 `DB_POOL_TIMEOUT`，SQLAlchemy 拋 `sqlalchemy.exc.TimeoutError`
+
+    前兩種被 SQLAlchemy 包成 `DBAPIError`——不是 `DataError`，會落到 `unhandled_exception_handler`。
+    改前那裡回 500 並以 ERROR 印出堆疊；但這些代表系統忙碌、不是程式錯誤，記成 ERROR 會在系統最忙、
+    最需要 log 乾淨的時候刷屏。交易與連線不必在這裡處理：`get_db` 遇例外會 rollback，連線回池後可重用。
+
+    ⚠️ 55P03 目前只有稽核鎖會產生（本庫沒有 `NOWAIT`；`dp/notify` 用的是 `SKIP LOCKED`，不會報錯）。
+    日後加了 `NOWAIT`，它的 55P03 也會變成 503，要確認那是想要的語意。
 
     ⛔ **不要改成以 `@app.exception_handler(DBAPIError)` 註冊**：`IntegrityError` 也是 `DBAPIError`
     的子類，註冊後它會被這裡攔走——`tests/unit/test_core_data_error_handler.py` 的
     `test_不可攔截_IntegrityError`（#697）明文禁止，理由是它是 `dm/editor/service` 的並發後盾。
     所以由 catch-all 在最前面呼叫本函式，其餘錯誤照舊。
     """
-    if not isinstance(exc, DBAPIError) or getattr(exc.orig, "sqlstate", None) != _PG_QUERY_CANCELED:
+    if not _is_db_busy(exc):
         return None
     logger.warning(
-        "Query canceled by statement_timeout on %s %s\n%s",
+        "DB busy (%s) on %s %s\n%s",
+        type(exc).__name__,
         request.method,
         request.url.path,
         format_exception_for_log(exc),
@@ -355,11 +399,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     ——SQLAlchemy StatementError 的訊息含 SQL 與綁定參數，會把個資寫進 log（#123），
     改由 app/core/log_redaction.format_exception_for_log 去識別化。
     AppError / HTTPException / RequestValidationError 均有專屬 handler，不會走到此處。
-    查詢逾時（SQLSTATE 57014）例外，回 503，見 `query_timeout_response`。
+    DB 等候上限到期（查詢逾時、等稽核鎖逾時、連線池等候逾時）回 503，見 `db_busy_response`。
     """
-    timeout = query_timeout_response(request, exc)
-    if timeout is not None:
-        return timeout
+    busy = db_busy_response(request, exc)
+    if busy is not None:
+        return busy
     logger.error(
         "Unhandled exception on %s %s\n%s",
         request.method,
@@ -388,14 +432,3 @@ async def health_check() -> JSONResponse:
 async def get_version() -> VersionResponse:
     """回傳目前系統版本號（來源：pyproject.toml）。"""
     return VersionResponse(version=_APP_VERSION)
-
-
-@app.get("/api/client-info", response_model=ClientInfoResponse)
-async def get_client_info() -> ClientInfoResponse:
-    """回傳呼叫者的連線資訊（IP + IPv4/IPv6 協定）。
-
-    公開端點不需 JWT，回傳資訊僅含請求者自身 IP，無資訊洩漏疑慮。
-    IP 由 client_ip_middleware 寫入 contextvar；is_ipv6 以「IP 字串含冒號」判斷。
-    """
-    ip = get_client_ip()
-    return ClientInfoResponse(ip=ip, is_ipv6=":" in ip if ip else False)

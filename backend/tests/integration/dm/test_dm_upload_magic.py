@@ -66,11 +66,11 @@ async def _create(db, *, filename, data, mime):
 
 
 async def test_fake_pdf_rejected(db):
-    """副檔名 .pdf 但內容非 PDF（偽造）→ DM_FILE_002。"""
+    """副檔名 .pdf 但內容非 PDF（偽造）→ DM_FILE_005（#211 起與「不支援的格式」分開）。"""
     await _editor(db)
     with pytest.raises(AppError) as ei:
         await _create(db, filename="evil.pdf", data=b"MZ\x90\x00 not a pdf", mime="application/pdf")
-    assert ei.value.error_code == "DM_FILE_002"
+    assert ei.value.error_code == "DM_FILE_005"
 
 
 async def test_real_pdf_stores_server_authoritative_mime(db):

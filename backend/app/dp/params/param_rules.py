@@ -50,8 +50,10 @@ _RULES: dict[tuple[str, str], IntRule] = {
     #   LOCK_MINUTES 設大 → 帳號鎖定後解不開，而管理者自己也可能被鎖（DM 側無 bootstrap
     #     管理者機制），24 小時之後就只剩手動解鎖一條路。
     #   RESET_TOKEN_TTL_MIN / EMAIL_CHANGE_TTL_MIN 設大 → 連結近乎永久有效。這兩條與 #50
-    #     互鎖：該 issue 指出 DP_EMAIL_LOG.BODY 永久保存含明文重設連結的信件內文，而目前
-    #     唯一的緩解就是「一次性 + 短 TTL」——上限放寬等於把那個緩解拆掉，故取 2 小時
+    #     互鎖：DP_EMAIL_LOG.BODY 保存含明文連結的信件內文。#50 已讓 PWD_RESET /
+    #     EMAIL_CHANGE_VERIFY 於 SENT 後遮罩，但 PENDING / FAILED 列（保留原文）以及下述
+    #     註冊啟用 / 驗證 / 邀請信（不在 #50 裁示範圍）仍存原文，對這些列唯一的緩解仍是
+    #     「一次性 + 短 TTL」——上限放寬等於把那個緩解拆掉，故取 2 小時
     #     （相對預設 30 分鐘仍有 4 倍餘裕）而非業界常見的 24 小時。
     #
     #     ⚠️ **RESET_TOKEN_TTL_MIN 不只管密碼重設**，有四個讀取端共用它：

@@ -185,6 +185,8 @@ cd backend && alembic merge heads -m "merge_multiple_heads"
   3. 執行 alembic upgrade head 驗證可正常 apply
 ```
 
+⚠️ 第 3 步若對的是**共用 dev DB**（`backend/.env`），先過 `/sti-implement`「共用 dev 環境守則」守則 1、2——ET #204 正是在這一步把 dev DB 推到未合併的 merge revision，鎖住其餘三個 session 約 2 小時。只想驗證能否 apply，跑任一支 integration 測試即可（`apply_migrations` fixture 會在隔離 test DB 上執行 `alembic upgrade head`），不必動 dev DB。
+
 ##### 選擇 2：稍後手動處理
 
 顯示指令供使用者自行執行後結束：

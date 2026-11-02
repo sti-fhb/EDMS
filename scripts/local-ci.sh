@@ -64,6 +64,27 @@ skip_step() {
     echo -e "${YELLOW}  ⊘ ${name} (skipped)${NC}"
 }
 
+# 🔴 不可寫成 $(uv run alembic heads | wc -l)：崩潰時 traceback 走 stderr、stdout 為空，
+# wc -l 得 0 → 被當成「正常」（#598）。須先檢查指令本身的 exit code。
+check_alembic_heads() {
+    local heads count
+    if ! heads=$(uv run alembic heads 2>&1); then
+        echo "alembic heads 執行失敗（非 head 數問題）："
+        echo "$heads"
+        return 1
+    fi
+    # 數 "(head)" 標記而非行數；grep 零命中時 exit 1，故以 || true 兜底。
+    # 0 個也視為失敗：本 repo 已有 migration，數到 0 代表輸出格式不如預期，寧紅勿綠。
+    count=$(printf '%s\n' "$heads" | grep -c '(head)' || true)
+    # :-0 兜底：萬一 grep 自身出錯而無輸出，[ "" -ne 1 ] 會判為 false 而放行
+    if [ "${count:-0}" -ne 1 ]; then
+        echo "發現 ${count} 個 Alembic head，請先執行 /sti-alembic-check 合併"
+        echo "$heads"
+        return 1
+    fi
+    echo "✅ Alembic head 正常（單一 head）：${heads}"
+}
+
 # ──────────────────────────────────────────────────────────
 # 後端檢查
 # ──────────────────────────────────────────────────────────
@@ -105,24 +126,18 @@ run_backend() {
     run_step "Backend: ruff format" uv run ruff format --check .
 
     # 3. Alembic heads 檢查（確保只有單一 migration head）
-    # 註：alembic 會載入 env.py，需要 backend/.env 提供 DATABASE_URL / JWT_SECRET_KEY 等設定，
-    #     但不會實際連線 DB；若缺 .env 會直接報錯，故先檢查 .env 是否存在。
-    #     versions/ 為空時 alembic heads 無輸出（0 head），亦視為正常。
+    # 註：alembic heads 會載入全部 migration 檔，其中有一支在 module 層 import settings，
+    #     需要 backend/.env 提供 DATABASE_URL / JWT_SECRET_KEY 等設定，但不會實際連線 DB；
+    #     若缺 .env 會直接報錯，故先檢查 .env 是否存在。
+    # ⚠️ 本機綠燈不代表 merge 後單頭：多頭是「分支 + main」合起來才有的狀態，
+    #     只有 CI（測 merge commit）看得到。本機這道只攔得下自己分支內的多頭。
     if [[ ! -f .env ]]; then
         echo -e "${YELLOW}  ⚠ 找不到 backend/.env，跳過 alembic heads 檢查${NC}"
         echo -e "${YELLOW}    請執行：cp .env.example .env 並設定必要欄位${NC}"
         skip_step "Backend: alembic heads"
     else
-        # 使用 wc -l 與 CI workflow 對齊（ci.yml），避免本地通過但 CI 失敗
-        run_step "Backend: alembic heads" bash -c '
-            HEAD_COUNT=$(uv run alembic heads | wc -l)
-            if [ "$HEAD_COUNT" -gt 1 ]; then
-                echo "發現 ${HEAD_COUNT} 個 Alembic head，請先執行 /sti-alembic-check 合併"
-                uv run alembic heads
-                exit 1
-            fi
-            echo "✅ Alembic head 正常（單一 head 或尚無 migration）"
-        '
+        # 判定邏輯與 ci.yml「檢查 Alembic heads」對齊，避免本地通過但 CI 失敗
+        run_step "Backend: alembic heads" check_alembic_heads
     fi
 
     # 4. Unit tests

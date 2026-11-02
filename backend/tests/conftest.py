@@ -18,7 +18,8 @@ os.environ.setdefault(
     "postgresql+asyncpg://test:test@localhost/test_edms",
 )
 # JWT_SECRET_KEY 為必填設定；unit 測試以固定測試值滿足載入，不用於任何真實簽章。
-os.environ.setdefault("JWT_SECRET_KEY", "test-secret-not-for-production")
+# 長度須達 app.core.config 對 HS256 要求的 32 bytes，否則 settings 載入失敗；門檻調整時須跟著改。
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-not-for-production-32b+")
 # DEBUG：測試 / CI 屬非 production。設 true 以免 FRONTEND_BASE_URL 的 production 護欄
 # （見 app.core.config._validate_frontend_base_url）在 CI（無 .env、FRONTEND_BASE_URL 落回
 # localhost 預設）擋下 settings 載入，導致全數測試 collection error。

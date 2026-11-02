@@ -12,7 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.http_cache import NO_STORE_HEADERS
 from app.core.pagination import PagedResponse
-from app.dm.deps import DmContext, get_dm_context
+from app.core.rate_limit import (
+    EXPORT_IP_RATE_MAX,
+    EXPORT_USER_RATE_MAX,
+    RATE_WINDOW_SECONDS,
+    SlidingWindowRateLimiter,
+    limit_concurrent_exports,
+    rate_limit_by_ip,
+    rate_limit_by_user,
+)
+from app.dm.deps import DmContext, get_dm_admin_context, get_dm_context
 from app.dm.obsolete_archive.schemas import ObsoleteDocItem, ObsoleteQuery
 from app.dm.obsolete_archive.service import ObsoleteArchiveService
 
@@ -21,6 +30,11 @@ _CODE_MAX_LEN = 10
 
 router = APIRouter(prefix="/api/dm", tags=["dm-obsolete-archive"])
 _service = ObsoleteArchiveService()
+
+#: 匯出限流（#833 B4），門檻理由見 `core/rate_limit.EXPORT_USER_RATE_MAX`。
+_EXPORT_SCOPE = "dm-obsolete-archive-export"
+_export_user_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_USER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_export_ip_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 
 # 入口可見性改用共用 GET /api/dm/admin-access（US11 A' 收斂）；本模組不再提供 /obsolete-archive/access。
 
@@ -41,7 +55,16 @@ async def list_obsolete(
     return await _service.search(db, query=query, roles=ctx.roles, page=page, limit=limit)
 
 
-@router.get("/obsolete-archive/documents/export")
+@router.get(
+    "/obsolete-archive/documents/export",
+    # 先過 DM 管理者閘再限流：非管理者在閘口 403、不佔名額（理由見 `get_dm_admin_context`）。
+    dependencies=[
+        Depends(get_dm_admin_context),
+        Depends(rate_limit_by_user(_export_user_limiter, _EXPORT_SCOPE)),
+        Depends(rate_limit_by_ip(_export_ip_limiter, _EXPORT_SCOPE)),
+        Depends(limit_concurrent_exports),
+    ],
+)
 async def export_obsolete(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),

@@ -122,9 +122,9 @@ class DmDocumentService:
         # 併驗版本歸屬本文件（CURRENT_VERSION_ID 為邏輯 FK 無 DB 約束，防資料異常回錯檔，Sec LOW-1）
         if ver is None or ver.doc_id != doc.doc_id or not ver.file_path:
             raise _NOT_FOUND
-        safe_path = resolve_within_root(
-            ver.file_path, not_found=_NOT_FOUND
-        )  # storage-root 圍籬（#160，收斂 US12 Sec MED-2）
+        # storage-root 圍籬（#160，收斂 US12 Sec MED-2）＋檔案歸屬圍籬（#240 A1）：本端點不掛 DM 角色閘，
+        # 讀取者是 ET 學員，檔案須確實落在本文件目錄下
+        safe_path = resolve_within_root(ver.file_path, not_found=_NOT_FOUND, expect_prefix=doc.doc_id)
         # D-2：不寫 DM_DOC_READ——ET 代學員取檔不計入 DM 閱讀統計（US13），ET 端自行統計學習進度。
         return DmFileContent(
             path=safe_path,

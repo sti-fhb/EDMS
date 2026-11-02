@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.core.utils import utcnow
 from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
-from app.dp.notify.worker import EmailWorker
+from app.dp.notify.worker import REDACTED_BODY, EmailWorker
 from app.services import NotifyService
 
 pytestmark = pytest.mark.integration
@@ -24,6 +24,16 @@ class _SucceedMailer:
 class _FailMailer:
     async def send(self, *, recipient, subject, body):
         raise RuntimeError("smtp down")
+
+
+class _RecordingBodyMailer:
+    """記下寄出的 body，用以證明送進 SMTP 的是原文。"""
+
+    def __init__(self):
+        self.bodies = []
+
+    async def send(self, *, recipient, subject, body):
+        self.bodies.append(body)
 
 
 class _SelectiveMailer:
@@ -127,3 +137,42 @@ async def test_worker_respects_retry_interval(db):
     )
     assert sent == 1
     assert (await _logs(db))[0].status == "SENT"
+
+
+async def test_sensitive_body_redacted_only_after_sent_persisted(db):
+    """敏感系統信（#50）：失敗時 DB 保留原文；寄出後 DB 中 BODY 已遮罩。
+
+    每次狀態轉移後 expire_all 重新查 DB（二次查詢），並**先斷言 STATUS** 再看 BODY——
+    只看最終 BODY 的話，「根本沒寄成功所以還沒遮」與「遮罩了」分不出來（SA 裁示要求）。
+    """
+    link_body = "請點擊 https://edms.example/reset?token=PLAINTEXT 重設密碼"
+    db.add(
+        DpEmailLog(
+            module="DP",
+            template_code="PWD_RESET",
+            caller_module="DP",
+            recipient="a@x.com",
+            subject="s",
+            body=link_body,
+            status="PENDING",
+            retry_count=0,
+            created_user="SYSTEM",
+            created_date=utcnow(),
+        )
+    )
+    await db.flush()
+    worker = EmailWorker()
+
+    await worker.process_pending_once(db, mailer=_FailMailer(), max_retry=3, interval_minutes=0)
+    db.expire_all()
+    row = (await _logs(db))[0]
+    assert row.status == "PENDING"
+    assert row.body == link_body  # 未寄成功（PENDING）：原文保留供重試
+
+    mailer = _RecordingBodyMailer()
+    await worker.process_pending_once(db, mailer=mailer, max_retry=3, interval_minutes=0)
+    db.expire_all()
+    row = (await _logs(db))[0]
+    assert row.status == "SENT"
+    assert row.body == REDACTED_BODY
+    assert mailer.bodies == [link_body]  # 寄出的是原文，遮罩發生在寄出之後
