@@ -38,7 +38,6 @@ class _WindowRepo(AuthRepository):
         return SimpleNamespace(
             email=row.email,
             user_name=row.user_name,
-            pwd_hash=None,
             kind=KIND_SELF_REGISTER,
             expires_date=row.expires_date,
         )
