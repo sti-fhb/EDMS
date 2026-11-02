@@ -10,21 +10,21 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy import text
 
-import app.core.db as core_db
+from app.dp.audit import verify
 from app.dp.audit.service import AuditLogService
-from app.dp.audit.verify import _amain, verify_chain
+from app.dp.audit.verify import _amain, _cli_session, verify_chain
 
 pytestmark = pytest.mark.integration
 
 
 def _patch_session_local(monkeypatch, db):
-    """把 CLI 入口用的 AsyncSessionLocal 導向測試 session（savepoint 隔離）。"""
+    """把 CLI 入口用的 session 導向測試 session（savepoint 隔離）。"""
 
     @asynccontextmanager
     async def _fake_session():
         yield db
 
-    monkeypatch.setattr(core_db, "AsyncSessionLocal", lambda: _fake_session())
+    monkeypatch.setattr(verify, "_cli_session", _fake_session)
 
 
 async def _write_rows(db, n: int) -> None:
@@ -155,5 +155,25 @@ async def test_amain_execution_error_returns_exit_2(db, monkeypatch):
     def _boom():
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr(core_db, "AsyncSessionLocal", _boom)
+    monkeypatch.setattr(verify, "_cli_session", _boom)
     assert await _amain() == 2
+
+
+async def test_cli_的連線不受查詢逾時限制(apply_migrations):
+    """#833 C3：稽核表大到單句全表走訪超過 `DB_STATEMENT_TIMEOUT_MS`（60 秒）時，CLI 不可被中止成
+    退出碼 2「執行錯誤」——那會讓例行稽核永遠跑不完。比照 migration 設 0。
+
+    正向錨點見 `tests/integration/test_core_db_statement_timeout.py`：應用程式的連線帶 60 秒。
+    """
+    async with _cli_session() as db:
+        setting = (await db.execute(text("SELECT setting FROM pg_settings WHERE name = 'statement_timeout'"))).scalar()
+
+    assert setting == "0"
+
+
+async def test_cli_的連線帶_application_name(apply_migrations):
+    """維運要能從 `pg_stat_activity` 認出、必要時中止這條長時間連線。"""
+    async with _cli_session() as db:
+        name = (await db.execute(text("SELECT current_setting('application_name')"))).scalar()
+
+    assert name == "edms-audit-verify"
