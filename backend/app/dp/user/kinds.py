@@ -62,10 +62,10 @@ grep -rn "KIND_ADMIN_INVITE\|KIND_SELF_REGISTER" backend/app --include=*.py
 
 from typing import Literal
 
-# US2 自助註冊：**不帶 PWD_HASH**（#212），密碼由本人於驗證步當場設定
+# US2 自助註冊：**不帶密碼**（#212），密碼由本人於驗證步當場設定
 KIND_SELF_REGISTER = "SELF_REGISTER"
 
-# US4 管理者邀請：建立時 PWD_HASH 為 NULL，受邀者於啟用連結自設密碼才回填
+# US4 管理者邀請：不帶密碼，受邀者於啟用連結自設密碼
 KIND_ADMIN_INVITE = "ADMIN_INVITE"
 
 # 寫入端的型別標註用。字面量在本檔重複一次是刻意的：`Literal` 需要語法上的字面量，

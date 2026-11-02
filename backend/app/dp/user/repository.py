@@ -291,7 +291,6 @@ class AuthRepository:
         token_hash: str,
         email: str,
         user_name: str,
-        pwd_hash: str | None,
         expires_date: datetime,
         now: datetime,
         kind: PendingKind = KIND_SELF_REGISTER,
@@ -300,15 +299,15 @@ class AuthRepository:
     ) -> None:
         """新增一筆待驗證 / 待啟用列（token 僅存 SHA-256）；呼叫方須先清同 Email 舊列。
 
-        kind＝SELF_REGISTER（US2 自助註冊；#212 起 pwd_hash 恆為 None）或 ADMIN_INVITE（US4 邀請，
-        pwd_hash 為 None、invite_id 作為對外識別碼、operator_id 為管理者）。
+        kind＝SELF_REGISTER（US2 自助註冊）或 ADMIN_INVITE（US4 邀請，invite_id 作為對外識別碼、
+        operator_id 為管理者）。兩者皆不帶密碼——本表無密碼欄位（#212 / #668），密碼於驗證 /
+        啟用步由本人當場設定。
         """
         db.add(
             DpPendingRegistration(
                 token_hash=token_hash,
                 email=email,
                 user_name=user_name,
-                pwd_hash=pwd_hash,
                 kind=kind,
                 invite_id=invite_id,
                 expires_date=expires_date,
