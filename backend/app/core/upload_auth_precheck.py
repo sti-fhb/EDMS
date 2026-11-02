@@ -1,4 +1,7 @@
-"""上傳端點在解析 body 之前先驗登入憑證（#810 第 1 項）。
+"""寫入請求在解析 body 之前先驗登入憑證（#810 第 1 項；#833 C1 擴大到所有寫入）。
+
+> 模組與 class 名稱沿用 `upload_*`：最先只管上傳端點。#833 C1 起涵蓋全部寫入請求，
+> 同時上傳數上限仍只管上傳端點。
 
 ## 為什麼不能只靠身分驗證的 dependency
 
@@ -44,7 +47,34 @@ uvicorn 送完回應就關連線，而 nginx 還在轉送 body，於是判定上
 - **名額持有到回應結束**，不是 body 傳完：ET 影片在 body 收完後還要寫檔、跑 `ffprobe`。客戶端中途
   斷線時，要等路由讀到 `http.disconnect` 結束才歸還；例外與取消都由 `finally` 歸還
 
+## 一般寫入也先驗（#833 C1）
+
+JSON body 同樣是 FastAPI 先解析、身分依賴後跑：未登入者可讓後端解析最多 2MB（nginx 的一般 API 上限）
+才被 401 擋下。單一請求不大，但解析在事件迴圈上同步進行、後端只有一個 worker，換多個 IP 連送就能
+吃滿一顆核心（#817 security review M2）。所以 `/api/` 下的寫入（`WRITE_METHODS`）一律先驗，
+**例外只有 `ANONYMOUS_WRITE_ROUTES`**（登入、註冊、持信中 token 的流程）。
+
+- **以「路徑不在匿名清單」判定，不比對路由表**：比對路由要重做 Starlette 的路徑參數解析，而反過來
+  「列出需要驗的」會讓新端點預設不驗。代價是不存在的寫入路徑未登入時回 401 而不是 404；
+  匿名端點帶尾斜線（`POST /api/login/`）也回 401，不再由 Starlette 307 轉址——前端與 nginx 都不送尾斜線。
+  ⛔ 不要為此對路徑做正規化：本層多一種與 Starlette 不同的比對規則，就多一個「兩邊判定不一致」的洞
+- GET 不在範圍內：沒有 body 要解析，身分驗證維持由 `get_jwt_payload` 處理
+- ⚠️ 本層不讓任何匿名 GET 變成需認證（例如 `/api/client-info`，由 #199 處理）
+
+## 匿名寫入的 body 上限（#833 C1 security review MEDIUM-1）
+
+匿名端點不經上面的預檢，是未登入者唯一還能讓後端解析 JSON 的入口；而它們的限流是 dependency、
+在解析**之後**才跑，擋不住解析成本。不設上限的話只換個端點（`/api/login`）就回到 2MB：實測解析 2MB
+約 49ms，nginx 每 IP 50r/s 即可讓單一 worker 滿載。
+
+所以匿名寫入的 body 先在本層收齊、超過 `ANONYMOUS_MAX_BODY_BYTES` 就丟棄並回 413，未超過才原樣轉交。
+以「收齊」而非看 `Content-Length` 判定：不帶長度的 chunked 請求也擋得到。上限內的 body 最多 128KB，
+暫存於記憶體無妨。
+
 ## 清單的單一事實來源
+
+`ANONYMOUS_WRITE_ROUTES` 必須正好是「不經 `get_jwt_payload` 的寫入路由」，
+`tests/unit/test_core_upload_auth_precheck.py` 以 `test_route_auth_coverage` 的路由掃描做守門。
 
 `UPLOAD_PATH_PATTERN` 必須與 `nginx/nginx.conf` 的上傳 location 一致，
 `tests/unit/test_core_upload_auth_precheck.py` 以 OpenAPI 的路由為準對兩邊做守門。
@@ -55,7 +85,7 @@ import re
 from collections import Counter
 from typing import Final
 
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.auth import decode_access_token
 from app.core.exceptions import AppError
@@ -68,10 +98,34 @@ UPLOAD_PATH_PATTERN: Final = re.compile(
 #: 只攔有 body 的寫入方法；同路徑的 GET（文件清單、版本清單）照常走原本的身分驗證。
 UPLOAD_METHODS: Final = frozenset({"POST", "PUT"})
 
+#: 匿名寫入 body 的上限。最大的合法請求是設定密碼類（兩個 4096 字的密碼 + 200 字的 token），以最壞的
+#: JSON 跳脫估約 98KB（前端實際送約 32KB）；`test_匿名寫入上限容得下最大的合法請求` 由 schema 推算守門。
+ANONYMOUS_MAX_BODY_BYTES: Final = 128 * 1024
+
+#: 讀 body 前先驗憑證的方法（#833 C1）。
+WRITE_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+#: 不需登入的寫入端點。理由見 `tests/unit/test_route_auth_coverage.py` 的 `_NO_AUTH_ALLOWLIST`
+#: （匿名端點的權威清單）；新增匿名寫入端點時兩邊都要加，守門測試會提醒。
+ANONYMOUS_WRITE_ROUTES: Final = frozenset(
+    {
+        ("POST", "/api/login"),
+        ("POST", "/api/register"),
+        ("POST", "/api/verify-email"),
+        ("POST", "/api/resend-verification"),
+        ("POST", "/api/forgot-password"),
+        ("POST", "/api/reset-password"),
+        ("POST", "/api/reset-password/policy"),
+        ("POST", "/api/activate-account"),
+        ("POST", "/api/verify-email-change"),
+    }
+)
+
 #: 每位使用者同時進行中的上傳數上限（理由見模組說明）。
 UPLOAD_MAX_CONCURRENT_PER_USER: Final = 2
 
 _UNAUTHORIZED: Final = AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
+_BODY_TOO_LARGE: Final = AppError(status_code=413, detail="上傳內容超過系統允許的大小上限", error_code="COMMON_413")
 _TOO_MANY_UPLOADS: Final = AppError(
     status_code=429, detail="同時上傳的檔案過多，請待目前的上傳完成後再試", error_code="COMMON_429"
 )
@@ -118,11 +172,21 @@ def _route_path(scope: Scope) -> str:
     return path
 
 
-def _needs_precheck(scope: Scope) -> bool:
+def _is_api_write(scope: Scope) -> bool:
     return (
         scope["type"] == "http"
-        and scope.get("method", "").upper() in UPLOAD_METHODS
-        and UPLOAD_PATH_PATTERN.match(_route_path(scope)) is not None
+        and scope.get("method", "").upper() in WRITE_METHODS
+        and _route_path(scope).startswith("/api/")
+    )
+
+
+def _is_anonymous(scope: Scope) -> bool:
+    return (scope.get("method", "").upper(), _route_path(scope)) in ANONYMOUS_WRITE_ROUTES
+
+
+def _is_upload(scope: Scope) -> bool:
+    return (
+        scope.get("method", "").upper() in UPLOAD_METHODS and UPLOAD_PATH_PATTERN.match(_route_path(scope)) is not None
     )
 
 
@@ -134,6 +198,36 @@ async def _discard_body(receive: Receive) -> None:
         if message["type"] == "http.disconnect":
             return
         more_body = message.get("more_body", False)
+
+
+async def _read_capped(receive: Receive, limit: int) -> bytes | None:
+    """讀完整份 body；超過 `limit` 即丟棄其餘並回 `None`，客戶端中途斷線也回 `None`。"""
+    chunks: list[bytes] = []
+    size = 0
+    more_body = True
+    while more_body:
+        message = await receive()
+        if message["type"] == "http.disconnect":
+            return None
+        chunk = message.get("body", b"")
+        size += len(chunk)
+        more_body = message.get("more_body", False)
+        if size > limit:
+            if more_body:
+                await _discard_body(receive)
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _replay(body: bytes, receive: Receive) -> Receive:
+    """把已收齊的 body 當成單一訊息交給路由；之後的 `receive` 交回原本的通道（斷線偵測照常運作）。"""
+    pending = [{"type": "http.request", "body": body, "more_body": False}]
+
+    async def replayed() -> Message:
+        return pending.pop() if pending else await receive()
+
+    return replayed
 
 
 async def _send_error(send: Send, error: AppError) -> None:
@@ -150,7 +244,7 @@ async def _send_error(send: Send, error: AppError) -> None:
 
 
 class UploadAuthPrecheckMiddleware:
-    """上傳端點的寫入請求：未帶有效 token 回 401、同一人同時上傳過多回 429，兩者都丟棄 body、不交給路由解析。"""
+    """寫入請求未帶有效 token 回 401；上傳端點另有同一人同時上傳過多回 429。兩者都丟棄 body、不交給路由解析。"""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -158,13 +252,23 @@ class UploadAuthPrecheckMiddleware:
         self._in_flight: Counter[str] = Counter()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if not _needs_precheck(scope):
+        if not _is_api_write(scope):
             await self.app(scope, receive, send)
             return
+        if _is_anonymous(scope):
+            await self._forward_anonymous(scope, receive, send)
+            return
         sub = _subject(_bearer_token(scope))
-        if sub is None or self._in_flight[sub] >= UPLOAD_MAX_CONCURRENT_PER_USER:
+        if sub is None:
             await _discard_body(receive)
-            await _send_error(send, _UNAUTHORIZED if sub is None else _TOO_MANY_UPLOADS)
+            await _send_error(send, _UNAUTHORIZED)
+            return
+        if not _is_upload(scope):
+            await self.app(scope, receive, send)
+            return
+        if self._in_flight[sub] >= UPLOAD_MAX_CONCURRENT_PER_USER:
+            await _discard_body(receive)
+            await _send_error(send, _TOO_MANY_UPLOADS)
             return
         self._in_flight[sub] += 1
         try:
@@ -173,3 +277,12 @@ class UploadAuthPrecheckMiddleware:
             self._in_flight[sub] -= 1
             if self._in_flight[sub] <= 0:
                 del self._in_flight[sub]
+
+    async def _forward_anonymous(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """匿名寫入：body 收齊且未超過上限才交給路由（理由見模組說明）。"""
+        body = await _read_capped(receive, ANONYMOUS_MAX_BODY_BYTES)
+        if body is None:
+            # 超量回 413；中途斷線時對方已不在，送出也只會被丟掉，照樣送一次即可（與超量共用路徑）
+            await _send_error(send, _BODY_TOO_LARGE)
+            return
+        await self.app(scope, _replay(body, receive), send)

@@ -53,9 +53,11 @@
 > - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`（含等鎖時間）被 PostgreSQL 中止（SQLSTATE 57014），
 >   由 `main.py` 的 `query_timeout_response` 轉成本碼。
 
-> **`COMMON_413`**：**由 nginx 產生，不是後端**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）。
-> 請求 body 超過該路徑的 `client_max_body_size`（一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，
-> 後端完全不會收到請求。後端程式碼 grep 不到這個碼是正常的，⛔ 不要當成孤兒刪掉。
+> **`COMMON_413`**：兩個來源。
+> - **nginx**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）：請求 body 超過該路徑的 `client_max_body_size`
+>   （一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，後端完全不會收到請求。⛔ 後端 grep 不到這條路徑是正常的
+> - **後端**（#833 C1，`app/core/upload_auth_precheck.py` 的 `ANONYMOUS_MAX_BODY_BYTES`）：不需登入的寫入端點
+>   （登入、註冊、忘記密碼等）body 超過 128KB。未登入者只能打這幾支，限流又在解析之後才跑，故另設較小的上限
 
 > **上傳端點的兩道上限**（#833）沿用通用碼，訊息較表列的具體：
 > - `COMMON_422`「上傳表單格式不符」：表單超過解析上限（欄位數、單一欄位大小、檔案數），
