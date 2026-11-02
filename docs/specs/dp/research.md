@@ -47,7 +47,7 @@
 - **Decision**: `DP_PWD_RESET` 存 token 之 **SHA-256 雜湊**（非明文，信中連結才有明文）；`TOKEN_TYPE` 取值 `PWD_RESET`（忘記密碼）與 **`EMAIL_CHANGE`**（帳號 Email 變更驗證，`NEW_EMAIL` 欄記待生效信箱）。同一使用者同一類型重新申請時，舊未用 token 一律作廢（USED_DATE 標記）。
 - **Rationale**: US8 Email 變更需一次性時效驗證 token，與密碼重設同模式，共用一張表最精簡；DB 洩漏時雜湊 token 不可反打。spec Key Entities 原寫「現僅 PWD_RESET」，本計畫依 US8 需求擴充為兩型（無 `ACCOUNT_CONFIRM`，見 §1）。
 - **Alternatives**: token 存 `DP_USER` 欄位（一人同時僅一 token、查詢彆扭）；JWT self-contained token（無法單次作廢）。均否決。
-- **outbox 快照之明文連結（#50）**: 信中明文連結會隨渲染快照寫入 `DP_EMAIL_LOG.BODY`（§8），抵銷「只存雜湊」的保證。SA 裁示採方案 A：`PWD_RESET` / `EMAIL_CHANGE_VERIFY` 於 worker 寄出成功轉 SENT 時遮罩 BODY（既有 SENT 列由 migration 回溯遮罩），使「這兩種信寄出後表內不再有其可用連結」成為資料本身的事實，而非仰賴部署層持續維持的存取控管（方案 B，否決）。殘餘範圍（緩解為一次性 + 短 TTL）：(1) 上述兩種信之 PENDING（重試需原文）/ FAILED（SA 裁示保留）列；(2) `ACCOUNT_VERIFY` / `ACCOUNT_INVITE` 同含一次性明文連結（持有者可為未啟用帳號設定密碼），但不在裁示範圍，SENT 後仍存原文——是否比照遮罩待 SA 裁示；(3) 遮罩只作用於現行列值，TTL 期間產生的 WAL / 備份 / 尚未 VACUUM 的舊列版本仍可能含原文。
+- **outbox 快照之明文連結（#50）**: 信中明文連結會隨渲染快照寫入 `DP_EMAIL_LOG.BODY`（§8），抵銷「只存雜湊」的保證。SA 裁示採方案 A（2026-10-29；2026-11-02 擴大範圍）：含一次性明文連結的四種系統信（`PWD_RESET` / `EMAIL_CHANGE_VERIFY` / `ACCOUNT_VERIFY` / `ACCOUNT_INVITE`）於 worker 寄出成功轉 SENT 時遮罩 BODY（既有 SENT 列由 migration 回溯遮罩）；FAILED 列（終態、無重試路徑）於**建立後超過該範本對應之連結時效參數**時由 `SCHDP001` 每日遮罩；主旨不遮罩，改於範本維護存檔時禁止放入一次性連結變數（spec_us9 FR-DP-US9-12）。使「這些信寄出或失效後表內不再有其可用連結」成為資料本身的事實，而非仰賴部署層持續維持的存取控管（方案 B，否決）。殘餘範圍（緩解為一次性 + 短 TTL）：(1) PENDING 列（重試需原文）與 FAILED 但尚未逾時效之列；(2) 遮罩只作用於現行列值，TTL 期間產生的 WAL / 備份 / 尚未 VACUUM 的舊列版本仍可能含原文。
 
 ## §6 稽核日誌：TEXT 存 JSON、append-only 落地、完整性雜湊
 
@@ -69,13 +69,13 @@
 - **Rationale**: spec US6 非同步不阻塞（DM「全體」發布通知可達千人）；快照確保「寄出內容」可稽——範本事後修改不影響已排隊信件；逐收件人一列使單筆失敗獨立重試（FR-DP-US6-06）。
 - **Alternatives**: Celery / 外部 MQ（EDMS 單體規模過度設計）；寄送時才渲染（範本異動使佇列內容漂移，且失敗重試需重讀範本）。均否決。
 - **告警**: 不做系統內通報（spec 釐清第 2 輪 Q1）；FAILED 率由 IT 以 log / 監控工具追蹤。
-- **快照例外**: 含一次性明文連結的系統信（`PWD_RESET` / `EMAIL_CHANGE_VERIFY`）SENT 後 BODY 遮罩，見 §5（#50）。
+- **快照例外**: 含一次性明文連結的系統信（`PWD_RESET` / `EMAIL_CHANGE_VERIFY` / `ACCOUNT_VERIFY` / `ACCOUNT_INVITE`）SENT 後 BODY 遮罩、FAILED 逾連結時效後遮罩，見 §5（#50）。
 
 ## §9 排程引擎：APScheduler + DB 註冊表 + leader
 
 - **Decision**: 平台以 APScheduler（AsyncIOScheduler）為執行引擎，啟動時自 `DP_SCHEDULE` 載入啟用中 job（cron + `HANDLER_REF` 動態 import 各模組 handler）；`max_instances=1` + coalesce 落實「前次未完成跳過本次」，跳過亦寫 `DP_SCHEDULE_LOG`（SKIPPED）。多實例部署沿用 TBMS `core/scheduler_leader.py` 之 leader 選舉（EDMS 預設單一實例可直接執行）。
 - **Rationale**: `_refs/09` §2.10 既定方案；DB 註冊表使 job 清單 / 啟停可查可稽（US11 總覽唯讀讀此表 + log 表）；handler 反向 import 模組 service 符合「平台引擎、業務歸模組」。
-- **平台自身 job `SCHDP001`（每日）**: 掃 `DP_USER`——① `LAST_LOGIN_DATE` 逾 90 日（參數）→ 停用 + 稽核；② `PWD_CHANGED_DATE` 距效期不足提醒天數（預設 7）→ 經發信服務寄「密碼到期提醒」（`MODULE=DP`）。
+- **平台自身 job `SCHDP001`（每日）**: 掃 `DP_USER`——① `LAST_LOGIN_DATE` 逾 90 日（參數）→ 停用 + 稽核；② `PWD_CHANGED_DATE` 距效期不足提醒天數（預設 7）→ 經發信服務寄「密碼到期提醒」（`MODULE=DP`）；③ 清理逾期滿 1 天之自助註冊待驗證列（#226）；④ 遮罩逾連結時效之寄送失敗信件內文（#50，見 §5）。
 - **Alternatives**: 各模組自跑排程（多引擎多觸發點，已於 2026-07-08 集中化決策否決）；Celery beat（同 §8 理由否決）。
 
 ## §10 速率限制（防自動化程式）

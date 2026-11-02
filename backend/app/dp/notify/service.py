@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
+from app.dp.notify.redaction import ONE_TIME_LINK_VARIABLES
 from app.dp.notify.repository import NotifyRepository
 from app.dp.notify.schemas import RenderedMail, SendResult
 
@@ -25,6 +26,13 @@ _UNRENDERABLE_MSG = "範本內容含無法代入的變數，請確認僅使用�
 
 #: `ensure_renderable` 的主旨單行檢核訊息（#534）。
 _SUBJECT_MULTILINE_MSG = "主旨不得含換行，請改為單行"
+
+#: `ensure_subject_without_link` 的對外訊息（#50）。不嵌入變數名稱（sti-error-codes），以「哪類連結」
+#: 描述讓管理者看得懂要移掉什麼。
+_SUBJECT_LINK_MSG = "主旨不得使用重設、驗證或啟用連結等一次性連結變數，請改放於內文"
+
+#: 主旨連結檢核的探針值：與真實渲染不可能自然出現的 ASCII 標記（主旨的代入值字元剝除不會動到它）。
+_LINK_PROBE = "__EDMS_ONE_TIME_LINK_PROBE__"
 
 #: 單次 `send_email` 的收件人上限（對齊 TBMS 慣例）。**公開常數**：傳多人清單的呼叫方
 #: 需據此分批，故由 `app.services` 一併匯出（#563）。
@@ -289,6 +297,35 @@ def ensure_renderable(*, subject: str, body: str, variables: str | None) -> None
         # error_message 不得嵌入動態值）。詳情留在伺服器日誌——比照 `render_preview`。
         logger.warning("通知範本佔位檢核失敗: %s", _safe_log(exc))
         raise AppError(status_code=422, detail=_UNRENDERABLE_MSG, error_code="DP_MAIL_011") from exc
+
+
+def ensure_subject_without_link(*, subject: str, variables: str | None) -> None:
+    """儲存前驗證主旨未使用一次性連結類變數；違反拋 `AppError(422, DP_MAIL_013)`（#50）。
+
+    SA 裁示（2026-11-02）：outbox 只遮罩 BODY、不遮主旨，而主旨會出現在寄送紀錄列表與 log，
+    事後遮罩擋不完——故於 DP04 存檔時直接禁止。
+
+    ⚠️ 與 `ensure_renderable` 同一姿態：**不另寫正則，直接跑 `_render`**。連結類變數代入探針
+    標記、其餘代入空字串，渲染結果含標記即表示主旨用到了連結類變數。這樣 `{{reset_link}}`
+    （跳脫後的字面文字，不會被代入）不會誤擋，判斷與實際寄送的渲染恆一致。
+
+    須在 `ensure_renderable` **之後**呼叫：無法渲染的主旨已由 DP_MAIL_011 擋下，此處的
+    `_render` 不會再拋例外。只檢查**該範本有宣告**的連結類變數——未宣告的已屬 DP_MAIL_011。
+
+    Args:
+        subject: 待存的主旨。
+        variables: 該範本的 `VARIABLES` 欄原始值。
+
+    Raises:
+        AppError: 主旨使用一次性連結類變數（422 `DP_MAIL_013`）。
+    """
+    declared = declared_variable_names(variables)
+    link_vars = declared & ONE_TIME_LINK_VARIABLES
+    if not link_vars:
+        return
+    probe = {name: (_LINK_PROBE if name in link_vars else "") for name in declared}
+    if _LINK_PROBE in _render(subject, probe, single_line=True):
+        raise AppError(status_code=422, detail=_SUBJECT_LINK_MSG, error_code="DP_MAIL_013")
 
 
 def _channel_allows_email(channel: str) -> bool:

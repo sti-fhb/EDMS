@@ -18,7 +18,7 @@ from app.dp.audit.models import DpAuditLog
 from app.dp.notify.admin_service import TemplateAdminService
 from app.dp.notify.models import DpNotifyTemplate
 from app.dp.notify.schemas import TemplateUpdate
-from app.dp.notify.service import declared_variable_names, ensure_renderable
+from app.dp.notify.service import declared_variable_names, ensure_renderable, ensure_subject_without_link
 from app.dp.users.models import DpUser
 from app.et.roles.gate import et_is_module_admin
 
@@ -437,6 +437,30 @@ async def test_佔位檢核失敗時不寫入也不留稽核(db, admin_gate):
     assert await _count_audit(db, "ET.ZT_PH2") == 1, "被擋下的請求不得留稽核"
 
 
+async def test_主旨含一次性連結變數被擋下(db):
+    """DP04 存檔時擋主旨中的連結類變數（#50 SA 2026-11-02 裁示 3）：以真實種子 PWD_RESET 驗接線。
+
+    `{reset_link}` 已宣告於該範本 VARIABLES，故過得了 DP_MAIL_011，擋在 DP_MAIL_013。
+    """
+    version = (
+        await db.execute(
+            text('SELECT "VERSION" FROM "DP_NOTIFY_TEMPLATE" WHERE "MODULE"=\'DP\' AND "TEMPLATE_CODE"=\'PWD_RESET\'')
+        )
+    ).scalar_one()
+
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module="DP",
+            template_code="PWD_RESET",
+            data=_upd(subject="密碼重設 {reset_link}", body="{reset_link}", version=version),
+            operator=_OP,
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DP_MAIL_013"
+
+
 async def test_既有範本全數通過新檢核(db):
     """**所有** seed 範本都必須過得了 `ensure_renderable`（#534）。
 
@@ -470,6 +494,8 @@ async def test_既有範本全數通過新檢核(db):
     for module, code, subject, body, variables in rows:
         try:
             ensure_renderable(subject=subject, body=body, variables=variables)
+            # #50：主旨禁用一次性連結變數。SA 裁示時確認種子主旨不含；此處對全庫實測釘住。
+            ensure_subject_without_link(subject=subject, variables=variables)
         except AppError:
             bad.append(f"{module}/{code}（VARIABLES={variables!r}）")
     assert bad == [], "下列既有範本過不了新檢核，管理者將無法編輯它們：\n  " + "\n  ".join(bad)
