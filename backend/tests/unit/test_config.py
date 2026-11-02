@@ -476,3 +476,68 @@ def test_pytest_ignores_migration_url_from_dotenv() -> None:
 
     assert os.environ["MIGRATION_DATABASE_URL"] == ""
     assert settings.migration_database_url == settings.DATABASE_URL
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB_ECHO 與 DEBUG 解耦（#197 AC 5）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _settings(**overrides: object) -> Settings:
+    """建立 hermetic 的 Settings（只給必填 + 指定覆寫）。"""
+    base: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "DEBUG": True,
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def test_db_echo_預設關閉() -> None:
+    """SQLAlchemy 的 echo 會把**每次查詢的綁定參數**原樣印進 log，預設必須是關的。"""
+    assert _settings().DB_ECHO is False
+
+
+def test_開啟_debug_不會連帶打開_db_echo() -> None:
+    """🔴 本條是 #197 AC 5 的核心：echo 與 DEBUG **解耦**。
+
+    解耦之前 `db.py` 寫的是 `echo=settings.DEBUG`，於是 DEBUG 這一個開關同時控制
+    三道 production 護欄（`config.py` 的 FRONTEND_BASE_URL / TRUSTED_PROXY_COUNT /
+    儲存根）**與**全量 SQL 參數記錄。
+
+    而 `config.py` 自己記錄過 DEBUG 被當逃生門用的情境（「現場只能以 DEBUG=true 繞過」）
+    ——真的有人在正式環境開 DEBUG 救火，SQLAlchemy 就開始把病人／員工個資印進 log，
+    而 `core/log_redaction` **涵蓋不到 `sqlalchemy.engine` 這條 logger**（該檔「未涵蓋的
+    既有暴露面」有明文）。
+    """
+    assert _settings(DEBUG=True).DB_ECHO is False, "DEBUG 不得連帶打開 SQL 參數記錄"
+
+
+def test_db_echo_可獨立開啟() -> None:
+    """正向錨點：解耦不是把功能拿掉——要看 SQL 時設一個鍵就有，且**不必開 DEBUG**。
+
+    沒有這條的話，上面兩條用「永遠回 False」也會通過。
+    刻意用 production（`DEBUG=False`）情境，才證得了「不靠 DEBUG 也開得起來」。
+    """
+    s = _settings(
+        DEBUG=False,
+        DB_ECHO=True,
+        FRONTEND_BASE_URL="https://edms.example.com",  # 以下三項為 DEBUG=false 的既有護欄
+        TRUSTED_PROXY_COUNT=0,
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+    )
+    assert s.DB_ECHO is True
+
+
+def test_engine_的_echo_取自_db_echo_而非_debug() -> None:
+    """守門：`db.py` 建 engine 時用的是 `DB_ECHO`。
+
+    ⚠️ 以原始碼比對而非讀 `engine.echo`——module-level 的 `engine` 在 import 時就以當下的
+    settings 建好，測試改不了它。要驗的是「下一個人不會把它改回 `settings.DEBUG`」。
+    """
+    source = (Path(__file__).resolve().parents[2] / "app" / "core" / "db.py").read_text(encoding="utf-8")
+    assert "echo=settings.DB_ECHO" in source, "engine 的 echo 應取自 DB_ECHO"
+    assert "echo=settings.DEBUG" not in source, "⛔ 不得改回與 DEBUG 綁在一起（#197 AC 5）"

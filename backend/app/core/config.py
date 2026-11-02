@@ -48,6 +48,20 @@ class Settings(BaseSettings):
     # 讀取一律經 `migration_database_url`，不要直接讀本欄位。
     MIGRATION_DATABASE_URL: str | None = None
 
+    # SQLAlchemy 引擎的 echo：開啟後**每一次查詢連同綁定參數值**都會印進 log（#197 AC 5）。
+    #
+    # 🔴 **刻意與 `DEBUG` 解耦，請勿改回 `echo=settings.DEBUG`。** 原本兩者共用一個開關，而
+    # `DEBUG` 同時閘住三道 production 護欄（見下方三個 `_validate_*`）。本檔自己記錄過 `DEBUG`
+    # 被當逃生門用的情境（「現場只能以 DEBUG=true 繞過」，見 `_validate_mail_tls_exclusive`）
+    # ——真有人在正式環境開 `DEBUG` 救火，就會連帶把病人／員工個資印進 log。
+    #
+    # ⚠️ 而且那層**不受 `core/log_redaction` 保護**：echo 走獨立的 `sqlalchemy.engine` logger、
+    # 參數值在訊息本體而非 `exc_info`，`install_exception_redaction` 管不到（該檔「未涵蓋的既有
+    # 暴露面」有明文）。
+    #
+    # dev 要看 SQL 時在 `.env` 設 `DB_ECHO=true` 即可，不需要連帶打開 production 護欄的逃生門。
+    DB_ECHO: bool = False
+
     # 連線池
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
