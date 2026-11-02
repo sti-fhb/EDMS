@@ -23,6 +23,7 @@ _PWD_RESET_VARS = "user_name（使用者姓名）, reset_link（密碼重設連�
         ("user_name（使用者姓名）, verify_link（驗證連結）", "{verify_link}"),
         ("user_name（使用者姓名）, activate_link（啟用連結）", "請啟用 {activate_link} 謝謝"),
         (_PWD_RESET_VARS, "{reset_link!s}"),  # conversion 也會代入值
+        (_PWD_RESET_VARS, "{{{reset_link}}}"),  # 字面 `{` + 代入連結 + 字面 `}`（前端 regex 須同步，#893 review）
     ],
 )
 def test_subject_with_link_variable_rejected(variables, subject):

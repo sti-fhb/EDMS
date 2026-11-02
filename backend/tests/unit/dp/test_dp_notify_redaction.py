@@ -71,7 +71,11 @@ async def test_missing_param_falls_back_to_sender_default():
 
 
 def test_ttl_mapping_matches_sender_params():
-    """時效對照表與寄信端實際讀的參數一致（寄信端改參數時這條會提醒改對照表）。"""
+    """固定時效對照表內容（每列註明寄信端出處）。
+
+    ⚠️ 本條只比對寫死的期望值，**與寄信端程式沒有連動**：寄信端改讀別的參數時本條不會紅。
+    改對照表或改寄信端讀的參數時，須人工核對另一邊（出處見 `redaction.ONE_TIME_LINK_TEMPLATES` 註解）。
+    """
     assert ONE_TIME_LINK_TEMPLATES == {
         ("DP", "PWD_RESET"): ("LOGIN", "RESET_TOKEN_TTL_MIN"),  # forgot_service
         ("DP", "EMAIL_CHANGE_VERIFY"): ("LOGIN", "EMAIL_CHANGE_TTL_MIN"),  # email_change_service

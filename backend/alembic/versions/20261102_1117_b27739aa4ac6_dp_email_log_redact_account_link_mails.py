@@ -4,12 +4,17 @@ Revision ID: b27739aa4ac6
 Revises: 7ade05c26fd8
 Create Date: 2026-11-02 11:17:33.929327
 
-回溯遮罩已寄出之註冊驗證信 / 邀請信 outbox 內文（#50 SA 2026-11-02 裁示 1）。
+遮罩已寄註冊驗證／邀請信內文並更新 SCHDP001 說明
+
+回溯遮罩已寄出之註冊驗證信 / 邀請信 outbox 內文（#50 SA 2026-11-02 裁示 1），並把排程總覽
+（DP06）上的 SCHDP001 說明補上本版新增的第④批（裁示 2）。
 
 異動說明：
 - 影響 Table：DP_EMAIL_LOG（僅 UPDATE 既有列之 BODY / UPDATED_*，不改 schema）
-- 範圍：STATUS='SENT' 且 (MODULE, TEMPLATE_CODE) 為 (DP, ACCOUNT_VERIFY) / (DP, ACCOUNT_INVITE)
-- PENDING 列不動（重試需原文）
+  - 範圍：STATUS='SENT' 且 (MODULE, TEMPLATE_CODE) 為 (DP, ACCOUNT_VERIFY) / (DP, ACCOUNT_INVITE)
+  - PENDING 列不動（重試需原文）
+- 影響 Table：DP_SCHEDULE（SCHDP001 一列之 DESCRIPTION）
+  - 條件帶原值（34da4449e681 寫入之說明）比對，不覆蓋管理者於 DP06 改過的內容
 
 ## 為什麼要回溯
 
@@ -33,7 +38,8 @@ worker 轉 SENT 的列不會被遮罩。
 
 ## downgrade
 
-不可逆：原文已覆寫、無從還原（亦不應還原——還原即重新寫入明文連結）。downgrade 為 no-op。
+- DP_EMAIL_LOG 遮罩**不可逆**：原文已覆寫、無從還原（亦不應還原——還原即重新寫入明文連結）。
+- DP_SCHEDULE.DESCRIPTION 可還原：同樣帶新值比對，改回 34da4449e681 的說明。
 """
 
 from typing import Sequence, Union
@@ -49,6 +55,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 _REDACTED_BODY = "[已遮罩：本信含一次性連結，寄出後清除原文]"
 
+# SCHDP001 說明：(34da4449e681 寫入之原值, 新值)
+_SCHDP001_DESC_OLD = (
+    "停用連續閒置超過閒置停用天數未登入之帳號、對密碼即將到期者寄提醒信，並清理逾期未完成之註冊驗證資料"
+)
+_SCHDP001_DESC_NEW = (
+    "停用連續閒置超過閒置停用天數未登入之帳號、對密碼即將到期者寄提醒信、"
+    "清理逾期未完成之註冊驗證資料，並清除寄送失敗且連結已失效之信件內文"
+)
+
+_UPDATE_SCHEDULE_DESC = text(
+    'UPDATE "DP_SCHEDULE" SET "DESCRIPTION" = :new WHERE "JOB_ID" = \'SCHDP001\' AND "DESCRIPTION" = :old'
+)
+
 
 def upgrade() -> None:
     op.execute(
@@ -60,8 +79,9 @@ def upgrade() -> None:
             'AND "BODY" <> :redacted'
         ).bindparams(redacted=_REDACTED_BODY)
     )
+    op.execute(_UPDATE_SCHEDULE_DESC.bindparams(new=_SCHDP001_DESC_NEW, old=_SCHDP001_DESC_OLD))
 
 
 def downgrade() -> None:
-    # 資料覆寫不可逆（見 module docstring），不實作
-    pass
+    # DP_EMAIL_LOG 遮罩不可逆（見 module docstring），只還原 SCHDP001 說明
+    op.execute(_UPDATE_SCHEDULE_DESC.bindparams(new=_SCHDP001_DESC_OLD, old=_SCHDP001_DESC_NEW))

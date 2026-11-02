@@ -8,8 +8,12 @@ import { z } from "zod"
  */
 export const ONE_TIME_LINK_VARIABLES = ["reset_link", "verify_link", "activate_link"] as const
 
-// `{reset_link}` / `{reset_link!s}` 會被代入；`{{reset_link}}` 是跳脫後的字面文字，不擋（與後端渲染一致）
-const _SUBJECT_LINK_PATTERN = new RegExp(`(?<!\\{)\\{(?:${ONE_TIME_LINK_VARIABLES.join("|")})(?:![rsa])?\\}`)
+// 與後端渲染一致：`{{` 是跳脫後的字面 `{`，所以要看變數前連續 `{` 的奇偶——
+// `{reset_link}` / `{{{reset_link}}}`（字面 `{` + 代入）會代入連結 → 擋；`{{reset_link}}` 是字面文字 → 不擋。
+// `(?:![rsa])?` 涵蓋轉換旗標（`{reset_link!s}` 同樣會代入）。
+const _SUBJECT_LINK_PATTERN = new RegExp(
+  `(?<!\\{)(?:\\{\\{)*\\{(?:${ONE_TIME_LINK_VARIABLES.join("|")})(?:![rsa])?\\}`,
+)
 
 const _SubjectSchema = z
   .string()
