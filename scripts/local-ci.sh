@@ -70,6 +70,66 @@ PASSED=()
 FAILED=()
 SKIPPED=()
 
+# ──────────────────────────────────────────────────────────
+# 併行測試偵測（#635）
+# ──────────────────────────────────────────────────────────
+# 這台機器由多個 session 共用，而後端階段是 `pytest -n auto`（12 核 → 12 worker）。
+# 只要有人照專案文件跑標準的本機 CI，另一個 session 的前端 vitest 就會假紅——那是
+# 工具預設與共用機器的**結構衝突**，不是誰的疏忽，所以會反覆發生。
+#
+# ⛔ 刻意「警告」而不是「擋下」：腳本分不出**孤兒 worker**（沒有人在跑、worker 卻還在）
+#    與活人。直接擋會把「等到天荒地老」變成預設行為，也會讓背景／非互動執行整組失敗。
+#    決定權留給看得到 cwd 的人。環境變數 EDMS_CI_BLOCK_ON_BUSY=1 可升級成擋下。
+#
+# 🔴 指紋清單的**唯一事實來源**在 `scripts/detect-test-procs.ps1` 的 $pattern。
+#    新增 runner 改那一處；`.claude/rules/sti-testing.md` 的步驟 0 指向它，不另抄一份。
+CONCURRENT_REPORT=""
+
+detect_concurrent_tests() {
+    local script="${ROOT_DIR}/scripts/detect-test-procs.ps1"
+    # fail-open：偵測器自身的任何問題都只印一行說明，CI 不因它而失敗。
+    [[ -f "$script" ]] || { echo -e "${YELLOW}⚠ 找不到 detect-test-procs.ps1，略過併行測試偵測${NC}"; return 0; }
+    command -v powershell >/dev/null 2>&1 || { echo -e "${YELLOW}⚠ 無 powershell，略過併行測試偵測${NC}"; return 0; }
+
+    local raw
+    if ! raw="$(powershell -NoProfile -ExecutionPolicy Bypass -File "$script" 2>/dev/null | tr -d '\r')"; then
+        echo -e "${YELLOW}⚠ 併行測試偵測失敗，略過（CI 不因此失敗）${NC}"
+        return 0
+    fi
+    [[ -n "$raw" ]] || return 0   # 機器乾淨：不增加任何輸出雜訊
+
+    local pid name cpu wt cmd cores="?" lines=""
+    while IFS=$'\t' read -r pid name cpu wt cmd; do
+        [[ -z "$pid" ]] && continue
+        if [[ "$pid" == "#CORES" ]]; then cores="$name"; continue; fi
+        lines+="    PID ${pid}  ${name}  cpu=${cpu}%  worktree=${wt}"$'\n'
+        # 🔴 命令列是 Windows 路徑，含 `\E`、`\b`、`\t` 等序列。本報告最後由 `echo -e`
+        # 輸出（要處理顏色碼），而 `echo -e` 會把它們當跳脫字元吃掉：實測
+        # `TBMS_git\EDMS\backend` 被印成 `TBMS_gitDMSackend`（\E→ESC、\b→退格）。
+        # 先把反斜線加倍，`echo -e` 解析後正好還原成一個。
+        lines+="        ${cmd//\\/\\\\}"$'\n'
+    done <<< "$raw"
+
+    CONCURRENT_REPORT="$(cat <<EOF
+${YELLOW}⚠ 偵測到其他測試行程正在跑（本機 ${cores} 核，與本輪互搶 CPU）${NC}
+${lines}    兩種情況，先分辨是哪一種：
+      • ${YELLOW}有主人${NC}：某個 session 正在跑 → 等它跑完，或請對方降併發度
+      • ${YELLOW}孤兒${NC}：沒有人在跑、worker 卻還在（中止背景測試不會收掉 xdist worker）
+        → 問過一輪沒人認領就直接收掉，${RED}「等對方跑完」對孤兒是錯的建議${NC}
+    ⚠ cpu=0% ${YELLOW}不代表沒影響${NC}：那是取樣瞬間值，且 venv 的 launcher shim 恆為 0%
+      （同一個 worker 會出現兩列，有 CPU 的那層才是真的在跑）
+    判讀細節見 .claude/rules/sti-testing.md〈前端「假紅」判定〉步驟 0
+EOF
+)"
+    echo ""
+    echo -e "$CONCURRENT_REPORT"
+
+    if [[ "${EDMS_CI_BLOCK_ON_BUSY:-}" == "1" ]]; then
+        echo -e "${RED}EDMS_CI_BLOCK_ON_BUSY=1 已設定，中止本輪${NC}"
+        exit 2
+    fi
+}
+
 run_step() {
     local name="$1"
     shift
@@ -295,6 +355,8 @@ run_e2e() {
 echo -e "${BLUE}EDMS Local CI${NC} — mode: ${YELLOW}${MODE}${NC}（${E2E_LABEL}）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+detect_concurrent_tests
+
 case "$MODE" in
     all|quick)
         run_backend
@@ -337,7 +399,21 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
         echo -e "  ${RED}✘${NC} $step"
     done
     echo ""
+    # 🔴 明文列出失敗項，不要只靠 ✔ / ✘ 符號（#635）。
+    # 實際事故（2026-10-14）：有人 grep `✖` 判讀自己的結果，而本腳本印的是 `✘`
+    # ——U+2716 vs U+2718，不同碼位。於是只撈到 ✔ 行，把「後端全綠」回報出去，
+    # 而實際有兩道紅。⚠️ 符號比對漏掉時，錯的方向剛好是**看起來全綠**。
+    # 明文摘要讓「有沒有失敗」不必由讀者從缺漏去推論——缺漏是最容易被合理化掉的訊號。
+    local_ci_failed_list="$(printf '%s, ' "${FAILED[@]}")"
+    echo "FAILED: ${local_ci_failed_list%, }"
+    echo ""
     echo -e "${RED}CI 失敗（${E2E_LABEL}）：${#FAILED[@]} 個檢查未通過${NC}"
+    # 併行測試的警告在開頭印過一次，這裡**再印一次**：前端真的紅的時候，
+    # 警告就在紅字旁邊，正是需要它的那一刻（開頭那次早被 10 分鐘的 log 埋掉了）。
+    if [[ -n "$CONCURRENT_REPORT" ]]; then
+        echo ""
+        echo -e "$CONCURRENT_REPORT"
+    fi
     exit 1
 else
     echo ""

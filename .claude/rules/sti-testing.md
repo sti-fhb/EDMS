@@ -253,27 +253,59 @@ pnpm test:coverage    # 含覆蓋率報告
 `Error: Test timed out in 5000ms.`，而那些檔案你一個都沒改——病因是 worker 互相搶資源
 （`vite.config.ts` 的 `maxWorkers` 註解有完整背景），不是測試壞了。
 
-#### 🔴 步驟 0：先看有沒有**吃 CPU 的測試**在跑（最便宜，常常連判定都免了）
+#### 🔴 步驟 0：**腳本已經幫你查過了**——這裡是它警告時怎麼判讀（#635）
 
-查到就**先處理掉再分析**——這省掉一輪 10 分鐘的全套重跑。但處理方式有兩種，**先分辨是哪一種**：
+`pnpm ci:local` 開跑前會自動偵測其他測試行程（`scripts/detect-test-procs.ps1`），
+查到就在**開頭**與**結果彙總**各印一次警告。**機器乾淨時完全不輸出**，所以沒看到警告
+就是沒偵測到。
+
+⛔ 它**刻意只警告、不擋下**：腳本分不出孤兒與活人，直接擋會把「等到天荒地老」變成預設
+行為，也會讓背景／非互動執行整組失敗。要擋的話設 `EDMS_CI_BLOCK_ON_BUSY=1`。
+
+⚠️ **偵測保護的是「查的人」，不是「被害的人」。** 它擋不住「在你之後才開始跑的人」——
+2026-10-15 就有一個 session 開跑前量到乾淨，仍被之後加入的負載害到前端假紅。
+
+##### 警告長這樣，三個欄位各自怎麼讀
+
+```
+⚠ 偵測到其他測試行程正在跑（本機 12 核，與本輪互搶 CPU）
+    PID 40900  python.exe  cpu=0%   worktree=EDMS
+        C:\...\TBMS_git\EDMS\backend\.venv\Scripts\python.exe -m pytest -n auto
+    PID 32940  python.exe  cpu=82%  worktree=?
+```
+
+| 欄位 | 怎麼讀 |
+|---|---|
+| `worktree` | 從執行檔路徑推得，**xdist worker 也抓得到**（它的 venv python 路徑帶 worktree 名）。`?` ＝ 路徑不在 repo 下，通常是系統 python |
+| `cpu` | ⚠️ **取樣瞬間值，`0%` 不代表沒影響**。venv 的 launcher shim 恆為 0%，所以同一個 worker 會出現**兩列**，有 CPU 的那層才是真的在跑 |
+| 行數 | ⛔ **不等於併發度**。見下方「量測與 A/B 的前提」的兩個相反陷阱 |
+
+##### 處理方式有兩種，先分辨是哪一種
 
 | 情況 | 怎麼確認 | 動作 |
 |------|---------|------|
-| **有主人**（某個 session 正在跑）| 追父行程的 cwd 問到是誰，或直接問 | 等它跑完，或請對方降併發度 |
-| 🔴 **孤兒**（沒有人在跑，worker 卻還在）| 問過一輪沒有人認領；或父行程已不存在 | **直接收掉**（見下） |
+| **有主人**（某個 session 正在跑）| 看警告裡的 `worktree` 直接問那個 session | 等它跑完，或請對方降併發度 |
+| 🔴 **孤兒**（沒有人在跑，worker 卻還在）| 問過一輪沒有人認領 | **直接收掉**（見下） |
 
 ⚠️ **「等對方跑完」對孤兒是錯的建議**——沒有人會結束它，你會等到天荒地老。
 
+##### 手動查（腳本跑不起來，或你不是在跑 `ci:local`）
+
 ```powershell
-Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='python.exe'" |
-  Where-Object { $_.CommandLine -match 'vitest|playwright|pytest|stdin\.readline|tsc' } |
-  Select-Object ProcessId, CommandLine
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/detect-test-procs.ps1
 ```
 
-⛔ **別把這一步寫窄成「查 pytest」。** 要擋的是「有人在跑吃 CPU 的測試」，不是某一個 runner。
-曾經有人照「查 execnet worker（`stdin.readline`）」的寫法查得 0、判定「沒人在跑測試」，
-**而實際的併發來源是另一個 worktree 的 `vitest run`**（4 個 worker）——指紋寫死成某個 runner，
-換一個工具同一個洞就再開一次。上面的指令刻意涵蓋多種 runner，新增工具時往 `-match` 裡加。
+輸出是 TSV：`pid / 映像 / cpu% / worktree / 命令列`，無輸出＝沒偵測到。
+
+🔴 **指紋清單的唯一事實來源是該腳本的 `$pattern`**，新增 runner 改那一處，**不要在別處各抄
+一份**。⛔ 也別把它寫窄成「查 pytest」：曾經有人照「查 execnet worker（`stdin.readline`）」
+的寫法查得 0、判定「沒人在跑測試」，**而實際的併發來源是另一個 worktree 的 `vitest run`**
+（4 個 worker）——指紋寫死成某個 runner，換一個工具同一個洞就再開一次。
+
+> 腳本另有 `$excludePattern`，排除**只是帶著這些名字**的編輯器工具（Pylance 內含 pytest 型別
+> stub，命令列會命中）。2026-11-02 實測它曾以 82% CPU 出現在警告裡——而**會誤報的警告會被
+> 忽略，包括它真的對的時候**。`scripts/test-detect-patterns.ps1` 以 7 個案例釘住兩個 regex
+> （含「有效 regex」本身：無效的話偵測器會 fail-open，功能靜默消失）。
 
 > 兩個最常見的指紋：`stdin.readline` ＝ pytest-xdist / execnet worker；指令列含 `vitest` ＝
 > vitest 的 fork。追父行程的 cwd 就知道是哪個 worktree、哪個 session。
