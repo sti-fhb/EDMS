@@ -94,6 +94,7 @@ flowchart TD
 | §3（觀察與排查） | **`<PROD_VM>`** | **docker 一律要**；systemctl／journalctl 不用 |
 | §4.1（client IP 驗收） | **`<PROD_VM>`** | 要 |
 | §5 的 psql 維護 | **`<PROD_VM>`** | 要 |
+| §5.3（ET 影片目錄遷移，一次性） | **`<PROD_VM>`** | 要 |
 
 > 本檔所稱「本機」一律指**開發者自己的電腦**，不是 `<PROD_VM>`。
 
@@ -533,6 +534,38 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 | **未納入監控** | 容器掛掉不會有人知道。TBMS 有 `monitoring.md` 定義的 VM 層告警，EDMS 尚未納入 |
 | **最小權限 DB 角色切換** | 待維運執行 §2.8，完成後刪除本列 |
 | **第一個帳號為手動 bootstrap** | 因當時無 SMTP，帳號與 ET／DM 角色是直接以 app 的 ORM 寫入的，未走正規註冊流程 |
+
+---
+
+## 5.3 一次性作業：ET 影片目錄遷移（#871）
+
+**在 `<PROD_VM>` 上執行，需要 `sudo`。** 含 #871 的版本部署後執行一次；不停機、可重跑、可回復。
+
+**為何要做**：#871 之前，暫存模式新增的教材，影片目錄名與所屬教材編號不一致。播放端自 #871 起驗「影片檔須落在所屬教材目錄下」，但**跑完本作業之前只記 log、照常放行**——所以部署本身不會讓任何影片播不出來；本作業做完，驗證才真正生效。
+
+```bash
+# 1. dry-run：列出將搬移的影片與 FILE_PATH 變更，不做任何變更
+sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos
+
+# 2. 執行（逐筆先建新路徑、再改 DB；每筆各自 commit）
+sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos --apply
+echo $?   # 0＝完成且驗證已生效；1＝仍有待處理的列；2＝執行錯誤
+```
+
+| 結果 | 處置 |
+|------|------|
+| 退出碼 0、最後一行「歸屬圍籬已生效」 | 完成。抽播幾支影片確認 |
+| 退出碼 1，有「檔案不存在」的列 | **先確認 `/opt/edms/data/et_videos` 有掛上**（`sudo docker exec edms-backend ls /app/var/et_videos`）。目錄沒掛上時所有影片都會被判成「不存在」——此時**不要**加 `--accept-missing`。確認掛載正常、那幾支確實早已遺失（改前改後都是 404）後，再加 `--accept-missing` 重跑 |
+| 退出碼 1，有「需人工確認」的列（同一支檔另被其他教材引用） | 正常資料裡一支影片只屬於一份教材，這代表有某筆資料指錯了檔。用 dry-run 列出的 `video_id` / `material_id` 交給開發確認；確認屬正常後才加 `--allow-shared` 重跑 |
+| 退出碼 1，有「遷移失敗」的列 | 依訊息排除（多為權限：目錄 owner 須為 `10001:10001`，見 §2.4）後重跑；已完成的列不會重做 |
+
+- **搬移紀錄**：每一筆**動手前**先追加一行到 `/opt/edms/data/et_videos/.relocate-videos-<時間>.jsonl`（結束時會印出路徑；一筆都沒動手時不建立）。因為先寫後做，紀錄可能含沒做成的列，`--revert` 會自動略過。回復時要用它，請保留
+- **磁碟**：新路徑以 hard link 建立，不佔額外空間；舊路徑約一天後由孤兒影片清理（SCHET002）收掉。⚠️ 影片目錄須在支援 hard link 的檔案系統上（現行 bind mount 即是）——不支援時退回複製，每支影片都要完整複製一次，教師按「更新」也會跟著變慢
+- **搬移紀錄的權限**：以 0600 建立、只有執行腳本的帳號（容器內的 app 使用者）能讀寫。`--revert` 只接受執行者本人所有、他人不可寫的紀錄，**不要 chmod 放寬**
+- **回復**：`sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos --revert /app/var/et_videos/.relocate-videos-<時間>.jsonl`——把 FILE_PATH 改回舊值（舊路徑已被清掉時從新路徑掛回去），並撤銷驗證（回到放行模式）
+- **新環境**：沒有任何影片時同樣執行一次 `--apply`，它只會寫入標記檔使驗證生效
+- **驗證開關**：即 `/opt/edms/data/et_videos/.ownership-fence-enforced` 這個檔，由 `--apply` 在確認沒有待遷移的列後才寫入。**不要手動建立**
+- ⚠️ **只還原 DB、不還原影片目錄時**（§5.1 的 DB 與檔案備份是兩條流程）：DB 若退回本作業之前的狀態，開關檔還在，舊路徑的影片會整批 404。還原 DB 後再跑一次 `--apply` 即可（舊路徑已被清掉的列，會直接改指向正式目錄裡已有的那支）。反過來只還原影片目錄而開關檔消失，則驗證退回放行模式，再跑一次 `--apply` 即可
 
 ---
 
