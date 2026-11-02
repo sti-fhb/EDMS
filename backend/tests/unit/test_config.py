@@ -232,6 +232,54 @@ def test_trusted_proxy_count_not_required_in_debug() -> None:
     assert s.TRUSTED_PROXY_COUNT == 0
 
 
+def _settings_for_seed(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "FRONTEND_BASE_URL": "https://edms.example.com",
+        # 聚焦 SEED_DEMO_ACCOUNTS 預設值，避開其餘 production 護欄
+        "TRUSTED_PROXY_COUNT": 0,
+        "DM_FILE_STORAGE_ROOT": _ABS_DM_ROOT,
+        "ET_VIDEO_STORAGE_ROOT": _ABS_ET_ROOT,
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def _no_seed_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「未設定」須連環境變數一併排除——`_env_file=None` 只隔離 .env 檔，不隔離 os.environ。"""
+    monkeypatch.delenv("SEED_DEMO_ACCOUNTS", raising=False)
+
+
+@pytest.mark.usefixtures("_no_seed_env")
+def test_seed_demo_accounts_defaults_false_in_production() -> None:
+    """正式模式未設定 → 預設不種示範帳號（不沿用欄位預設 true）。"""
+    s = _settings_for_seed(DEBUG=False)
+    assert s.SEED_DEMO_ACCOUNTS is False
+
+
+def test_seed_demo_accounts_explicit_true_honored_in_production() -> None:
+    """正式模式明示 true → 依設定值種入。"""
+    s = _settings_for_seed(DEBUG=False, SEED_DEMO_ACCOUNTS=True)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
+def test_seed_demo_accounts_env_true_honored_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """部署以環境變數 / env_file 注入（非建構參數），該來源同樣算已設定。"""
+    monkeypatch.setenv("SEED_DEMO_ACCOUNTS", "true")
+    s = _settings_for_seed(DEBUG=False)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
+@pytest.mark.usefixtures("_no_seed_env")
+def test_seed_demo_accounts_defaults_true_in_debug() -> None:
+    """dev（DEBUG=true）未設定 → 維持預設種入，供本機手動驗證登入。"""
+    s = _settings_for_seed(DEBUG=True)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
 def test_trusted_proxy_count_upper_bound() -> None:
     """上限 8：明顯誤設（如把毫秒數填進來）於啟動即擋。"""
     with pytest.raises(ValueError):
