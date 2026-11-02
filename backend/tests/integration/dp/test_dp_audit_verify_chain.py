@@ -2,7 +2,8 @@
 
 驗證 verify_chain 走訪 DP_AUTH_LOG 全表（LOG_ID 遞增＝建鏈序）重算並比對存檔 ROW_HASH：
 完整鏈回 OK、竄改任一入 hash 之欄位精準指出首斷點、空表回 EMPTY。
-竄改以測試專用 raw UPDATE 模擬（正式 repo append-only 無 update 途徑）。
+竄改以測試專用 raw UPDATE 模擬（正式 repo append-only 無 update 途徑）；DB 層 trigger 會擋下
+UPDATE（#22），故 `_tamper` 先在測試交易內停用 trigger，交易結束 rollback 即恢復。
 """
 
 from contextlib import asynccontextmanager
@@ -25,6 +26,16 @@ def _patch_session_local(monkeypatch, db):
         yield db
 
     monkeypatch.setattr(verify, "_cli_session", _fake_session)
+
+
+async def _tamper(db, column: str, value: str, log_id: int) -> None:
+    """模擬竄改：停用擋改刪的 trigger 後直接 UPDATE（僅存在於本測試交易內，rollback 後恢復）。"""
+    assert column in {"BEFORE_VALUE", "AFTER_VALUE", "ROW_HASH"}, column
+    await db.execute(text('ALTER TABLE "DP_AUDIT_LOG" DISABLE TRIGGER "TRG_DP_AUDIT_LOG_DENY_MODIFY"'))
+    await db.execute(
+        text(f'UPDATE "DP_AUDIT_LOG" SET "{column}" = :v WHERE "LOG_ID" = :id'),  # noqa: S608 —— 欄名已白名單
+        {"v": value, "id": log_id},
+    )
 
 
 async def _write_rows(db, n: int) -> None:
@@ -80,10 +91,7 @@ async def test_verify_detects_tampered_before_value(db):
         (await db.execute(text('SELECT "LOG_ID" FROM "DP_AUDIT_LOG" ORDER BY "LOG_ID" ASC'))).scalars().all()
     )
     victim = log_ids[2]
-    await db.execute(
-        text('UPDATE "DP_AUDIT_LOG" SET "BEFORE_VALUE" = :v WHERE "LOG_ID" = :id'),
-        {"v": '{"status": "TAMPERED"}', "id": victim},
-    )
+    await _tamper(db, "BEFORE_VALUE", '{"status": "TAMPERED"}', victim)
 
     result = await verify_chain(db)
     assert result.status == "BROKEN"
@@ -100,10 +108,7 @@ async def test_verify_detects_tampered_row_hash(db):
         (await db.execute(text('SELECT "LOG_ID" FROM "DP_AUDIT_LOG" ORDER BY "LOG_ID" ASC'))).scalars().all()
     )
     victim = log_ids[1]
-    await db.execute(
-        text('UPDATE "DP_AUDIT_LOG" SET "ROW_HASH" = :v WHERE "LOG_ID" = :id'),
-        {"v": "0" * 64, "id": victim},
-    )
+    await _tamper(db, "ROW_HASH", "0" * 64, victim)
 
     result = await verify_chain(db)
     assert result.status == "BROKEN"
@@ -118,10 +123,7 @@ async def test_verify_reports_first_break_only(db):
     )
     # 竄改第 2 與第 5 列，應回報第 2 列
     for idx in (1, 4):
-        await db.execute(
-            text('UPDATE "DP_AUDIT_LOG" SET "AFTER_VALUE" = :v WHERE "LOG_ID" = :id'),
-            {"v": '{"x": 1}', "id": log_ids[idx]},
-        )
+        await _tamper(db, "AFTER_VALUE", '{"x": 1}', log_ids[idx])
     result = await verify_chain(db)
     assert result.status == "BROKEN"
     assert result.first_broken_log_id == log_ids[1]
@@ -141,10 +143,7 @@ async def test_amain_broken_returns_exit_1(db, monkeypatch):
     """斷鏈 → CLI 退出碼 1。"""
     await _write_rows(db, 3)
     victim = (await db.execute(text('SELECT "LOG_ID" FROM "DP_AUDIT_LOG" ORDER BY "LOG_ID" ASC'))).scalars().first()
-    await db.execute(
-        text('UPDATE "DP_AUDIT_LOG" SET "AFTER_VALUE" = :v WHERE "LOG_ID" = :id'),
-        {"v": '{"tampered": 1}', "id": victim},
-    )
+    await _tamper(db, "AFTER_VALUE", '{"tampered": 1}', victim)
     _patch_session_local(monkeypatch, db)
     assert await _amain() == 1
 

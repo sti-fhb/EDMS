@@ -1,6 +1,8 @@
 """core.config 設定測試——涵蓋 #16 T001 新增之 JWT / SMTP 設定。"""
 
+import ast
 import os
+from pathlib import Path
 
 import pytest
 
@@ -380,3 +382,97 @@ def test_scan_access_ttl_out_of_range_fails_startup(value: int) -> None:
     message = str(exc_info.value)
     assert "invalid environment variables" in message
     assert "SCAN_ACCESS_TTL_MIN" in message
+
+
+# --- MIGRATION_DATABASE_URL（#22：migration 與 app 執行期分用 DB 角色）---
+
+
+def _settings_with_db_urls(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://app:p@localhost/edms",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "DEBUG": True,
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_migration_url_falls_back_to_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未設定時退回 DATABASE_URL——合併後既有部署不改任何設定也能照常跑 migration。"""
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    assert _settings_with_db_urls().migration_database_url == "postgresql+asyncpg://app:p@localhost/edms"
+
+
+def test_migration_url_prefers_dedicated_setting() -> None:
+    """有設定時 migration 改用它（資料表 owner），app 執行期仍用 DATABASE_URL（最小權限角色）。"""
+    s = _settings_with_db_urls(MIGRATION_DATABASE_URL="postgresql+asyncpg://owner:p@localhost/edms")
+    assert s.migration_database_url == "postgresql+asyncpg://owner:p@localhost/edms"
+    assert s.DATABASE_URL == "postgresql+asyncpg://app:p@localhost/edms"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_migration_url_blank_treated_as_unset(blank: str) -> None:
+    """空值（`.env` 留 `MIGRATION_DATABASE_URL=` 範本行）視同未設定，不可拿空字串去連線。"""
+    assert _settings_with_db_urls(MIGRATION_DATABASE_URL=blank).migration_database_url == (
+        "postgresql+asyncpg://app:p@localhost/edms"
+    )
+
+
+def test_alembic_env_uses_migration_url() -> None:
+    """`alembic/env.py` 的線上 / 離線兩條路徑都必須取 `migration_database_url`，不可直接讀 DATABASE_URL。
+
+    直接讀 DATABASE_URL 的話，切到最小權限角色後 migration 會以 app 角色執行而在 DDL 失敗。
+    以 AST 檢查屬性存取，不靠字串比對（註解裡出現同一段字不算數）。
+    """
+    env = Path(__file__).resolve().parents[2] / "alembic" / "env.py"
+    attrs = [
+        n.attr
+        for n in ast.walk(ast.parse(env.read_text(encoding="utf-8")))
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "settings"
+    ]
+    assert attrs.count("migration_database_url") == 2
+    assert "DATABASE_URL" not in attrs
+
+
+@pytest.mark.parametrize(
+    "migration_url",
+    [
+        "postgresql+asyncpg://owner:p@otherhost/edms",
+        "postgresql+asyncpg://owner:p@localhost:5433/edms",
+        "postgresql+asyncpg://owner:p@localhost/edms_dev",
+        "postgresql+asyncpg://owner:p@localhost/edms?host=/run/postgresql",
+    ],
+    ids=["host", "port", "database", "query-host"],
+)
+def test_migration_url_must_target_same_database(migration_url: str) -> None:
+    """只能換帳號、不能換庫：指向別的 host / port / 庫時啟動即擋，訊息不回顯連線字串。"""
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://app:p@localhost/edms",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=True,
+            MIGRATION_DATABASE_URL=migration_url,
+        )
+    message = str(exc_info.value)
+    assert "MIGRATION_DATABASE_URL" in message
+    assert "owner:p" not in message
+
+
+def test_migration_url_same_database_explicit_default_port_accepted() -> None:
+    """同一個庫、只差在有沒有寫出預設埠 5432 → 視為相同。"""
+    s = _settings_with_db_urls(MIGRATION_DATABASE_URL="postgresql+asyncpg://owner:p@LOCALHOST:5432/edms")
+    assert s.migration_database_url.startswith("postgresql+asyncpg://owner:p@")
+
+
+def test_pytest_ignores_migration_url_from_dotenv() -> None:
+    """tests/conftest.py 把 MIGRATION_DATABASE_URL 清空：backend/.env 設了指向 dev 庫的值也不影響測試。
+
+    少了這一步，那個值會被 Settings 從 .env 補讀，與測試庫不同庫而在 import 時被 validator 擋下，
+    整批測試在 collection 階段失敗（CI 沒有 .env，看不到）。
+    """
+    from app.core.config import settings
+
+    assert os.environ["MIGRATION_DATABASE_URL"] == ""
+    assert settings.migration_database_url == settings.DATABASE_URL

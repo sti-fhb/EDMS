@@ -70,7 +70,7 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=settings.DATABASE_URL,
+        url=settings.migration_database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -90,7 +90,10 @@ async def run_async_migrations() -> None:
     # 日界才會與應用層一致（#483）。
     # 關閉查詢逾時（#810）：工廠預設對每條連線套 `DB_STATEMENT_TIMEOUT_MS`（60 秒），而回填大量資料的
     # migration 單句可能超過；被中斷的話部署卡在半途。`tests/unit/test_core_db.py` 守門。
-    engine = create_app_engine(settings.DATABASE_URL, connect_args={"server_settings": {"statement_timeout": "0"}})
+    # 連線取 migration_database_url（#22）：app 執行期角色沒有 DDL 權限，migration 須以資料表 owner 執行。
+    engine = create_app_engine(
+        settings.migration_database_url, connect_args={"server_settings": {"statement_timeout": "0"}}
+    )
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()
