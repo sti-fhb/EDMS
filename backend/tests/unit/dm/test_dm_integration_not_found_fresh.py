@@ -59,26 +59,33 @@ def _depth(exc: BaseException) -> int:
     return len(traceback.extract_tb(exc.__traceback__))
 
 
-async def _swallow(call) -> list[AppError]:
-    """比照 ET 端吞掉點：攔下 `AppError` 後不重拋，只留下實例。"""
+async def _swallow(call) -> tuple[list[AppError], int]:
+    """比照 ET 端吞掉點：攔下 `AppError` 後不重拋，只留下實例。
+
+    另回傳第一次攔下當下的 traceback 深度，供之後比對它有沒有被後續 raise 附加。
+    """
     swallowed: list[AppError] = []
+    first_depth = 0
     for _ in range(_ROUNDS):
         try:
             await call()
         except AppError as exc:
+            if not swallowed:
+                first_depth = _depth(exc)
             swallowed.append(exc)
         else:  # pragma: no cover - 情境設定錯誤才會走到
             pytest.fail("預期拋出 DM_DOC_001")
-    return swallowed
+    return swallowed, first_depth
 
 
-def _assert_no_growth(swallowed: list[AppError]) -> None:
+def _assert_no_growth(swallowed: list[AppError], first_depth: int) -> None:
     assert len(swallowed) == _ROUNDS
     assert {(e.status_code, e.error_code) for e in swallowed} == {(404, "DM_DOC_001")}
     # 持有全部實例時 id 不會被回收重用，故 id 相異即代表每次都是新實例。
     assert len({id(e) for e in swallowed}) == _ROUNDS
-    # 第一次吞下的例外，在之後 N-1 輪過後深度仍與最後一次相同——常數寫法下前者會是後者的 N 倍。
-    assert _depth(swallowed[0]) == _depth(swallowed[-1])
+    # 第一次吞下的例外，經過之後 N-1 輪仍維持攔下當下的深度。常數寫法下它與後續是同一物件，
+    # 每輪 raise 都會把 frame 附加上去，深度約成長為 N 倍。
+    assert _depth(swallowed[0]) == first_depth
 
 
 _GET_CURRENT_CASES = {
@@ -104,12 +111,12 @@ class TestDmDocumentService被吞掉不累積:
     async def test_get_current_by_doc_id(self, repo: _Repo) -> None:
         """SRVDM001：ET 吞掉點全數經此（learning / material / publish / doc_change）。"""
         svc = DmDocumentService(repository=repo)  # type: ignore[arg-type]
-        _assert_no_growth(await _swallow(lambda: svc.get_current_by_doc_id(None, _DOC)))
+        _assert_no_growth(*await _swallow(lambda: svc.get_current_by_doc_id(None, _DOC)))
 
     @pytest.mark.parametrize("repo", _READ_FILE_CASES.values(), ids=_READ_FILE_CASES.keys())
     async def test_read_file_for_reference(self, repo: _Repo) -> None:
         """取檔：ET 端以 `raise ... from exc` 改拋，被攔下的 DM 例外仍掛在 `__cause__` 上。"""
         svc = DmDocumentService(repository=repo)  # type: ignore[arg-type]
         _assert_no_growth(
-            await _swallow(lambda: svc.read_file_for_reference(None, doc_id=_DOC, version_id=_VERSION_ID))
+            *await _swallow(lambda: svc.read_file_for_reference(None, doc_id=_DOC, version_id=_VERSION_ID))
         )

@@ -135,7 +135,7 @@ class DmDocumentService:
         if ver is None or ver.doc_id != doc.doc_id or not ver.file_path:
             raise _not_found()
         # storage-root 圍籬（#160，收斂 US12 Sec MED-2）＋檔案歸屬圍籬（#240 A1）：本端點不掛 DM 角色閘，
-        # 讀取者是 ET 學員，檔案須確實落在本文件目錄下
+        # 讀取者是 ET 學員，檔案須確實落在本文件目錄下。`_not_found()` 在通過圍籬時也會建一個實例，成本可忽略
         safe_path = resolve_within_root(ver.file_path, not_found=_not_found(), expect_prefix=doc.doc_id)
         # D-2：不寫 DM_DOC_READ——ET 代學員取檔不計入 DM 閱讀統計（US13），ET 端自行統計學習進度。
         return DmFileContent(
