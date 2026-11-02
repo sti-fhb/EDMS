@@ -72,7 +72,7 @@
 
 | 層 | 落點 | 內容 |
 |---|---|---|
-| GRANT | `scripts/db-app-role.sql`（部署 / ops 層，非 migration） | app 執行期角色對本表**僅 `INSERT` / `SELECT`**，不可 DDL；migration 改以 owner 連線（`MIGRATION_DATABASE_URL`） |
+| GRANT | `scripts/db-app-role.sql`（部署 / ops 層，非 migration） | app 執行期角色對本表**僅 `INSERT` / `SELECT`**，不可 DDL；migration 改以 owner 連線（`MIGRATION_DATABASE_URL`，正式環境只帶進 migration 容器） |
 | trigger | migration `7ade05c26fd8` | `TRG_DP_AUDIT_LOG_DENY_MODIFY` 拒絕 `UPDATE` / `DELETE` / `TRUNCATE`，owner / superuser 的一般 DML 亦擋 |
 
 > GRANT 不落 Alembic migration：migration 以 schema owner 執行 DDL，GRANT / REVOKE 屬部署環境之角色治理。角色切換步驟見 `docs/infra/deployment.md` §2.8。

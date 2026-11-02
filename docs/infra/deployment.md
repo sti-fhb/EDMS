@@ -179,8 +179,7 @@ sudo systemctl enable --now edms-deploy.timer
 
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
-DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
-MIGRATION_DATABASE_URL=...   # 切換到最小權限角色後才需要，見 §2.8
+DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms   # 切換後改為 edms_app，見 §2.8
 TRUSTED_PROXY_COUNT=2
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
@@ -195,7 +194,7 @@ EDMS_BACKUP_BUCKET=gs://...
 
 ⚠️ 兩點容易出錯：
 
-- **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` 必須與 owner 連線的值一致**——切換到 §2.8 最小權限角色前是 `DATABASE_URL`，切換後是 `MIGRATION_DATABASE_URL`（`DATABASE_URL` 改為 `edms_app`，不要改回 owner）。 不一致時 DB 容器會正常啟動、health check 卻過不了，症狀看起來像後端有問題
+- **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` 必須與 owner 連線的值一致**——切換到 §2.8 最小權限角色前是 `DATABASE_URL`；切換後 owner 連線改放 `/opt/edms/.env.migrate`，`.env.prod` 不再放 `POSTGRES_PASSWORD`，`DATABASE_URL` 是 `edms_app`（不要改回 owner）。 不一致時 DB 容器會正常啟動、health check 卻過不了，症狀看起來像後端有問題
 - **`EDMS_BACKUP_BUCKET` 用維運人員實際建立的 bucket 名稱**（GCS 名稱全球唯一，可能不是預設的 `gs://edms-db-backup`）。填錯的話部署會停在備份那步——這是刻意的，沒有快照就不動 schema
 
 #### 安裝後驗收
@@ -223,6 +222,7 @@ journalctl -u edms-deploy.service -n 30
 | `.env.example` | 範本，列出 docker compose 需要的所有變數 | ✅ |
 | `.env.local` | **本機開發**用，由 `docker-compose.override.yml` 引用。從 `.env.example` 複製後填值 | ❌ |
 | `/opt/edms/.env.prod` | **正式環境**，放在 VM 上。`vm-deploy.sh` 部署時複製進 `/opt/edms/repo/.env.prod` | ❌ |
+| `/opt/edms/.env.migrate` | （選用）migration 專用的 owner 連線，只帶進 migration 容器，見 §2.8 | ❌ |
 | `backend/.env.example`、`frontend/.env.example` | 供「不透過 docker」直接跑起服務時使用 | ✅ |
 
 `MAIL_*` 一組設定於 `/opt/edms/.env.prod`，見 §2.6。
@@ -314,10 +314,12 @@ sudo chmod 600 /opt/edms/.env.prod
 
 | 角色 | 用途 | 設定 |
 |---|---|---|
-| `edms`（`POSTGRES_USER`，資料表 owner） | 執行 migration、備份、維護 | `MIGRATION_DATABASE_URL` |
-| `edms_app` | app 執行期 | `DATABASE_URL` |
+| `edms`（`POSTGRES_USER`，資料表 owner） | 執行 migration、備份、維護 | `/opt/edms/.env.migrate` 的 `MIGRATION_DATABASE_URL` |
+| `edms_app` | app 執行期 | `/opt/edms/.env.prod` 的 `DATABASE_URL` |
 
-`MIGRATION_DATABASE_URL` 未設定時 alembic 退回用 `DATABASE_URL`——所以**合併這個版本不需要先改任何設定**，切換前一切照舊（app 仍以 owner 連線，但 trigger 已生效）。
+**migration 憑證與執行期設定分離**：owner 連線只放在 `/opt/edms/.env.migrate`。`vm-deploy.sh` 只把它帶進跑 migration 的一次性容器（`run --rm`），常駐的 `edms-backend` 讀不到。切換完成後，`.env.prod` 不得含任何 owner 憑證——包括 `POSTGRES_PASSWORD`（見步驟 5）。
+
+`/opt/edms/.env.migrate` 不存在時 alembic 退回用 `DATABASE_URL`——所以**合併這個版本不需要先改任何設定**，切換前一切照舊（app 仍以 owner 連線，但 trigger 已生效）。
 
 `edms_app` 的權限（腳本冪等，每次執行都把權限收斂到這個狀態）：
 
@@ -332,7 +334,7 @@ sudo chmod 600 /opt/edms/.env.prod
 
 #### 切換步驟（在 `<PROD_VM>` 上，一次性）
 
-順序不可顛倒：**先建角色 → 同時設好兩個連線設定 → 重建容器**。
+順序不可顛倒：**先建角色 → 建 `.env.migrate` → 再改 `.env.prod` → 重建容器**。
 
 ```bash
 cd /opt/edms/repo
@@ -354,15 +356,23 @@ async def main():
     await c.close()
 asyncio.run(main())"
 
-# 4. 編輯 /opt/edms/.env.prod（兩行一起改）：
-#      MIGRATION_DATABASE_URL=<原本 DATABASE_URL 的值，即 owner edms 的連線>
+# 4. 建立 /opt/edms/.env.migrate，只放一行（值＝目前 .env.prod 的 DATABASE_URL，即 owner 的連線）：
+#      MIGRATION_DATABASE_URL=postgresql+asyncpg://edms:<owner 密碼>@edms-db:5432/edms
+#    host / port / 資料庫名須與 DATABASE_URL 相同，只能換帳號密碼（不同時後端啟動即擋下）
+sudo install -m 600 -o root -g root /dev/null /opt/edms/.env.migrate
+sudo vi /opt/edms/.env.migrate
+
+# 5. 編輯 /opt/edms/.env.prod：
 #      DATABASE_URL=postgresql+asyncpg://edms_app:<步驟 2 的密碼>@edms-db:5432/edms
+#      刪除 POSTGRES_PASSWORD 這一行（只在 DB 第一次初始化時使用，既有資料目錄不需要；
+#      在新機器重建環境時才暫時放回）
 #    密碼含 @ : / # ? % 等字元時須 percent-encode。
 
-# 5. 套用：照 §2.5「修改 /opt/edms/.env.prod 後套用」重建 edms-backend
+# 6. 套用：照 §2.5「修改 /opt/edms/.env.prod 後套用」重建 edms-backend
+#    （edms-db 的 env_file 也是 .env.prod，下次部署時會因設定變動被重建一次，資料不受影響）
 ```
 
-⚠️ 只改 `DATABASE_URL`、漏設 `MIGRATION_DATABASE_URL` 的話，下一次部署的 migration 會以 `edms_app` 執行而失敗（沒有 DDL 權限）。`vm-deploy.sh` 在 migration 失敗時中止、不會啟動新版，不致於半套用，但部署會卡住直到補上設定。
+⚠️ 只改 `DATABASE_URL`、漏建 `.env.migrate` 的話，下一次部署的 migration 會以 `edms_app` 執行而失敗（沒有 DDL 權限）。`vm-deploy.sh` 在 migration 失敗時中止、不會啟動新版，不致於半套用，但部署會卡住直到補上設定。
 
 #### 驗證
 
@@ -381,6 +391,9 @@ sudo docker exec edms-db psql -U edms -d edms -tAc \
 sudo docker exec edms-db psql -U edms -d edms -tAc \
   "SELECT count(*) FROM pg_auth_members WHERE member = 'edms_app'::regrole"
 
+# 常駐的 backend 容器不含 owner 憑證：應為 0
+sudo docker exec edms-backend sh -c 'env | grep -cE "^(POSTGRES_PASSWORD|MIGRATION_DATABASE_URL)="'
+
 # 驗鏈工具以 app 角色唯讀執行（退出碼 0＝完好）
 sudo docker exec edms-backend /app/.venv/bin/python -m app.dp.audit.verify
 ```
@@ -389,11 +402,11 @@ sudo docker exec edms-backend /app/.venv/bin/python -m app.dp.audit.verify
 
 #### 還原（切換後出問題時）
 
-把 `.env.prod` 的 `DATABASE_URL` 改回 owner 的連線、移除 `MIGRATION_DATABASE_URL`，再照 §2.5 重建 `edms-backend`。`edms_app` 角色留著不影響運作。
+把 `.env.prod` 的 `DATABASE_URL` 改回 owner 的連線（值在 `.env.migrate`），再照 §2.5 重建 `edms-backend`。`.env.migrate` 與 `edms_app` 角色留著不影響運作。
 
 #### 日常注意
 
-- migration 一律以 owner（`MIGRATION_DATABASE_URL`）執行。若改用其他角色建表，新表不會自動授權給 `edms_app`，app 會出現 `permission denied`——以 owner 重跑一次步驟 1 即可補齊
+- migration 一律以 owner（`.env.migrate`）執行；手動跑 migration 時比照 `vm-deploy.sh` 的寫法帶入，不要把它寫進 `.env.prod`。若改用其他角色建表，新表不會自動授權給 `edms_app`，app 會出現 `permission denied`——以 owner 重跑一次步驟 1 即可補齊
 - 日後若有 migration 重建或分割 `DP_AUDIT_LOG`，須在同一 migration 重建 trigger，部署後以 owner 重跑步驟 1
 - 日後真的需要修補稽核表資料時，作法見 migration `7ade05c26fd8` 的 docstring（同一交易內暫停 trigger、並記錄理由），不要直接停用 trigger 了事
 - 備份還原（§5.1）：`pg_dump` 帶出 GRANT 與預設權限、但不含角色本身——還原到**新叢集**後先跑一次步驟 1、2 再啟動 app。還原一律整庫重建後 `pg_restore`；「清空資料表再灌資料」的方式會被 trigger 擋下

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     # migration 專用連線（資料表 owner）。未設定 / 空值時退回 DATABASE_URL，故合併本設定前的部署
     # 不改任何設定也能照常跑 migration；DATABASE_URL 換成最小權限角色後，這裡就必須設成 owner。
+    # 正式環境只帶進 migration 的一次性容器（scripts/vm-deploy.sh 讀 /opt/edms/.env.migrate），
+    # 常駐的 app 容器不持有它。
     # 讀取一律經 `migration_database_url`，不要直接讀本欄位。
     MIGRATION_DATABASE_URL: str | None = None
 
