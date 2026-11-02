@@ -56,6 +56,10 @@ export default defineConfig({
       env: {
         E2E_API_PORT: String(API_PORT),
         DATABASE_URL,
+        // 明示清空 → alembic 退回使用上面那個（已過 e2e_ 護欄的）DATABASE_URL（#22 的 fallback）。
+        // 不清的話，開發者 backend/.env 若設了指向 dev DB 的 MIGRATION_DATABASE_URL，
+        // 後端會因「與 DATABASE_URL 不同庫」的 validator 起不來。
+        MIGRATION_DATABASE_URL: "",
         // 假值：僅供 E2E 簽 JWT，長度需 ≥ 32 bytes（HS256 門檻）
         JWT_SECRET_KEY: "e2e-test-secret-key-at-least-32-bytes-long",
         DEBUG: "true",
