@@ -83,10 +83,14 @@ ORPHAN_GRACE_SECONDS: Final = 24 * 60 * 60
 #: （教師放棄的上傳）一天遠低於此，積壓的舊孤兒則分幾天清完。
 MAX_ORPHAN_DELETES_PER_RUN: Final = 200
 
-#: 系統自己產生的檔名（`storage.promote` 與 `save_video_stream`）：`{數字目錄}/{uuid hex}.{副檔名}`
-#: 與 `.tmp/{uuid hex}.{副檔名}`。**只有這兩種會被清**——根目錄是 bind mount，裡面若有人手放
-#: 的檔、`lost+found`，或根目錄被誤設到別的資料夾，那些都不是本作業該碰的東西。
-_MANAGED_PATH = re.compile(r"^(?:\d+|\.tmp)/[0-9a-f]{32}\.[A-Za-z0-9]{1,10}$")
+#: 系統自己產生的檔名（`storage.promote` 與 `save_video_stream`）：`{數字目錄}/{uuid hex}.{副檔名}`、
+#: 暫存新增教材的 `s{數字}/{uuid hex}.{副檔名}`（#871）與 `.tmp/{uuid hex}.{副檔名}`。**只有這幾種
+#: 會被清**——根目錄是 bind mount，裡面若有人手放的檔、`lost+found`、歸屬圍籬的標記檔，或根目錄
+#: 被誤設到別的資料夾，那些都不是本作業該碰的東西。
+#:
+#: ⚠️ `s{數字}/` 下的檔在按「更新」後由 `storage.link_into_material` 掛進 `{MATERIAL_ID}/`，原名字
+#: 從此沒有列指向而成為孤兒——刪的是一個名字，內容仍由正式目錄那個名字持有（hard link）。
+_MANAGED_PATH = re.compile(r"^(?:s?\d+|\.tmp)/[0-9a-f]{32}\.[A-Za-z0-9]{1,10}$")
 
 
 def is_managed_video_path(rel_path: str) -> bool:

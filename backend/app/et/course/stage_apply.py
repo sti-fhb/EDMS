@@ -50,6 +50,7 @@
 `test_刪掉整個項目時教材一起被刪` 會紅——那是該響的警報。
 """
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -84,6 +85,7 @@ from app.et.course.stage_rules import (
     RETEST_PAYLOAD_KEY,
     StageNode,
 )
+from app.et.material import storage
 from app.et.material.repository import EtMaterialRepository
 from app.et.progress.repository import EtProgressRepository
 from app.et.quiz.models import EtOption
@@ -140,7 +142,8 @@ async def apply_stage(
         刪除統計，供呼叫端寫進稽核描述。
 
     Raises:
-        AppError: 500 `ET_STAGE_001` 暫存樹結構不合法；409 `ET_LOCK_001` 期間活表被
+        AppError: 500 `ET_STAGE_001` 暫存樹結構不合法；500 `ET_STAGE_002` 影片檔無法掛進所屬教材目錄
+            （見 `_adopt_video_file`）；409 `ET_LOCK_001` 期間活表被
             其他操作改動。
     """
     # 🔴 **活表樹只載入一次**，驗證與刪除共用。
@@ -591,6 +594,10 @@ async def _upsert(
                 values[spec.fk] = (
                     course.course_id if node.parent_stage_id is None else live_id_by_stage[node.parent_stage_id]
                 )
+            if spec.entity_type == ENTITY_MATERIAL_VIDEO and node.source_id is None and "file_path" in values:
+                values["file_path"] = await _adopt_video_file(
+                    values["file_path"], values["material_id"], material_stage_id=node.parent_stage_id
+                )
             if spec.entity_type == ENTITY_ITEM:
                 # 反向連結：教材 / 測驗已於本迴圈稍早建好（`APPLY_ORDER` 保證）。
                 #
@@ -614,6 +621,58 @@ async def _upsert(
     # 回傳對照表：套用後才知道新增節點的活表 id，而 `_require_retest_for_flagged`
     # 需要它才找得到「本次新增的測驗」對應到哪一列。
     return live_id_by_stage
+
+
+async def _adopt_video_file(file_path: str, material_id: int, *, material_stage_id: int) -> str:
+    """**本次新增的**影片檔掛進所屬教材的 `{MATERIAL_ID}/`，回新的 `FILE_PATH`（#871）。
+
+    暫存新增的教材，影片落在 `s{stage_id}/`（它上傳時還沒有 `MATERIAL_ID`）；寫活表的此刻才拿得到
+    正式 id。播放端以 `expect_prefix=MATERIAL_ID` 驗歸屬，不掛回來就播不出來。既有教材的影片本來
+    就在正式目錄，原樣回傳。
+
+    🔴 **只掛該教材自己的暫存目錄**（`s{教材 stage_id}`，以及 #871 前的 `{教材 stage_id}`），且
+    **只處理新增的影片**（呼叫端以 `source_id is None` 篩）。不限的話，一筆指向他份教材檔案的
+    `FILE_PATH` 會在下一次「更新」時被掛過來、從此通過歸屬圍籬——圍籬要擋的正是這種列。既有影片
+    若路徑不符，由遷移腳本在圍籬生效前處理；生效後交給播放端擋。
+
+    hard link 而非搬移——本交易可能回滾，回滾後暫存列仍指向原路徑（見 `storage.link_into_material`）。
+    丟到執行緒：檔案系統不支援 hard link 時會退回複製，同步做會凍結 event loop。
+
+    ## 掛不上時
+
+    | 情況 | 處置 | 理由 |
+    |------|------|------|
+    | 來源不存在、不是一般檔、逃出 root、不在該教材暫存目錄 | 保留原路徑、記 log | 見下 |
+    | 其他檔案系統錯誤，圍籬**尚未**生效 | 同上 | 照常可播；遷移腳本（`relocate_videos`）會把它列為待處理 |
+    | 其他檔案系統錯誤，圍籬**已**生效 | 500 `ET_STAGE_002`，整批回滾 | 見下 |
+
+    第一列：那支影片本來就播不出來（或本就該被圍籬擋），不該因它讓整批內容都更新不了。
+    圍籬已生效時保留原路徑，等於寫進一支學員必然 404 的影片，而遷移腳本已跑完、沒有人會再撈到它。
+    """
+    try:
+        return await asyncio.to_thread(
+            storage.link_into_material,
+            file_path,
+            material_id,
+            allowed_source_dirs=frozenset({f"{storage.STAGED_DIR_PREFIX}{material_stage_id}", str(material_stage_id)}),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error(
+            "ET 套用：影片檔無法掛進所屬教材目錄，保留原路徑（不記路徑）material_id=%s：%s",
+            material_id,
+            type(exc).__name__,
+        )
+        return file_path
+    except OSError as exc:
+        if storage.ownership_fence_enforced(storage.storage_root()):
+            logger.error("ET 套用：影片檔無法掛進所屬教材目錄，中止更新（不記路徑）：%s", type(exc).__name__)
+            raise AppError(
+                status_code=500,
+                detail="影片檔處理失敗，請稍後再試",
+                error_code="ET_STAGE_002",
+            ) from exc
+        logger.error("ET 套用：影片檔無法掛進所屬教材目錄，保留原路徑（不記路徑）：%s", type(exc).__name__)
+        return file_path
 
 
 #: 有**自然鍵唯一索引**、且該索引不含 `DELETED` 的型別 → 新增前必須先找軟刪列復活。

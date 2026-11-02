@@ -390,8 +390,9 @@ class EtMaterialService:
             storage.discard(tmp_path)
             raise
 
-        # DB 記相對片段（可隨 root 搬移，#233）；回滾刪檔須用絕對路徑，兩者不可互換
-        final_abs, final_rel = storage.promote(tmp_path, video_id_hint=str(abs(material_id)), ext=ext)
+        # DB 記相對片段（可隨 root 搬移，#233）；回滾刪檔須用絕對路徑，兩者不可互換。
+        # 暫存新增的教材（負數 id）落 `s{stage_id}/`，按「更新」時才掛回正式目錄（#871）
+        final_abs, final_rel = storage.promote(tmp_path, video_id_hint=storage.video_dir_name(material_id), ext=ext)
         try:
             # 🔴 **取鎖後重新解析**：第 1、2 段之間另一個分頁可能按了「更新」把暫存區清掉、
             # 刪了這份教材，或課程狀態變了。重新解析在鎖內完成授權、必要時重新複製進暫存區，
