@@ -50,7 +50,7 @@ class VerifyService:
     async def verify(self, db: AsyncSession, *, new_password: str, confirm_password: str, token: str) -> None:
         """驗證註冊 token → **由本人當場設定密碼** → 啟用帳號（#212）。
 
-        密碼不再來自 pending 列（該列自 #212 起 PWD_HASH 為 NULL）。原本存「註冊當下填寫者的
+        密碼不再來自 pending 列（#212 起不存密碼，#668 移除該欄位）。原本存「註冊當下填寫者的
         密碼」使任何人可用他人 Email 註冊並填自己的密碼，受害者點下驗證信後帳號即以攻擊者的
         密碼建立（pre-hijack）。改為與 US4 邀請啟用同一實作 `activate_with_new_password`。
 
@@ -117,7 +117,7 @@ class ResendVerificationService:
 
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
-        # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原姓名 / 密碼雜湊寫新列。
+        # 以 Email 覆蓋：刪舊列（舊 token 即作廢）→ 沿用原姓名寫新列（本表無密碼欄位，#668）。
         # 用條件式刪除（非無條件版）：上面的 kind 檢查到此處之間隔著兩次 DB 讀取與 token 產生，
         # 若該空窗內原 SELF_REGISTER 列被驗證消耗、管理者又對同 Email 發出邀請，無條件刪除會
         # 吃掉那筆新邀請（與 #125 同一個 TOCTOU 形狀）。保留邀請後改由下方 UNIQUE 撞成 409。
@@ -131,7 +131,6 @@ class ResendVerificationService:
                 token_hash=hash_token(plaintext),
                 email=pending.email,
                 user_name=pending.user_name,
-                pwd_hash=pending.pwd_hash,
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
             )

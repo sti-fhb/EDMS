@@ -51,7 +51,6 @@ async def _seed_valid_invite(db) -> None:
         token_hash=hash_token("invite-token"),
         email=_EMAIL,
         user_name="被邀請者",
-        pwd_hash=None,
         expires_date=now + timedelta(hours=24),
         now=now,
         kind=KIND_ADMIN_INVITE,

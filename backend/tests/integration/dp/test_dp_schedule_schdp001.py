@@ -264,7 +264,6 @@ async def _seed_pending(db, *, email, expires_offset_hours, kind="SELF_REGISTER"
         token_hash=f"h-{email}",
         email=email,
         user_name="待驗證",
-        pwd_hash=None,
         expires_date=now + timedelta(hours=expires_offset_hours),
         now=now,
         kind=kind,
