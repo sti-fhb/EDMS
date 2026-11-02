@@ -162,7 +162,7 @@ Migration 執行完成後，會自動建立以下 seed 資料：
 > 即為一次輪替）。密碼僅以 bcrypt 雜湊存在於 migration 中。
 >
 > 帳號由 `7b24b5dea3ad_common_seed_demo_accounts` 建立，受 `SEED_DEMO_ACCOUNTS` 控制：
-> `DEBUG=true` 時預設開啟；`DEBUG=false`（production）時必須明示設定，未設定啟動即擋。
+> 未設定時 `DEBUG=true` 預設開啟、`DEBUG=false` 時預設 `false`。
 > 不需要示範帳號的環境將該設定設為 `false` 即不會種入。
 
 ---
