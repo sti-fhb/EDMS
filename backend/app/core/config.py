@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = False
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
+    # 發信 worker 輪距（秒）。E2E 設 1，否則每封信最壞要等滿一輪才寄出（#57）。
+    # ⚠️ worker 每輪最多寄 DP_PARAM MAIL.RATE_PER_MIN 封——那個「每分鐘」是靠本值 = 60 撐起來的，
+    # 調短等於把發信速率上限放大，故 production 不得低於 60（見 _validate_mail_worker_poll_interval）。
+    MAIL_WORKER_POLL_INTERVAL_SECONDS: int = Field(default=60, ge=1, le=3600)
 
     # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（invite_id）重寄的最小間隔秒數，
     # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
@@ -170,6 +174,21 @@ class Settings(BaseSettings):
         """
         if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
             raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_mail_worker_poll_interval(self) -> "Settings":
+        """production（非 DEBUG）護欄：發信 worker 輪距不得低於 60 秒。
+
+        worker 每輪最多寄 `MAIL.RATE_PER_MIN` 封（`dp/notify/worker.py`），該參數的「每分鐘」
+        語意建立在輪距 = 60 秒之上。輪距縮成 1 秒，實際上限就變成 60 倍，可能超出郵件主機的
+        寄信額度而被擋信。縮短輪距只為 E2E 不必每封信等一分鐘（#57），production 用不到。
+        """
+        if not self.DEBUG and self.MAIL_WORKER_POLL_INTERVAL_SECONDS < 60:
+            raise ValueError(
+                "MAIL_WORKER_POLL_INTERVAL_SECONDS 在 production（DEBUG=false）不得低於 60："
+                "worker 每輪最多寄 MAIL.RATE_PER_MIN 封，縮短輪距會放大發信速率上限"
+            )
         return self
 
     @model_validator(mode="after")

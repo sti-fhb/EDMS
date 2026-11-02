@@ -9,6 +9,12 @@ import { defineConfig } from "vite"
 // 詳見 TBMS repo 的 docs/infra/onprem-path-routing.md §5.1。
 const basePath = process.env.VITE_BASE_PATH || "/"
 
+// `/api` 代理目標。預設連本機 dev 後端；E2E（e2e/playwright.config.ts）會改指向自己起的後端，
+// 讓 E2E 與手上開著的 dev server 互不搶 port（#57）。`vite preview` 未設 preview.proxy 時沿用本值。
+// 明確走 IPv4：Windows 上 localhost 會優先解析成 IPv6 ::1，而後端 fastapi dev 綁 127.0.0.1，
+// 用 localhost 會使 proxy 連 ::1:8001 被拒（ECONNREFUSED）。指定 127.0.0.1 避免此問題。
+const apiProxyTarget = process.env.EDMS_API_PROXY_TARGET || "http://127.0.0.1:8001"
+
 // https://vite.dev/config/
 export default defineConfig({
   base: basePath,
@@ -18,9 +24,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        // 明確走 IPv4：Windows 上 localhost 會優先解析成 IPv6 ::1，而後端 fastapi dev 綁 127.0.0.1，
-        // 用 localhost 會使 proxy 連 ::1:8001 被拒（ECONNREFUSED）。指定 127.0.0.1 避免此問題。
-        target: "http://127.0.0.1:8001",
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

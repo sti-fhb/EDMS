@@ -3,10 +3,15 @@
 # EDMS Local CI — 在本地模擬 GitHub CI 的所有檢查
 #
 # 用法：
-#   ./scripts/local-ci.sh          # 跑全部（不含 E2E）
-#   ./scripts/local-ci.sh quick    # 只跑 lint / format / type-check（最快）
-#   ./scripts/local-ci.sh backend  # 只跑後端
-#   ./scripts/local-ci.sh frontend # 只跑前端
+#   ./scripts/local-ci.sh             # 跑全部（不含 E2E）
+#   ./scripts/local-ci.sh quick       # 只跑 lint / format / type-check（最快）
+#   ./scripts/local-ci.sh backend     # 只跑後端
+#   ./scripts/local-ci.sh frontend    # 只跑前端
+#   ./scripts/local-ci.sh all --e2e   # 跑全部 + E2E（Playwright，見 e2e/README.md）
+#   ./scripts/local-ci.sh --e2e       # 同上（未指定模式時為 all）
+#
+# E2E 預設不跑：慢、且需額外前置（PostgreSQL 上的 e2e_ 專用庫、mailpit、chromium），
+# 不該拖慢日常開發（#57）。結果彙總會明確標示本次「含 / 不含 E2E」。
 #
 # 需要整合測試時，請確保 PostgreSQL 正在運行且 backend/.env.test 已設定。
 # 前端尚未建立時（frontend/ 不存在）會自動 skip 前端檢查，不報錯。
@@ -17,16 +22,37 @@ set -uo pipefail
 # 不使用 set -e：run_step 自行管理成功/失敗狀態，允許某步失敗後繼續執行其他檢查
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MODE="${1:-all}"
+MODE=""
+RUN_E2E=false
 
-# 白名單驗證：緊接 MODE 賦值之後，防止重構時順序被打亂
-case "$MODE" in
-    all|quick|backend|frontend) ;;
-    *)
-        echo "用法: $0 [all|quick|backend|frontend]"
-        exit 1
-        ;;
-esac
+usage() {
+    echo "用法: $0 [all|quick|backend|frontend] [--e2e]"
+}
+
+# 參數：至多一個模式 + 選填 --e2e（順序不拘）
+for arg in "$@"; do
+    case "$arg" in
+        --e2e) RUN_E2E=true ;;
+        all|quick|backend|frontend)
+            if [[ -n "$MODE" ]]; then usage; exit 1; fi
+            MODE="$arg"
+            ;;
+        *) usage; exit 1 ;;
+    esac
+done
+MODE="${MODE:-all}"
+
+# quick 的定位是「最快的靜態檢查」，與 E2E 相牴觸，直接拒絕而非默默忽略 --e2e
+if [[ "$MODE" == "quick" && "$RUN_E2E" == "true" ]]; then
+    echo "quick 模式不跑測試，不可與 --e2e 併用"
+    exit 1
+fi
+
+if [[ "$RUN_E2E" == "true" ]]; then
+    E2E_LABEL="含 E2E"
+else
+    E2E_LABEL="不含 E2E"
+fi
 
 # 前置檢查：確認必要工具已安裝（前端工具在有 frontend/ 時才要求）
 for cmd in uv git; do
@@ -231,10 +257,42 @@ run_frontend() {
 }
 
 # ──────────────────────────────────────────────────────────
+# E2E（Playwright，僅 --e2e 時執行）
+#
+# Playwright 會自行起 E2E 專用的後端（:8101）與前端（:4174），不碰 dev server 與 dev DB。
+# 前置（PostgreSQL 上的 e2e_ 專用庫、mailpit、chromium）見 e2e/README.md。
+# ──────────────────────────────────────────────────────────
+run_e2e() {
+    echo ""
+    echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║         E2E (Playwright)             ║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
+
+    command -v pnpm &>/dev/null || { echo -e "${RED}ERROR: pnpm not found${NC}"; FAILED+=("E2E (pnpm missing)"); return; }
+
+    # 明確要求跑 E2E 卻缺依賴 → 記為失敗而非 skip：使用者下了 --e2e，「綠燈但其實沒跑」比紅燈更糟
+    if [[ ! -d "$ROOT_DIR/e2e/node_modules" ]]; then
+        echo -e "${RED}  ✘ 尚未安裝 E2E 依賴：cd e2e && pnpm install && pnpm install:browser${NC}"
+        FAILED+=("E2E: Playwright (依賴未安裝)")
+        return
+    fi
+    if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
+        echo -e "${RED}  ✘ E2E 需建置前端，請先：cd frontend && pnpm install${NC}"
+        FAILED+=("E2E: Playwright (前端依賴未安裝)")
+        return
+    fi
+
+    cd "$ROOT_DIR/e2e"
+    run_step "E2E: type-check" pnpm type-check
+    run_step "E2E: Playwright" pnpm test
+    cd "$ROOT_DIR"
+}
+
+# ──────────────────────────────────────────────────────────
 # 執行
 # ──────────────────────────────────────────────────────────
 
-echo -e "${BLUE}EDMS Local CI${NC} — mode: ${YELLOW}${MODE}${NC}"
+echo -e "${BLUE}EDMS Local CI${NC} — mode: ${YELLOW}${MODE}${NC}（${E2E_LABEL}）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 case "$MODE" in
@@ -250,12 +308,16 @@ case "$MODE" in
         ;;
 esac
 
+if [[ "$RUN_E2E" == "true" ]]; then
+    run_e2e
+fi
+
 # ──────────────────────────────────────────────────────────
 # 結果彙總
 # ──────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "${BLUE}結果彙總${NC}"
+echo -e "${BLUE}結果彙總${NC}（${E2E_LABEL}）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [[ ${#PASSED[@]} -gt 0 ]]; then
@@ -275,10 +337,13 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
         echo -e "  ${RED}✘${NC} $step"
     done
     echo ""
-    echo -e "${RED}CI 失敗：${#FAILED[@]} 個檢查未通過${NC}"
+    echo -e "${RED}CI 失敗（${E2E_LABEL}）：${#FAILED[@]} 個檢查未通過${NC}"
     exit 1
 else
     echo ""
-    echo -e "${GREEN}CI 通過：${#PASSED[@]} 個檢查成功，${#SKIPPED[@]} 個跳過${NC}"
+    echo -e "${GREEN}CI 通過（${E2E_LABEL}）：${#PASSED[@]} 個檢查成功，${#SKIPPED[@]} 個跳過${NC}"
+    if [[ "$RUN_E2E" != "true" ]]; then
+        echo -e "${YELLOW}  未跑 E2E；需要時加 --e2e（或 pnpm ci:local:e2e）${NC}"
+    fi
     exit 0
 fi

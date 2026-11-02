@@ -384,6 +384,66 @@ def test_scan_access_ttl_out_of_range_fails_startup(value: int) -> None:
     assert "SCAN_ACCESS_TTL_MIN" in message
 
 
+# --- MAIL_WORKER_POLL_INTERVAL_SECONDS（發信 worker 輪距；E2E 縮短以免每封信等滿 60 秒，#57）---
+
+
+def test_mail_worker_poll_interval_defaults_to_60(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未設定時維持 60 秒——與 DP_PARAM MAIL.RATE_PER_MIN 的「每分鐘」語意對齊。"""
+    monkeypatch.delenv("MAIL_WORKER_POLL_INTERVAL_SECONDS", raising=False)
+    assert _settings_with_scan_ttl().MAIL_WORKER_POLL_INTERVAL_SECONDS == 60
+
+
+def test_mail_worker_poll_interval_short_value_allowed_in_debug() -> None:
+    """dev / CI / E2E（DEBUG=true）可縮短輪距。"""
+    assert _settings_with_scan_ttl(MAIL_WORKER_POLL_INTERVAL_SECONDS=1).MAIL_WORKER_POLL_INTERVAL_SECONDS == 1
+
+
+@pytest.mark.parametrize("value", [0, -1, 3601])
+def test_mail_worker_poll_interval_out_of_range_fails_startup(value: int) -> None:
+    """超出 1～3600 秒經 _build_settings 轉為啟動失敗，訊息點名欄位。"""
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=True,
+            MAIL_WORKER_POLL_INTERVAL_SECONDS=value,
+        )
+    assert "MAIL_WORKER_POLL_INTERVAL_SECONDS" in str(exc_info.value)
+
+
+def test_mail_worker_poll_interval_below_60_rejected_in_production() -> None:
+    """production 不得低於 60 秒：worker 每輪最多寄 RATE_PER_MIN 封，輪距縮短等於把發信速率上限放大。"""
+    with pytest.raises(ValueError, match="MAIL_WORKER_POLL_INTERVAL_SECONDS"):
+        Settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=False,
+            FRONTEND_BASE_URL="https://edms.example.com",
+            TRUSTED_PROXY_COUNT=0,
+            DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+            ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+            MAIL_WORKER_POLL_INTERVAL_SECONDS=59,
+        )
+
+
+def test_mail_worker_poll_interval_longer_value_allowed_in_production() -> None:
+    """production 調長（降低輪詢頻率）不影響速率上限語意，照收。"""
+    s = Settings(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",
+        TRUSTED_PROXY_COUNT=0,
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+        MAIL_WORKER_POLL_INTERVAL_SECONDS=120,
+    )
+    assert s.MAIL_WORKER_POLL_INTERVAL_SECONDS == 120
+
+
 # --- MIGRATION_DATABASE_URL（#22：migration 與 app 執行期分用 DB 角色）---
 
 
