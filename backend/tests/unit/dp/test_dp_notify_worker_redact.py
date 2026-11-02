@@ -1,13 +1,16 @@
 """發信 worker 敏感信 body 遮罩（#50）單元測試：fake repository / mailer，不連 DB。
 
-SA 裁示方案 A：IS_SYSTEM 之 PWD_RESET / EMAIL_CHANGE_VERIFY 於轉為 SENT **之後**遮罩 BODY；
-PENDING 保留原文供重試、FAILED 依裁示保留。持久化（flush 後二次查詢）由 integration 測試驗。
+SA 裁示：含一次性連結的四支系統信（PWD_RESET / EMAIL_CHANGE_VERIFY，2026-11-02 起加上
+ACCOUNT_VERIFY / ACCOUNT_INVITE）於轉為 SENT **之後**遮罩 BODY；PENDING 保留原文供重試；
+FAILED 由 worker 保留、超過連結時效後才由 SCHDP001 遮罩（見 test_dp_notify_redaction.py）。
+持久化（flush 後二次查詢）由 integration 測試驗。
 """
 
 import pytest
 
 from app.dp.notify.models import DpEmailLog
-from app.dp.notify.worker import REDACTED_BODY, EmailWorker
+from app.dp.notify.redaction import REDACTED_BODY
+from app.dp.notify.worker import EmailWorker
 
 pytestmark = pytest.mark.unit
 
@@ -59,7 +62,7 @@ async def _run(row, mailer, max_retry=3):
     )
 
 
-@pytest.mark.parametrize("template_code", ["PWD_RESET", "EMAIL_CHANGE_VERIFY"])
+@pytest.mark.parametrize("template_code", ["PWD_RESET", "EMAIL_CHANGE_VERIFY", "ACCOUNT_VERIFY", "ACCOUNT_INVITE"])
 async def test_sensitive_mail_redacted_after_sent(template_code):
     """敏感系統信寄出成功 → SENT 且 BODY 遮罩；mailer 收到的是原文（非提前遮罩）。"""
     row, mailer = _row(template_code=template_code), _RecordingMailer()
@@ -78,7 +81,7 @@ async def test_sensitive_mail_kept_while_pending_retry():
 
 
 async def test_sensitive_mail_kept_when_failed():
-    """寄送失敗達上限 → FAILED，BODY 保留原文（不遮罩未寄成功的信）。"""
+    """寄送失敗達上限 → FAILED，worker 不遮罩（逾連結時效才由 SCHDP001 遮）。"""
     row = _row()
     await _run(row, _RecordingMailer(fail=True), max_retry=1)
     assert row.status == "FAILED"
@@ -88,8 +91,9 @@ async def test_sensitive_mail_kept_when_failed():
 @pytest.mark.parametrize(
     ("module", "template_code"),
     [
-        ("DP", "ACCOUNT_INVITE"),  # SA 裁示僅點名兩支，其餘系統信不在範圍
+        ("DP", "PWD_EXPIRY_REMIND"),  # 不含一次性連結的系統信不在範圍
         ("ET", "PWD_RESET"),  # 判定以 (MODULE, TEMPLATE_CODE) 為鍵，非僅比代碼
+        ("ET", "ACCOUNT_INVITE"),
     ],
 )
 async def test_non_sensitive_mail_kept_after_sent(module, template_code):

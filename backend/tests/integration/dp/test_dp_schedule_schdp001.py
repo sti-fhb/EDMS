@@ -1,6 +1,7 @@
 """US11 SCHDP001 平台每日作業整合測試（handler / UsersService）。
 
-直測 `UsersService.disable_idle_accounts` / `send_pwd_expiry_reminders`（接收 db、逐筆 commit 容錯）。
+直測 `UsersService.disable_idle_accounts` / `send_pwd_expiry_reminders`（接收 db、逐筆 commit 容錯）
+與第④批 `redaction.redact_expired_failed_mails`（#50）。
 涵蓋 AC6①（閒置禁用 + 稽核 func_name=DP-USERS + null→CREATED_DATE 基準）/ AC6②（到期提醒→EMAIL_LOG PENDING）。
 """
 
@@ -13,6 +14,7 @@ from sqlalchemy import select
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.notify.models import DpEmailLog
+from app.dp.notify.redaction import REDACTED_BODY, redact_expired_failed_mails
 from app.dp.user.models import DpPendingRegistration
 from app.dp.user.repository import AuthRepository
 from app.dp.users.models import DpUser
@@ -315,3 +317,74 @@ async def test_purge_expired_pending_writes_no_per_row_audit(db):
 
     after = len((await db.execute(select(DpAuditLog))).scalars().all())
     assert after == before
+
+
+# ── ④ 遮罩逾連結時效之寄送失敗信件（#50 SA 2026-11-02 裁示 2）──────────────
+
+
+async def _seed_email_log(db, *, module, code, status, body, age):
+    row = DpEmailLog(
+        module=module,
+        template_code=code,
+        caller_module=module,
+        recipient=f"{module}-{code}-{status}-{age.total_seconds():.0f}-{len(body)}@edms.local",
+        subject="s",
+        body=body,
+        status=status,
+        retry_count=0,
+        created_user="SYSTEM",
+        created_date=utcnow() - age,
+    )
+    db.add(row)
+    await db.flush()
+    return row.message_id
+
+
+async def test_redact_expired_failed_mails_only_touches_failed_link_mails_past_ttl(db):
+    """只遮 (DP, 四支一次性連結信) 且 FAILED 且建立已逾時效者；其餘一律保留原狀。
+
+    「逾時」取 3 小時、「未逾時」取 1 分鐘：時效參數值域為 1~120 分（param_rules），
+    兩者在任何合法參數值下都分得開，測試不依賴種子參數值。
+    """
+    link = "請點擊 https://edms.example/x?token=PLAINTEXT"
+    old, fresh = timedelta(hours=3), timedelta(minutes=1)
+    ids = {
+        "pwd_old": await _seed_email_log(db, module="DP", code="PWD_RESET", status="FAILED", body=link, age=old),
+        "invite_old": await _seed_email_log(
+            db, module="DP", code="ACCOUNT_INVITE", status="FAILED", body=link, age=old
+        ),
+        "verify_fresh": await _seed_email_log(
+            db, module="DP", code="ACCOUNT_VERIFY", status="FAILED", body=link, age=fresh
+        ),
+        "render_failed": await _seed_email_log(db, module="DP", code="PWD_RESET", status="FAILED", body="", age=old),
+        "pending_old": await _seed_email_log(db, module="DP", code="PWD_RESET", status="PENDING", body=link, age=old),
+        "et_same_code": await _seed_email_log(
+            db, module="ET", code="ACCOUNT_INVITE", status="FAILED", body=link, age=old
+        ),
+        "no_link_tpl": await _seed_email_log(
+            db, module="DP", code="PWD_EXPIRY_REMIND", status="FAILED", body=link, age=old
+        ),
+    }
+
+    redacted = await redact_expired_failed_mails(db)
+
+    db.expire_all()
+    rows = {
+        r.message_id: r
+        for r in (await db.execute(select(DpEmailLog).where(DpEmailLog.message_id.in_(ids.values())))).scalars()
+    }
+    body = {k: rows[v].body for k, v in ids.items()}
+    # 先斷言 STATUS 未被動到，再看 BODY——遮罩不得改狀態
+    assert {k for k, v in ids.items() if rows[v].status != "FAILED"} == {"pending_old"}
+    assert body["pwd_old"] == REDACTED_BODY
+    assert body["invite_old"] == REDACTED_BODY
+    assert rows[ids["pwd_old"]].updated_user == "SYSTEM"
+    assert body["verify_fresh"] == link  # 連結可能仍有效、尚未逾時
+    assert body["render_failed"] == ""  # 渲染失敗列維持空 BODY，不偽裝成「曾含連結」
+    assert body["pending_old"] == link  # PENDING 仍需原文重試
+    assert body["et_same_code"] == link  # 以 (MODULE, TEMPLATE_CODE) 為鍵
+    assert body["no_link_tpl"] == link  # 不含一次性連結的範本不在範圍
+    assert redacted == 2
+
+    # 每日重跑：已遮罩列不再改寫
+    assert await redact_expired_failed_mails(db) == 0

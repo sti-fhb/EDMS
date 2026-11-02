@@ -50,15 +50,16 @@ _RULES: dict[tuple[str, str], IntRule] = {
     #   LOCK_MINUTES 設大 → 帳號鎖定後解不開，而管理者自己也可能被鎖（DM 側無 bootstrap
     #     管理者機制），24 小時之後就只剩手動解鎖一條路。
     #   RESET_TOKEN_TTL_MIN / EMAIL_CHANGE_TTL_MIN 設大 → 連結近乎永久有效。這兩條與 #50
-    #     互鎖：DP_EMAIL_LOG.BODY 保存含明文連結的信件內文。#50 已讓 PWD_RESET /
-    #     EMAIL_CHANGE_VERIFY 於 SENT 後遮罩，但 PENDING / FAILED 列（保留原文）以及下述
-    #     註冊啟用 / 驗證 / 邀請信（不在 #50 裁示範圍）仍存原文，對這些列唯一的緩解仍是
-    #     「一次性 + 短 TTL」——上限放寬等於把那個緩解拆掉，故取 2 小時
+    #     互鎖：DP_EMAIL_LOG.BODY 保存含明文連結的信件內文。#50 讓四種含一次性連結的系統信
+    #     （密碼重設 / Email 變更 / 註冊啟用 / 邀請）於 SENT 後遮罩、FAILED 列超過本 TTL 後由
+    #     SCHDP001 遮罩，但 PENDING 列（重試需原文）與 FAILED 未逾 TTL 的列仍存原文，對這些列
+    #     唯一的緩解仍是「一次性 + 短 TTL」——上限放寬等於把那個緩解拆掉，故取 2 小時
     #     （相對預設 30 分鐘仍有 4 倍餘裕）而非業界常見的 24 小時。
     #
     #     ⚠️ **RESET_TOKEN_TTL_MIN 不只管密碼重設**，有四個讀取端共用它：
     #       user/forgot_service（密碼重設）、user/register_service（註冊啟用）、
     #       user/verify_service（驗證信）、users/service._invite_ttl_min（管理者邀請 / 重寄）。
+    #     另 dp/notify/redaction.py（SCHDP001 遮罩逾 TTL 的 FAILED 信）也讀這兩個參數判斷逾時。
     #     所以 120 這個上限**把四種連結一起封在 2 小時**。這是 #528 的明確裁示（四者皆為
     #     明文連結且同樣落在 outbox，#50 的理由對四者一致成立），代價是管理者無法把邀請
     #     連結調長——下班前發的邀請隔天就過期。
