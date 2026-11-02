@@ -1,9 +1,13 @@
 """速率限制（T015）純單元測試：滑動視窗 + IP dependency（注入 now，不連 DB）。"""
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
+from app.core import rate_limit as rate_limit_module
 from app.core.exceptions import AppError
-from app.core.rate_limit import SlidingWindowCounter, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.core.rate_limit import SlidingWindowCounter, SlidingWindowRateLimiter, ip_bucket, rate_limit_by_ip
 from app.core.request_context import set_client_ip
 
 pytestmark = pytest.mark.unit
@@ -196,3 +200,153 @@ def test_counter_key_空間滿時_fail_open():
     assert counter.try_record("b", now=100.0)
     assert counter.try_record("c", now=100.0) is False, "滿時回 False"
     assert counter.count("c", now=100.0) == 0, "未被記錄 ⇒ 不佔額度，呼叫端視為未達上限"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IP 分桶收斂（#198）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_ipv6_同一_64_內不同位址落入同一桶():
+    """持有一個 /64 的攻擊者不能靠換位址取得新配額。
+
+    /64 是 VPS、行動網路、家用固網的標配配額，換位址不需偽造任何 header。
+    """
+    a = ip_bucket("2001:db8:1:2::1")
+    b = ip_bucket("2001:db8:1:2:ffff:ffff:ffff:ffff")
+    assert a == b, "同一 /64 內的位址必須同桶"
+
+
+def test_ipv6_不同_64_落入不同桶():
+    """收斂到 /64 而非更寬——不同 /64 仍是不同來源，不可互相拖累。"""
+    assert ip_bucket("2001:db8:1:2::1") != ip_bucket("2001:db8:1:3::1")
+
+
+def test_ipv4_維持_32_不同位址不同桶():
+    """⛔ IPv4 刻意不收斂（SA 2026-10-29 裁示）。
+
+    收到 /24 會把 NAT 後方整批使用者當成同一個人——院內網路與行動網路都是共用出口。
+    而取得一個 IPv4 /24 的成本與取得一個 IPv6 /64 差好幾個量級，威脅結構不同。
+    """
+    assert ip_bucket("203.0.113.1") != ip_bucket("203.0.113.2")
+    assert ip_bucket("203.0.113.1") == "203.0.113.1", "IPv4 原樣，便於排查時直接比對"
+
+
+def test_ipv4_mapped_的_ipv6_視為_ipv4():
+    """`::ffff:1.2.3.4` 是 IPv4 位址的 IPv6 表示法，收斂成 /64 會把整個 IPv4 空間併成一桶。"""
+    assert ip_bucket("::ffff:203.0.113.1") != ip_bucket("::ffff:203.0.113.2")
+
+
+def test_無法解析的來源原樣回傳():
+    """`unknown`（無 client IP 時的 fallback）與任何非法字串都不得讓限流炸掉。"""
+    assert ip_bucket("unknown") == "unknown"
+    assert ip_bucket("") == ""
+
+
+async def test_rate_limit_by_ip_以_64_分桶():
+    """dependency 層級的驗證：同 /64 的兩個位址共用同一份配額。"""
+    limiter = SlidingWindowRateLimiter(max_requests=1, window_seconds=60)
+    dep = rate_limit_by_ip(limiter, scope="login")
+    set_client_ip("2001:db8:aa:bb::1")
+    try:
+        await dep()  # 首次放行
+        set_client_ip("2001:db8:aa:bb::9999")  # 同 /64，換位址
+        with pytest.raises(AppError) as exc:
+            await dep()
+        assert exc.value.status_code == 429, "換位址不得取得新配額"
+    finally:
+        set_client_ip(None)
+
+
+async def test_rate_limit_by_ip_不同_64_各自計數():
+    """正向錨點：收斂不得過寬，不同 /64 必須各有配額。"""
+    limiter = SlidingWindowRateLimiter(max_requests=1, window_seconds=60)
+    dep = rate_limit_by_ip(limiter, scope="login")
+    set_client_ip("2001:db8:aa:bb::1")
+    try:
+        await dep()
+        set_client_ip("2001:db8:aa:cc::1")  # 另一個 /64
+        await dep()  # 不得被前一個 /64 拖累
+    finally:
+        set_client_ip(None)
+
+
+def test_稽核的_source_ip_不經分桶收斂():
+    """⛔ `DP_AUDIT_LOG.SOURCE_IP` 必須是完整位址——鑑識需要精確來源。
+
+    反向：全庫不得有限流以外的 `ip_bucket` 引用。
+    正向錨點：寫入點確實用的是 `get_client_ip`（否則反向斷言可能只是因為整個檔沒了）。
+
+    🔴 **掃整棵 `backend/`，不是只掃 `app/dp/audit/`。** 不變量是「寫進 SOURCE_IP 的是完整
+    位址」，而 `get_client_ip()` 的呼叫點散在近 30 個模組。最便宜也最致命的回歸是一行：有人
+    為了「統一」把收斂搬到上游，此時全站稽核一起降解成 /64，而只掃 audit 目錄的斷言**仍然
+    全綠**。
+
+    ⚠️ **`main.py` 不在 `app/` 底下**（它在 `backend/` 根），而 `set_client_ip(...)` 正是最可能
+    被動手腳的地方之一——只掃 `app/` 會漏掉它。本測試改掃 `backend/` 全部 `.py`。
+
+    ⛔ **這條守不住的形狀**：有人**不引用 `ip_bucket`、直接就地重寫**收斂邏輯（例如在
+    `get_client_ip()` 裡自己算前綴）。字串比對本質上抓不到那個，只能靠 review。寫在這裡是
+    為了讓下一個人知道本測試的界線在哪，不要以為它保證了比實際更多的東西。
+    """
+    backend_dir = Path(__file__).resolve().parents[2]
+    referrers = {
+        p.relative_to(backend_dir).as_posix()
+        for p in backend_dir.rglob("*.py")
+        if "tests" not in p.relative_to(backend_dir).parts and "ip_bucket" in p.read_text(encoding="utf-8")
+    }
+    assert referrers == {"app/core/rate_limit.py"}, f"ip_bucket 外洩到限流以外：{referrers}"
+
+    # 正向錨點：寫入點確實存在且取的是完整 client IP（否則反向斷言可能只是因為檔案沒了）。
+    query_service = (backend_dir / "app" / "dp" / "audit" / "query_service.py").read_text(encoding="utf-8")
+    assert "source_ip=get_client_ip()" in query_service, "稽核寫入點應取完整 client IP"
+
+
+def test_counter_觸頂的_log_說明是照常放行():
+    """fail-open 的後果是「該 key 的上限失效」，訊息必須這樣寫。"""
+    counter = SlidingWindowCounter(window_seconds=60, max_keys=1)
+    counter.try_record("a", now=100.0)
+    with patch.object(rate_limit_module.logger, "warning") as warn:
+        assert counter.try_record("b", now=100.0) is False
+    assert warn.call_count == 1
+    msg = warn.call_args.args[0]
+    assert "放行" in msg and "失效" in msg, f"fail-open 的訊息寫錯方向：{msg}"
+
+
+def test_limiter_觸頂的_log_說明是一律拒絕():
+    """🔴 與上一條**相反**：limiter 觸頂是 fail-closed，後果是過度阻擋而非保護失效。
+
+    兩者共用同一個 `SlidingWindowCounter`，訊息若只寫 fail-open 的語意，排查的人會去找
+    「為什麼沒擋住」，而真實症狀是「擋太多」——方向完全相反。
+    """
+    limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=60, max_keys=1)
+    limiter.hit("a", now=100.0)
+    with patch.object(rate_limit_module.logger, "warning") as warn:
+        with pytest.raises(AppError) as exc:
+            limiter.hit("b", now=100.0)
+    assert exc.value.status_code == 429
+    assert warn.call_count == 1
+    msg = warn.call_args.args[0]
+    assert "拒絕" in msg, f"fail-closed 的訊息寫錯方向：{msg}"
+    assert "放行" not in msg, "limiter 觸頂不會放行"
+
+
+def test_觸頂的_log_不得帶出_key():
+    """key 可能含帳號 / Email（`login:acct:a@b.c`），不得寫進 log。"""
+    limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=60, max_keys=1)
+    limiter.hit("login:acct:someone@example.com", now=100.0)
+    with patch.object(rate_limit_module.logger, "warning") as warn:
+        with pytest.raises(AppError):
+            limiter.hit("login:acct:victim@example.com", now=100.0)
+    rendered = str(warn.call_args)
+    assert "example.com" not in rendered, "log 不得帶出使用者可控的 key"
+
+
+def test_zone_id_不造成分桶分裂():
+    """🔴 `fe80::1%eth0` 與 `fe80::%eth0` 若不清 scope 會落入**兩個**桶。
+
+    成因：`strict=False` 只在 host bits ≠ 0 時重建位址（順便丟掉 scope），全 0 時沿用
+    原物件，於是 scope 原樣留在 network 字串裡。同一條鏈兩個桶。
+    """
+    assert ip_bucket("fe80::1%eth0") == ip_bucket("fe80::%eth0") == "fe80::/64"
+    assert ip_bucket("fe80::1%eth0") == ip_bucket("fe80::1%1"), "zone 值不同不得分裂"

@@ -125,7 +125,6 @@ async def _make_admin_invite(db, email: str, *, minutes: int):
         token_hash=hash_token(f"invite-token-{email}"),
         email=email,
         user_name="受邀者",
-        pwd_hash=None,
         expires_date=now + timedelta(minutes=minutes),
         now=now,
         kind="ADMIN_INVITE",
@@ -156,7 +155,6 @@ async def test_register_blocked_by_unexpired_admin_invite(db):
     assert row.token_hash == original_token
     assert row.kind == "ADMIN_INVITE"
     assert row.user_name == "受邀者"
-    assert row.pwd_hash is None
 
 
 async def test_register_overwrites_expired_admin_invite(db, et_stub):
@@ -170,7 +168,6 @@ async def test_register_overwrites_expired_admin_invite(db, et_stub):
     assert row.token_hash != original_token  # 舊邀請 token 已作廢
     assert row.kind == "SELF_REGISTER"
     assert row.user_name == "自己註冊"
-    assert row.pwd_hash is None  # #212：pending 列不存密碼，密碼於驗證步當場設定
 
 
 async def test_delete_pending_unless_active_invite_keeps_valid_invite(db):
@@ -189,7 +186,6 @@ async def test_delete_pending_unless_active_invite_keeps_valid_invite(db):
         token_hash=hash_token("self-token"),
         email="drop-self@edms.local",
         user_name="自助",
-        pwd_hash=hash_password(_GOOD_PWD),
         expires_date=now + timedelta(minutes=30),
         now=now,
     )

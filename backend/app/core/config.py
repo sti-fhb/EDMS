@@ -1,7 +1,7 @@
 import ipaddress
 import os
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,12 +38,37 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=8)
 
     # 資料庫
+    # app 執行期連線。正式環境應為最小權限角色（對 DP_AUDIT_LOG 只有 INSERT / SELECT、不可 DDL），
+    # 角色由 scripts/db-app-role.sql 建立（#22，見 docs/infra/deployment.md）。
     DATABASE_URL: str
+    # migration 專用連線（資料表 owner）。未設定 / 空值時退回 DATABASE_URL，故合併本設定前的部署
+    # 不改任何設定也能照常跑 migration；DATABASE_URL 換成最小權限角色後，這裡就必須設成 owner。
+    # 正式環境只帶進 migration 的一次性容器（scripts/vm-deploy.sh 讀 /opt/edms/.env.migrate），
+    # 常駐的 app 容器不持有它。
+    # 讀取一律經 `migration_database_url`，不要直接讀本欄位。
+    MIGRATION_DATABASE_URL: str | None = None
+
+    # SQLAlchemy 引擎的 echo：開啟後**每一次查詢連同綁定參數值**都會印進 log（#197 AC 5）。
+    #
+    # 🔴 **刻意與 `DEBUG` 解耦，請勿改回 `echo=settings.DEBUG`。** 原本兩者共用一個開關，而
+    # `DEBUG` 同時閘住三道 production 護欄（見下方三個 `_validate_*`）。本檔自己記錄過 `DEBUG`
+    # 被當逃生門用的情境（「現場只能以 DEBUG=true 繞過」，見 `_validate_mail_tls_exclusive`）
+    # ——真有人在正式環境開 `DEBUG` 救火，就會連帶把病人／員工個資印進 log。
+    #
+    # ⚠️ 而且那層**不受 `core/log_redaction` 保護**：echo 走獨立的 `sqlalchemy.engine` logger、
+    # 參數值在訊息本體而非 `exc_info`，`install_exception_redaction` 管不到（該檔「未涵蓋的既有
+    # 暴露面」有明文）。
+    #
+    # dev 要看 SQL 時在 `.env` 設 `DB_ECHO=true` 即可，不需要連帶打開 production 護欄的逃生門。
+    DB_ECHO: bool = False
 
     # 連線池
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
     DB_POOL_RECYCLE: int = Field(default=1800, ge=60)
+    # 連線池滿時，新請求等一條連線的上限（秒；#833 B1）。SQLAlchemy 預設 30 秒：池滿時每個新請求都在
+    # 後端掛 30 秒才失敗，畫面一直轉圈，排隊的請求越積越多。等滿即回 503「系統忙碌」（`main.db_busy_response`）。
+    DB_POOL_TIMEOUT: float = Field(default=10, gt=0)
     # 單一 SQL 查詢的逾時（毫秒；0 = 不限），以 session 的 `statement_timeout` 套用到所有連線（#810）。
     # 連線池只有 POOL_SIZE + MAX_OVERFLOW 條；一個失控的查詢若無上限，可佔住連線到它跑完為止。nginx
     # 逾時回 504 之後後端仍會把請求跑完，那層保護不了連線池。
@@ -55,14 +80,23 @@ class Settings(BaseSettings):
     #    - 課程「發布／更新」交易：持課程行鎖到 commit（含對大量學員寫入加入紀錄、寄通知），
     #      同一門課的其他編輯要排隊（`et/course/stage_repository.lock_course`）
     #    - 稽核鏈的全平台 advisory lock：任何寫稽核的動作（含登入）都排在持鎖交易後面
-    #      （`dp/audit/repository.acquire_chain_lock`，ET 批次核可單一交易最多 100 筆）
+    #      （`dp/audit/repository.acquire_chain_lock`，ET 批次核可單一交易最多 100 筆）。
+    #      #833 起這把鎖另有較短的等鎖上限，見下方 `DB_AUDIT_LOCK_TIMEOUT_MS`
     #    正常情況兩者都在數秒內完成；等到 60 秒代表系統已出問題。2026-10-27 使用者確認此取捨。
     #    （⛔ 不要引用「上傳影片期間課程被鎖住」當例子：上傳是檔案落地後才取鎖，見 `material/service.upload_video`。）
     #
-    # 不受此限的連線：migration（`alembic/env.py`）顯式設 0。
-    # ⚠️ 稽核鏈驗證 CLI（`dp/audit/verify.py`）目前**仍受此限**：稽核表大到單句逾時，CLI 回退出碼 2
-    #    「執行錯誤」（不會誤報斷鏈）。屆時再比照 migration 處理。
+    # 不受此限的連線：migration（`alembic/env.py`）、稽核鏈驗證 CLI（`dp/audit/verify._cli_session`，#833 C3）顯式設 0。
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
+    # 等稽核鏈 advisory lock 的上限（毫秒；#833 B2），等滿回 503「系統忙碌」。
+    #
+    # 這把鎖全平台共用一個 key，持有到交易結束；寫稽核的動作（**含登入**）都排在它後面，每個排隊者各佔
+    # 一條連線。只靠上面 60 秒的查詢逾時兜底，一筆卡住的交易就能讓排隊者把連線池佔滿，連不寫稽核的頁面
+    # 也拿不到連線。代價是卡住期間登入與寫入直接收到「系統忙碌」，而不是等久一點後成功。
+    #
+    # ⚠️ **只套用在這把鎖**（`dp/audit/repository.acquire_chain_lock`，取到後還原）。不設成全站的
+    #    `lock_timeout`：課程「發布／更新」持課程行鎖時要對大量學員寫入，可能持鎖數秒以上，
+    #    全站設 10 秒會讓同一門課的其他編輯被誤擋。2026-10-29 使用者裁示。
+    DB_AUDIT_LOCK_TIMEOUT_MS: int = Field(default=10_000, ge=1)
 
     # 認證（簡單 JWT）
     # 各環境獨立產生、不進 git；缺少時 fail-fast（見 _build_settings）。
@@ -94,6 +128,10 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = False
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
+    # 發信 worker 輪距（秒）。E2E 設 1，否則每封信最壞要等滿一輪才寄出（#57）。
+    # ⚠️ worker 每輪最多寄 DP_PARAM MAIL.RATE_PER_MIN 封——那個「每分鐘」是靠本值 = 60 撐起來的，
+    # 調短等於把發信速率上限放大，故 production 不得低於 60（見 _validate_mail_worker_poll_interval）。
+    MAIL_WORKER_POLL_INTERVAL_SECONDS: int = Field(default=60, ge=1, le=3600)
 
     # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（invite_id）重寄的最小間隔秒數，
     # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
@@ -152,6 +190,21 @@ class Settings(BaseSettings):
         """
         if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
             raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_mail_worker_poll_interval(self) -> "Settings":
+        """production（非 DEBUG）護欄：發信 worker 輪距不得低於 60 秒。
+
+        worker 每輪最多寄 `MAIL.RATE_PER_MIN` 封（`dp/notify/worker.py`），該參數的「每分鐘」
+        語意建立在輪距 = 60 秒之上。輪距縮成 1 秒，實際上限就變成 60 倍，可能超出郵件主機的
+        寄信額度而被擋信。縮短輪距只為 E2E 不必每封信等一分鐘（#57），production 用不到。
+        """
+        if not self.DEBUG and self.MAIL_WORKER_POLL_INTERVAL_SECONDS < 60:
+            raise ValueError(
+                "MAIL_WORKER_POLL_INTERVAL_SECONDS 在 production（DEBUG=false）不得低於 60："
+                "worker 每輪最多寄 MAIL.RATE_PER_MIN 封，縮短輪距會放大發信速率上限"
+            )
         return self
 
     @model_validator(mode="after")
@@ -218,6 +271,39 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_migration_url_same_database(self) -> "Settings":
+        """MIGRATION_DATABASE_URL 只能換帳號，不能換庫：host / port / 資料庫名（含 query 的 host / port）
+        須與 DATABASE_URL 相同（#22）。
+
+        兩者指向不同庫時 migration 會套到 app 沒在用的那個庫——部署表面成功、app 卻 schema 不符；
+        本機則可能讓「只覆寫 DATABASE_URL」的 alembic 指令打到 `.env` 裡的另一個庫。
+        訊息只列欄位名，不回顯連線字串（含密碼）。
+        """
+        migration = (self.MIGRATION_DATABASE_URL or "").strip()
+        if not migration:
+            return self
+
+        def _target(url: str) -> tuple[str | None, int, str, list[str], list[str]]:
+            p = urlparse(url)
+            try:
+                port = p.port or 5432
+            except ValueError:
+                port = -1  # 格式錯誤：讓比對失敗，交由連線時報錯
+            # query 的 host / port（如 `?host=/run/postgresql`）會覆寫實際連線目標，一併比對
+            query = parse_qs(p.query)
+            return (
+                (p.hostname or "").lower() or None,
+                port,
+                p.path.lstrip("/"),
+                query.get("host", []),
+                query.get("port", []),
+            )
+
+        if _target(migration) != _target(self.DATABASE_URL):
+            raise ValueError("MIGRATION_DATABASE_URL 的 host / port / 資料庫名須與 DATABASE_URL 相同（只能換帳號密碼）")
+        return self
+
     @field_validator("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT", mode="before")
     @classmethod
     def _strip_storage_root(cls, v: Any) -> Any:
@@ -265,6 +351,11 @@ class Settings(BaseSettings):
                     "無磁碟機之絕對路徑依當前磁碟機解析，換啟動磁碟機即讀不到既有檔案"
                 )
         return self
+
+    @property
+    def migration_database_url(self) -> str:
+        """alembic 實際使用的連線：有設 MIGRATION_DATABASE_URL（非空白）就用它，否則退回 DATABASE_URL。"""
+        return (self.MIGRATION_DATABASE_URL or "").strip() or self.DATABASE_URL
 
     @property
     def cors_origins_list(self) -> list[str]:

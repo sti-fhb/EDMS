@@ -64,8 +64,8 @@ logger = logging.getLogger(__name__)
 def _not_enrolled() -> AppError:
     """非在籍。
 
-    ⚠️ **工廠函式而非模組層級常數**（#284 起；#289 裁示維持現狀，判準見
-    `.claude/rules/sti-backend-modules.md`「模組層級常數 vs 工廠函式」）。
+    ⚠️ **工廠函式而非模組層級常數**（#284 起，判準見 `.claude/rules/sti-backend-modules.md`
+    「模組層級常數 vs 工廠函式」）。
 
     `AppError` 繼承 `HTTPException`，是可變物件；CPython 在 raise 一個「已帶
     `__traceback__` 的既有實例」時會把本次傳播的每個 frame **附加**到既有 traceback
@@ -77,8 +77,8 @@ def _not_enrolled() -> AppError:
     呼叫即可觸發，不需在籍、不需該課程存在）。本 router 有限流，但限流只降低累積速率、
     不會讓累積停止。
 
-    > 其餘處的模組層級常數由 `main.app_error_handler` 兜底清除 traceback（#289 裁示 B），
-    > 不必跟著改；工廠函式是給匿名可達路徑的第二道防線，兩種寫法並存是刻意的。
+    > #289 判準：新程式一律用工廠函式；既有常數若會傳到 `main.app_error_handler`，由它清掉
+    > traceback，不強制改寫。
     """
     return AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_SURVEY_011")
 

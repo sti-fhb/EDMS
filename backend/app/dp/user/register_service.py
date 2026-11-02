@@ -226,7 +226,7 @@ class RegisterService:
         now = utcnow()
 
         # 2. 覆蓋同 Email 舊待驗證列（重新註冊 / 重寄語意）→ 寫新待驗證列（僅存 token SHA-256、
-        #    PWD_HASH 留空，密碼於驗證步當場設定）
+        #    不含密碼，密碼於驗證步當場設定）
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
         plaintext = generate_reset_token()
         # 條件式刪除：保留 TOCTOU 空窗內剛產生的有效邀請，讓其撞 UNIQUE 轉 409 而非被靜默覆蓋（#125）
@@ -237,7 +237,6 @@ class RegisterService:
                 token_hash=hash_token(plaintext),
                 email=email,
                 user_name=user_name,
-                pwd_hash=None,
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
             )

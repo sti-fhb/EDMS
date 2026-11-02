@@ -69,11 +69,14 @@ def create_app_engine(url: str, **kwargs: Any) -> AsyncEngine:
 
 engine = create_app_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    # ⛔ 不是 `settings.DEBUG`——echo 會把每次查詢的綁定參數印進 log，且不受 log_redaction
+    #    保護，刻意與 production 護欄的開關解耦（理由見 `config.DB_ECHO`，#197 AC 5）。
+    echo=settings.DB_ECHO,
     pool_pre_ping=True,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_recycle=settings.DB_POOL_RECYCLE,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
 )
 
 AsyncSessionLocal = async_sessionmaker(

@@ -329,13 +329,13 @@ class TestCSP設定契約:
     def test_nginx_是全站安全標頭的來源(self) -> None:
         """釘住「這份設定就是全站來源」這件事本身，不擴及 app 端。
 
-        本來想順手釘「app 端不得再設 nosniff」（設定檔第 19-20 行明文警告會疊出兩個同名
-        header），但寫完一跑就被推翻：`app/et/learning/router.py:183` **刻意**在影片串流
-        回應上加 `nosniff`，且附完整理由——該端點以 `inline` 回使用者上傳的位元組，關掉
-        MIME 嗅探是縱深防禦。
+        本來想順手釘「app 端不得再設 nosniff」，但寫完一跑就被推翻：`app/et/learning/router.py`
+        的影片串流端點 **刻意**加了 `nosniff`，且附完整理由——該端點以 `inline` 回使用者上傳的
+        位元組，關掉 MIME 嗅探是縱深防禦。
 
-        所以設定檔那句警告針對的是「全站再設一次」（middleware），不是個別端點的防禦。
-        兩者的差別沒有寫在設定檔裡，已回報到 #263 一併釐清。
+        所以禁的是「全站再設一次」（middleware），不是個別端點的防禦。這個差別原本只存在於
+        本 docstring，已於 #263 收尾時寫進 `nginx/security-headers.conf` 的 nosniff 那段註解，
+        連同「該端點會帶兩個同名 header、刻意接受、勿當違規刪掉」一併說明。
         """
         conf = self._CONF.read_text(encoding="utf-8")
         for header in ("X-Content-Type-Options", "Referrer-Policy", "Content-Security-Policy"):

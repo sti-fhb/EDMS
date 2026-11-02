@@ -43,3 +43,29 @@ async def test_lifespan_starts_and_stops_worker(monkeypatch):
         await asyncio.wait_for(started.wait(), timeout=2)
         assert started.is_set()
     # 離開 context 後 _fake_run 已優雅返回（未逾時強制取消）
+
+
+async def test_lifespan_passes_configured_poll_interval_to_worker(monkeypatch):
+    """worker 輪距取自 settings.MAIL_WORKER_POLL_INTERVAL_SECONDS（E2E 縮短用，#57）。"""
+    received: dict[str, object] = {}
+    started = asyncio.Event()
+
+    async def _fake_run(mailer, stop_event, **kwargs):
+        received.update(kwargs)
+        started.set()
+        await stop_event.wait()
+
+    async def _noop_async(*_args) -> None:
+        return None
+
+    monkeypatch.setattr("main.run_forever", _fake_run)
+    monkeypatch.setattr("main.start_scheduler", _noop_async)
+    monkeypatch.setattr("main.shutdown_scheduler", _noop_async)
+    monkeypatch.setattr("main.warm_up_password_backend", _noop_async)
+    monkeypatch.setattr("main.shutdown_password_executor", lambda: None)
+    monkeypatch.setattr("main.settings.MAIL_WORKER_POLL_INTERVAL_SECONDS", 7)
+
+    async with lifespan(app):
+        await asyncio.wait_for(started.wait(), timeout=2)
+
+    assert received == {"poll_interval_seconds": 7}

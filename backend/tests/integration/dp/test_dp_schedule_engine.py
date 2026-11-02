@@ -34,6 +34,13 @@ async def _boom_handler() -> None:
     raise RuntimeError("boom")
 
 
+async def _pii_handler() -> None:
+    raise RuntimeError(
+        'duplicate key value violates unique constraint "UQ_DP_USER_EMAIL"\n'
+        "DETAIL:  Key (EMAIL)=(wang.secret@example.com) already exists."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _allow_test_handlers(monkeypatch):
     """放行 tests.* 命名空間之測試 handler（生產白名單僅 app.dp./app.et./app.dm.，見 _resolve_handler）。"""
@@ -175,3 +182,12 @@ async def test_start_scheduler_registers_enabled_and_shutdown(db):
         assert scheduler.get_job("SCHDP001") is not None
     finally:
         await shutdown_scheduler(scheduler)
+
+
+async def test_run_and_log_錯誤訊息去識別化後才寫進歷程(db):
+    """#833 C2（security review M2）：`ERROR_MSG` 顯示在 DP 排程畫面，與 log 同樣要去識別化。"""
+    await run_and_log(db, _JOB, f"{_HANDLER_MOD}._pii_handler")
+
+    msg = (await _logs(db))[0].error_msg
+    assert "UQ_DP_USER_EMAIL" in msg, "正向錨點：仍看得出違反哪個約束"
+    assert "wang.secret@example.com" not in msg

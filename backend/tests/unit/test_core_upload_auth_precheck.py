@@ -1,12 +1,13 @@
-"""上傳端點在解析 body 之前先驗登入憑證（#810 第 1 項）。
+"""寫入請求在解析 body 之前先驗登入憑證（#810 第 1 項上傳端點、#833 C1 擴大到所有寫入）。
 
 FastAPI 先解析 body（`await request.form()`）才跑 dependency，身分驗證也是 dependency——未登入者
 因此能讓後端先收下最多 501MB 的檔案（落在容器的 /tmp）才被 401 擋下。
 `UploadAuthPrecheckMiddleware` 在進路由之前先驗 token 的簽章與效期，未通過就丟棄 body、回 401。
 
-本檔分兩部分：
+本檔分三部分：
 - middleware 行為：直接驅動 ASGI 介面，以「內層 app 沒被呼叫、body 在回應前被讀完丟棄」證明
   未登入的上傳到不了路由的解析
+- 一般寫入（#833 C1）：JSON 寫入同樣先驗憑證；匿名端點清單與路由一致
 - 清單守門：收檔案的路由 ↔ middleware 的路徑清單 ↔ nginx 的上傳 regex 三邊一致
 """
 
@@ -15,18 +16,22 @@ import json
 import re
 from pathlib import Path
 
+import httpx
 import jwt
 import pytest
 
 from app.core.auth import create_access_token
 from app.core.config import settings
 from app.core.upload_auth_precheck import (
+    ANONYMOUS_MAX_BODY_BYTES,
+    ANONYMOUS_WRITE_ROUTES,
     UPLOAD_MAX_CONCURRENT_PER_USER,
     UPLOAD_METHODS,
     UPLOAD_PATH_PATTERN,
     UploadAuthPrecheckMiddleware,
 )
 from main import app
+from tests.unit.test_route_auth_coverage import _iter_api_routes, _requires_jwt
 
 pytestmark = pytest.mark.unit
 
@@ -163,16 +168,202 @@ async def test_有效憑證放行_帳號狀態仍由原本的身分依賴檢查(
     [
         ("GET", "/api/dm/documents"),
         ("GET", "/api/dm/documents/DM-SOP-000001/versions"),
-        ("POST", "/api/dm/documents/DM-SOP-000001/submit"),
         ("POST", "/api/login"),
+        ("POST", "/api/register"),
+        ("POST", "/edms/api/login"),
+        ("POST", "/health"),
     ],
-    ids=["文件清單-GET", "版本清單-GET", "非上傳的-POST", "登入"],
+    ids=["文件清單-GET", "版本清單-GET", "登入", "自助註冊", "子路徑前綴下的登入", "非-api-路徑"],
 )
-async def test_非上傳請求不經本檢查_原樣交給路由(method, path):
-    """一般請求的身分驗證維持原狀（登入端點本來就不需要憑證）。"""
-    rec = await _run(_scope(method, path))
+async def test_讀取與匿名端點不經本檢查_原樣交給路由(method, path):
+    """GET 的身分驗證維持原狀（沒有 body 要解析）；匿名的寫入端點本來就不需要憑證。"""
+    extra = {"root_path": "/edms"} if path.startswith("/edms") else {}
+    rec = await _run(_scope(method, path, **extra))
 
     assert rec.inner_called is True
+
+
+# ── 一般寫入（#833 C1）──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/api/dm/documents/DM-SOP-000001/submit"),
+        ("PUT", "/api/dp/user/me"),
+        ("PATCH", "/api/et/courses/1"),
+        ("DELETE", "/api/et/courses/1/chapters/2"),
+        ("POST", "/api/no-such-route"),
+        ("POST", "/api/login/"),
+    ],
+    ids=["POST", "PUT", "PATCH", "DELETE", "不存在的路徑", "匿名端點帶尾斜線"],
+)
+async def test_一般寫入未帶憑證_丟棄_body_回_401(method, path):
+    """FastAPI 先解析 JSON body 才跑身分依賴；未登入者可讓後端解析最多 2MB（nginx 上限）才被擋（#817 M2）。
+
+    不存在的路徑也先回 401 而不是 404：不先驗就得先比對路由，而這裡刻意不依賴路由表（見模組說明）。
+    匿名端點帶尾斜線同理（改前是 307 轉址），刻意不正規化，見模組說明。
+    """
+    _assert_rejected(await _run(_scope(method, path)))
+
+
+async def test_一般寫入帶有效憑證放行():
+    token = create_access_token(sub="u1", ttl_minutes=15)
+    rec = await _run(_scope("POST", "/api/dm/documents/DM-SOP-000001/submit", _bearer(token)))
+
+    assert rec.inner_called is True
+    assert rec.status == 201
+
+
+async def test_一般寫入不佔同時上傳名額():
+    """同時上傳數上限只管收檔案的端點；一般寫入同時多支照常進得去。"""
+    gate = _Gate()
+    mw = UploadAuthPrecheckMiddleware(gate.inner_app)
+    token = create_access_token(sub="u1", ttl_minutes=15)
+    tasks = []
+    for _ in range(UPLOAD_MAX_CONCURRENT_PER_USER + 1):
+        rec = _Recorder()
+        scope = _scope("POST", "/api/dm/documents/DM-SOP-000001/submit", _bearer(token))
+        tasks.append(asyncio.create_task(mw(scope, rec.receive, rec.send)))
+        await asyncio.sleep(0)
+
+    assert gate.entered == UPLOAD_MAX_CONCURRENT_PER_USER + 1
+    assert mw._in_flight == {}
+    gate.release.set()
+    await asyncio.gather(*tasks)
+
+
+async def test_真的_app_未登入送壞掉的_JSON_回_401_而不是_422():
+    """因果鏈終點：改前 FastAPI 先解析 body，壞掉的 JSON 回 422（代表已經解析過了）；改後在解析前就 401。"""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+        r = await client.put("/api/dp/user/me", content=b"{not json", headers={"content-type": "application/json"})
+
+    assert r.status_code == 401, r.text
+    assert r.json()["error_code"] == "DP_AUTH_002"
+
+
+async def test_真的_app_匿名端點仍到得了路由():
+    """正向錨點：登入送壞掉的 JSON 照舊由路由解析、回 422——上一條的 401 不是「一律擋下」造成的。"""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+        r = await client.post("/api/login", content=b"{not json", headers={"content-type": "application/json"})
+
+    assert r.status_code == 422, r.text
+
+
+# ── 匿名寫入的 body 上限（#833 C1 security review MEDIUM-1）──────────
+
+
+class _BodyFeeder:
+    """以固定大小的塊送出 body，記錄內層 app 實際收到的內容。"""
+
+    def __init__(self, total: int, chunk: int = 16 * 1024, *, disconnect_at: int | None = None) -> None:
+        self._remaining = total
+        self._chunk = chunk
+        self._disconnect_at = disconnect_at
+        self.receive_calls = 0
+        self.sent: list[dict] = []
+        self.inner_body: bytes | None = None
+
+    async def receive(self) -> dict:
+        self.receive_calls += 1
+        if self._disconnect_at is not None and self.receive_calls > self._disconnect_at:
+            return {"type": "http.disconnect"}
+        size = min(self._chunk, self._remaining)
+        self._remaining -= size
+        return {"type": "http.request", "body": b"a" * size, "more_body": self._remaining > 0}
+
+    async def send(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def inner_app(self, scope, receive, send) -> None:
+        body, more = b"", True
+        while more:
+            message = await receive()
+            body += message.get("body", b"")
+            more = message.get("more_body", False)
+        self.inner_body = body
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    @property
+    def status(self) -> int:
+        return next(m["status"] for m in self.sent if m["type"] == "http.response.start")
+
+
+async def _anonymous(feeder: _BodyFeeder) -> _BodyFeeder:
+    await UploadAuthPrecheckMiddleware(feeder.inner_app)(_scope("POST", "/api/login"), feeder.receive, feeder.send)
+    return feeder
+
+
+async def test_匿名寫入_body_超過上限_丟棄_回_413():
+    """匿名端點不經本層的身分預檢，是未登入者唯一還能讓後端解析 JSON 的入口；不設上限的話 C1 只做了一半。"""
+    feeder = await _anonymous(_BodyFeeder(ANONYMOUS_MAX_BODY_BYTES + 1))
+
+    assert feeder.status == 413
+    assert feeder.inner_body is None, "超量的 body 不可交給路由解析"
+    assert feeder._remaining == 0, "body 要讀完丟棄"
+
+
+async def test_匿名寫入_body_在上限內原樣交給路由():
+    """正向錨點：上限內的 body 一個位元組都不少（本層先收齊再轉交）。"""
+    feeder = await _anonymous(_BodyFeeder(ANONYMOUS_MAX_BODY_BYTES))
+
+    assert feeder.status == 200
+    assert feeder.inner_body == b"a" * ANONYMOUS_MAX_BODY_BYTES
+
+
+async def test_匿名寫入_收齊前斷線即停止():
+    feeder = await _anonymous(_BodyFeeder(ANONYMOUS_MAX_BODY_BYTES, disconnect_at=1))
+
+    assert feeder.inner_body is None
+    assert feeder.receive_calls == 2
+
+
+def test_匿名寫入上限容得下最大的合法請求():
+    """最大的合法匿名請求：設定密碼類（兩個 4096 字的密碼 + 200 字的 token）。
+
+    以最壞的 JSON 編碼估：每個字都是 BMP 外的字元、跳脫成一對 surrogate（12 bytes）。前端
+    `JSON.stringify` 不跳脫非 ASCII，實際最多約 32KB；這裡取最壞情況，讓上限不必依賴前端的編碼方式。
+    密碼上限改大時這條會紅。
+    """
+    from app.dp.user.schemas import VerifyEmailRequest
+
+    def max_len(field: str) -> int:
+        meta = VerifyEmailRequest.model_fields[field].metadata
+        return next(m.max_length for m in meta if getattr(m, "max_length", None))
+
+    password = "\U0001f600" * max_len("new_password")
+    body = json.dumps(
+        {"token": "t" * max_len("token"), "new_password": password, "confirm_password": password},
+        ensure_ascii=True,
+    ).encode()
+    assert len(body) <= ANONYMOUS_MAX_BODY_BYTES, f"最大合法請求 {len(body)} bytes 超過上限"
+
+
+async def test_真的_app_匿名端點送超量_body_回_413():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+        r = await client.post(
+            "/api/login", content=b" " * (ANONYMOUS_MAX_BODY_BYTES + 1), headers={"content-type": "application/json"}
+        )
+
+    assert r.status_code == 413, r.text
+    assert r.json()["error_code"] == "COMMON_413"
+
+
+def test_守門_匿名寫入清單與路由一致():
+    """`ANONYMOUS_WRITE_ROUTES` 必須正好是「不經 `get_jwt_payload` 的寫入路由」。
+
+    少列：該匿名端點被本層擋成 401（例如登入壞掉）。多列：本該先驗的端點被放過。
+    路由的認證判定沿用 `test_route_auth_coverage` 的掃描（它也是匿名端點的權威清單）。
+    """
+    anonymous_writes = {
+        (method, route.path)
+        for route, inherited in _iter_api_routes()
+        if route.path.startswith("/api/") and not _requires_jwt(route, inherited)
+        for method in route.methods & {"POST", "PUT", "PATCH", "DELETE"}
+    }
+    assert len(anonymous_writes) >= 5, "正向錨點：掃描若失效（0 條）這條會空洞地通過"
+    assert set(ANONYMOUS_WRITE_ROUTES) == anonymous_writes
 
 
 # ── 每位使用者同時上傳數上限（#833 A3）─────────────────────────────
