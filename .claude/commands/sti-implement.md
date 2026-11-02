@@ -816,9 +816,10 @@ rm -f /tmp/review-local-${BRANCH_SLUG}-meta.json /tmp/review-local-${BRANCH_SLUG
 - **需要**：涉及使用者登入流程、主要 CRUD 操作、跨頁面互動
 - **跳過**：純後端 API、設定頁、簡單 CRUD 無複雜互動
 
-若需要，使用 **e2e-runner** agent 以 Playwright 撰寫並執行測試，涵蓋正常操作與邊界情況。
+若需要，使用 **e2e-runner** agent（`.claude/agents/e2e-runner.md`）以 Playwright 執行 `e2e/` 的測試並判讀結果；新增案例前先讀該 agent 的範圍原則（只蓋 critical path）。
 
-⚠️ 手動 UI 測試、以及打真後端的 E2E，連的都是**共用 dev DB**：開跑前先過「共用 dev 環境守則」守則 1、2。
+- `e2e/` 的 E2E 由 Playwright 自起專用後端（:8101）與前端（:4174），連的是 **`e2e_` 開頭的專用庫**、不碰共用 dev DB（啟動腳本會擋其他庫名，且不沿用已在跑的服務）——不必過下方守則
+- ⚠️ **手動 UI 測試**連的是**共用 dev DB**：開跑前先過「共用 dev 環境守則」守則 1、2
 
 ---
 

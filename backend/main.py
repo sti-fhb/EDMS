@@ -83,7 +83,9 @@ async def lifespan(app: "FastAPI"):
     await warm_up_password_backend()
     warn_if_scan_access_ttl_override()
     stop_event = asyncio.Event()
-    task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
+    task = asyncio.create_task(
+        run_forever(SmtpMailer(), stop_event, poll_interval_seconds=settings.MAIL_WORKER_POLL_INTERVAL_SECONDS)
+    )
     scheduler = await start_scheduler()
     try:
         yield

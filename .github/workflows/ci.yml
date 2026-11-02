@@ -15,10 +15,9 @@
 #
 # 工作流程：
 #   changes ─┬─ backend  (uv.lock 一致性 + ruff + alembic heads + unit/integration tests)
-#            └─ frontend (ESLint + type-check + tests；frontend/ 建立後才觸發)
+#            ├─ frontend (ESLint + type-check + tests；frontend/ 建立後才觸發)
+#            └─ e2e      (Playwright：真瀏覽器 → 真後端 → 真 DB + mailpit，#57)
 #                                                          └─► all-checks
-#
-# 註：E2E job 待 ET/DM 有 UI + e2e/ 目錄後再補（見 #57）。
 # ============================================================
 
 name: CI
@@ -50,6 +49,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - name: Checkout 原始碼
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -75,6 +75,10 @@ jobs:
               # （見 `.claude/rules/sti-testing.md`「前端『假紅』判定」）。若日後覺得
               # 改 ci.yml 時頻繁撞到前端假紅，這一行是第一個可以拿掉的，但拿掉前請明白
               # 換回來的是什麼。
+              - '.github/workflows/ci.yml'
+            # E2E 只看自己的目錄；前後端有改時另由 e2e job 的 if 條件觸發（見下方 e2e job）
+            e2e:
+              - 'e2e/**'
               - '.github/workflows/ci.yml'
 
   # ──────────────────────────────────────────────────────────
@@ -262,6 +266,117 @@ jobs:
         run: pnpm test
 
   # ──────────────────────────────────────────────────────────
+  # E2E：Playwright（#57）
+  #
+  # 真瀏覽器 → 真後端（uvicorn）→ 真 DB（service container），信件寄到 mailpit，
+  # 測試從 mailpit API 取驗證 / 重設連結。後端與前端（vite build + preview）由
+  # e2e/playwright.config.ts 的 webServer 自行啟動，與本機 `pnpm e2e` 走同一條路徑。
+  #
+  # 觸發：後端、前端、e2e/ 任一有變更（三者任一改動都可能打斷整合縫隙）。
+  # 首批只蓋 3 條 critical path（登入 / 註冊+信箱驗證 / 忘記密碼）——E2E 慢且易脆，勿一次全鋪。
+  # 失敗時把 Playwright trace 與 HTML 報表上傳為 artifact（判讀方式見 .claude/agents/e2e-runner.md）。
+  # ──────────────────────────────────────────────────────────
+  e2e:
+    name: E2E (Playwright)
+    needs: changes
+    if: >-
+      needs.changes.outputs.backend == 'true' ||
+      needs.changes.outputs.frontend == 'true' ||
+      needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    # 正常約 5 分鐘；設上限避免卡住的 webServer 吃滿 6 小時預設值
+    timeout-minutes: 20
+    # 本 job 執行的第三方程式碼面最大（三套 pnpm 依賴、playwright install --with-deps 以 sudo 跑 apt）；
+    # 不需 push、不呼叫 API，權限壓到最小
+    permissions:
+      contents: read
+
+    services:
+      # E2E 專用庫：DB 名須以 e2e_ 開頭（e2e/scripts/start-backend.sh 會擋），帳密為 CI 假值
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: edms
+          POSTGRES_PASSWORD: edms
+          POSTGRES_DB: e2e_edms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # 本機收信服務：SMTP :1025 收信、HTTP :8025 提供 API。釘 digest，換版走人工 review
+      # （⚠️ Dependabot 不掃 workflow 的 services 映像，不會有人自動提醒更新）
+      mailpit:
+        image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    env:
+      # 與 e2e/support/env.ts 的預設值相同，寫出來讓讀 CI 的人不必翻原始碼
+      E2E_DATABASE_URL: postgresql+asyncpg://edms:edms@127.0.0.1:5432/e2e_edms
+      E2E_MAILPIT_URL: http://127.0.0.1:8025
+
+    steps:
+      # 不把 GITHUB_TOKEN 留在 .git/config：後續會跑大量第三方程式碼，且本 job 不需要 git 寫入
+      - name: Checkout 原始碼
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+
+      # --locked：lock 過期直接失敗（與 backend job 的一致性檢查同義；E2E 不替你重解相依）
+      - name: 安裝 Python 依賴
+        working-directory: backend
+        run: uv sync --locked
+
+      - name: 安裝 pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
+
+      - name: 安裝 Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22
+
+      - name: 安裝前端依賴
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: 安裝 E2E 依賴
+        working-directory: e2e
+        run: pnpm install --frozen-lockfile
+
+      # 只裝 chromium（含系統相依套件）
+      - name: 安裝 Playwright 瀏覽器（chromium）
+        working-directory: e2e
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E TypeScript 型別檢查
+        working-directory: e2e
+        run: pnpm type-check
+
+      - name: 執行 E2E
+        working-directory: e2e
+        run: pnpm test
+
+      # ⚠️ trace 會記錄所有網路請求內容（測試帳密、驗證 token、JWT）。目前全為一次性假資料，
+      # 但 public repo 的 artifact 任何登入者都能下載——日後 E2E 若用到 secrets 或真實外部服務，
+      # 必須同時停用本步驟或改 trace: "off"。
+      - name: 上傳 Playwright trace / 報表（僅失敗時）
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: playwright-report
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────────────────
   # 彙總：所有 job 通過才算 CI 綠燈
   # Branch ruleset 只需設定 "all-checks" 這一個 status check（runner 上線後才設）。
   # 被 skip 的 job（路徑過濾）result 為 "skipped"，不算 failure。
@@ -273,6 +388,7 @@ jobs:
       - changes
       - backend
       - frontend
+      - e2e
     if: always()
 
     steps:

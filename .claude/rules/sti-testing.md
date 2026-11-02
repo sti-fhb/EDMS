@@ -27,7 +27,7 @@ paths:
 測試類型：
 1. **Unit Tests** — 個別函式，不連 DB，放 `tests/unit/`，加 `pytestmark = pytest.mark.unit`
 2. **Integration Tests** — API Endpoint + 真實 DB，放 `tests/integration/`，加 `pytestmark = pytest.mark.integration`
-3. **E2E Tests** — Playwright，關鍵業務流程（規劃中）
+3. **E2E Tests** — Playwright，只蓋 critical path，放 repo 根目錄 `e2e/`（見 `e2e/README.md`；執行與判讀交給 `e2e-runner` agent）
 
 ### integration vs unit 取捨
 
@@ -443,4 +443,4 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
 ## Agent 支援
 
 - **tdd-guide** — 新功能時**主動使用**，強制先寫測試
-- **e2e-runner** — Playwright E2E 測試專家
+- **e2e-runner** — Playwright E2E 執行與判讀（`.claude/agents/e2e-runner.md`：怎麼跑、怎麼讀 trace、flaky 處理原則）
