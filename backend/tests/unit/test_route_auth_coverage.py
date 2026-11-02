@@ -48,6 +48,9 @@ _NO_AUTH_ALLOWLIST: dict[tuple[str, str], str] = {
 def _iter_api_routes() -> list[tuple[APIRoute, tuple]]:
     """展開巢狀路由樹，回 `(route, router_level_dependencies)`。
 
+    ⚠️ 本函式與 `_requires_jwt` 也被 `test_core_upload_auth_precheck.py` 引用（匿名寫入清單的守門），
+    改名或搬移時兩邊一起改。
+
     ⚠️ 本專案的 FastAPI 版本**不攤平路由**：`app.routes` 裡是 `_IncludedRouter`
     包裝物件，子路由在 `original_router.routes`，而 **router-level 的
     `dependencies=[...]` 不在 `route.dependant` 裡**——它在 `include_context.dependencies`。
