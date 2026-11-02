@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.exceptions import AppError
-from app.dm.roles.authz import DM_REVIEWER, has_role
+from app.dm.roles.authz import DM_ADMIN, DM_REVIEWER, has_role
 from app.dm.roles.models import DmUserRole
 
 
@@ -68,4 +68,19 @@ async def get_dm_reviewer_context(ctx: DmContext = Depends(get_dm_context)) -> D
     """
     if not has_role(ctx.roles, DM_REVIEWER):
         raise AppError(status_code=403, detail="需要文件審核者權限", error_code="DM_AUTH_004")
+    return ctx
+
+
+async def get_dm_admin_context(ctx: DmContext = Depends(get_dm_context)) -> DmContext:
+    """DM 管理者閘（#833）：於模組存取閘之上再要求 `DM_ADMIN`。
+
+    給**要先確認是管理者、才能做別的事**的端點用——目前是 DM 三支匯出：限流要排在本閘之後，否則
+    DM_VIEWER 等一般角色（多數同仁都有）每次 403 之前都先佔掉同一 IP 的匯出名額，連打就能讓管理者 429
+    （security review M-2）。訊息與錯誤碼同各 service 的 `_ensure_admin`，那層硬閘照舊保留。
+
+    Raises:
+        AppError: 具 DM 角色但無 DM_ADMIN（403 DM_AUTH_003）。
+    """
+    if not has_role(ctx.roles, DM_ADMIN):
+        raise AppError(status_code=403, detail="需要文件管理者權限", error_code="DM_AUTH_003")
     return ctx
