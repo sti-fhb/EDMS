@@ -25,7 +25,19 @@ _PUBLISHED = "PUBLISHED"
 # 杜絕以可枚舉之 DOC_ID（DM-{分類碼}-{流水號}）跨分類（SOP/MANUAL/OTHER）取檔或窺視 metadata（Sec HIGH-1）。
 _REFERENCEABLE_CATEGORIES = frozenset({"TRAINING"})
 
-_NOT_FOUND = AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
+
+def _not_found() -> AppError:
+    """查無此文件、非可引用分類，或檔案未通過圍籬（一律同一 404，不洩漏存在與否）。
+
+    ⚠️ **工廠函式而非模組層級常數**（#289 Q1）：ET 端有 5 處以 `except AppError` 攔下本門面
+    的錯誤後**不重拋**（`et/learning/service._doc_row`、`et/material/service._doc_row` /
+    `_staged_doc_row`、`et/course/publish_service._obsolete_doc_ids`、
+    `et/material/doc_change_service.run`），走不到 `main.app_error_handler` 的清理。常數的
+    `__traceback__` 會隨每次 raise 只增不減，而每日排程 `doc_change_service` 不需任何使用者
+    操作，就會為每份壞引用累積一次。判準見 `.claude/rules/sti-backend-modules.md`
+    「模組層級常數 vs 工廠函式」。
+    """
+    return AppError(status_code=404, detail="查無此文件或無權存取", error_code="DM_DOC_001")
 
 
 @dataclass(frozen=True)
@@ -73,12 +85,12 @@ class DmDocumentService:
         """SRVDM001：依 DOC_ID 取當前發布版；廢止仍回最後版 + obsolete=true；無發布版 → DM_DOC_013。"""
         doc = await self._repo.get_document(db, doc_id)
         if doc is None or doc.category_code not in _REFERENCEABLE_CATEGORIES:
-            raise _NOT_FOUND  # 非可引用分類：回 404 不洩漏該 doc 存在 / 分類（Sec HIGH-1 / MED-1）
+            raise _not_found()  # 非可引用分類：回 404 不洩漏該 doc 存在 / 分類（Sec HIGH-1 / MED-1）
         if doc.current_version_id is None:
             raise AppError(status_code=409, detail="文件尚無已發布版本", error_code="DM_DOC_013")
         ver = await self._repo.get_version(db, doc.current_version_id)
         if ver is None:
-            raise _NOT_FOUND
+            raise _not_found()
         obsolete = doc.status == _OBSOLETE
         return DmCurrentVersion(
             doc_id=doc.doc_id,
@@ -115,16 +127,16 @@ class DmDocumentService:
         """
         doc = await self._repo.get_document(db, doc_id)
         if doc is None or doc.category_code not in _REFERENCEABLE_CATEGORIES:
-            raise _NOT_FOUND  # 非可引用分類：回 404 不洩漏（Sec HIGH-1）
+            raise _not_found()  # 非可引用分類：回 404 不洩漏（Sec HIGH-1）
         if version_id != doc.current_version_id:  # D-1：僅目前發布版
             raise AppError(status_code=403, detail="舊版本不可下載，請聯絡管理者", error_code="DM_DOC_002")
         ver = await self._repo.get_version(db, version_id)
         # 併驗版本歸屬本文件（CURRENT_VERSION_ID 為邏輯 FK 無 DB 約束，防資料異常回錯檔，Sec LOW-1）
         if ver is None or ver.doc_id != doc.doc_id or not ver.file_path:
-            raise _NOT_FOUND
+            raise _not_found()
         # storage-root 圍籬（#160，收斂 US12 Sec MED-2）＋檔案歸屬圍籬（#240 A1）：本端點不掛 DM 角色閘，
         # 讀取者是 ET 學員，檔案須確實落在本文件目錄下
-        safe_path = resolve_within_root(ver.file_path, not_found=_NOT_FOUND, expect_prefix=doc.doc_id)
+        safe_path = resolve_within_root(ver.file_path, not_found=_not_found(), expect_prefix=doc.doc_id)
         # D-2：不寫 DM_DOC_READ——ET 代學員取檔不計入 DM 閱讀統計（US13），ET 端自行統計學習進度。
         return DmFileContent(
             path=safe_path,
