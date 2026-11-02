@@ -33,7 +33,7 @@ from app.et.constants import ALL_ROLES, ROLE_ADMIN, ROLE_STUDENT
 from app.et.enrollment.tag_invite import EtTagInviteRepository
 from app.et.notify.mailer import CourseInviteMailer
 from app.et.roles.models import EtUserRole
-from app.services import AuditLogService
+from app.services import AccountQueryService, AuditLogService
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,10 @@ def ensure_not_self_admin_removal(operator_id: str, user_id: str, roles: set[str
         raise AppError(status_code=403, detail="無法取消自己的管理者角色", error_code="ET_ROLE_001")
 
 
+def _user_not_found() -> AppError:
+    return AppError(status_code=404, detail="查無此使用者帳號", error_code="ET_ROLE_004")
+
+
 class EtAssignService:
     """ET 角色 / 標籤指派（DP 後台權限管理之寫入實作）。"""
 
@@ -90,8 +94,10 @@ class EtAssignService:
         audit: AuditLogService | None = None,
         tag_invite: EtTagInviteRepository | None = None,
         invite_mailer: CourseInviteMailer | None = None,
+        accounts: AccountQueryService | None = None,
     ) -> None:
         self._audit = audit or AuditLogService()
+        self._accounts = accounts or AccountQueryService()
         self._tag_invite = tag_invite or EtTagInviteRepository()
         self._invite_mailer = invite_mailer or CourseInviteMailer()
 
@@ -181,14 +187,26 @@ class EtAssignService:
     ) -> None:
         """設定使用者之 ET 角色與受訓單位標籤為目標集合（差異套用、即時生效）。
 
+        **目標帳號須存在**（#188）：DP 端 `_require_usable_target` 對查無帳號刻意放行
+        （模組角色表無 FK 至 `DP_USER`），本轉接層既為權威寫入口，便不為不存在之帳號建列，
+        以免留下孤兒授權列。經 `AccountQueryService` 判定、不直接查 `DP_USER`（模組邊界）。
+        撤權同樣擋——`assign` 為目標集覆寫、不區分提權 / 降權（與 DP 對停用帳號的做法一致；
+        但 DP 對**查無**帳號是放行的，這道檢核只在 ET 這一側）。
+
         Raises:
             AppError: 自我保護（403 `ET_ROLE_001`）、標籤無效 / 未啟用（422 `ET_ROLE_002`）、
-                角色代碼無效（422 `ET_ROLE_003`）。
+                角色代碼無效（422 `ET_ROLE_003`）、查無帳號（404 `ET_ROLE_004`）。
         """
         _ensure_valid_roles(roles)
         desired = _decode_groups(groups)
         # 自我保護先於任何寫入
         ensure_not_self_admin_removal(operator_id, user_id, roles)
+        # 輸入檢核（純函式）之後、讀現況之前：查無帳號不必再碰 ET 任何表
+        if not await self._accounts.exists(db, user_id):
+            # 正常 UI 只列既有帳號，走到這裡多為竄改請求或競態——留痕。此 user_id 來自請求 path、
+            # 不可信（可含換行或極長），故以 %r 輸出，避免偽造 log 行
+            logger.warning("ET 角色指派目標帳號不存在 user_id=%r operator=%s", user_id, operator_id)
+            raise _user_not_found()
 
         current = (await self.get_users_assignments(db, [user_id]))[user_id]
         # 以**解碼後的配對**比較、不以字串比較——`"03:5"` 與 `"3:5"` 是同一組

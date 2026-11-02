@@ -23,18 +23,6 @@ pytestmark = pytest.mark.integration
 _GOOD_PWD = "Abcd1234"
 
 
-@pytest.fixture(autouse=True)
-def _reset_limits():
-    """清除 module-level 冷卻器與相關限流器狀態，隔離跨測試污染（單例會殘留）。"""
-    auth_router._verify_send_cooldown._last.clear()
-    # #234 新增的單例：它跨測試存活（24 小時視窗），不清會讓第 5 次起的同 Email
-    # 註冊落入靜默路徑——而那條路徑回 202、不報錯，測試可能**為了錯的理由通過**。
-    auth_router._overwrite_counter._hits.clear()
-    auth_router._register_limiter._hits.clear()
-    auth_router._resend_limiter._hits.clear()
-    yield
-
-
 def _reg_payload(email: str, **over):
     base = {"email": email, "user_name": "冷卻測試"}
     base.update(over)

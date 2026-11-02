@@ -7,17 +7,24 @@
 實際落盤 I/O（寫檔案系統 / 物件儲存）屬部署層，Foundation 提供可測核心：預覽判定 + 上傳檢核。
 
 ⚠️ 安全契約：
-- 副檔名白名單檢核**非充分條件**——故 `resolve_upload_mime` 另以 magic bytes 驗證可預覽類之真實型別、
-  並以伺服端判定之權威 MIME 落地（防 evil.exe 改名 evil.pdf 之內嵌 XSS，T066 M2）。
+- 副檔名白名單檢核**非充分條件**——故 `resolve_upload_mime` 另以 magic bytes 驗證白名單內有固定檔頭之
+  格式（PDF / 圖片 / Office）的真實型別、並以伺服端判定之權威 MIME 落地（防 evil.exe 改名 evil.pdf
+  之內嵌 XSS，T066 M2；Office 類於 #211 L1 補上）。
+- 上傳內容一律經 `read_upload` 讀入：讀取時即把關大小，不先整包載入記憶體再比對（#211 M1）。
 - 檔名不得用於組路徑：一律以系統產生之 FILE_ID 命名，避免 `../` 路徑穿越。
 - `DM_FILE_TYPES` 參數若被清空 / 停用，本函式**改用安全預設白名單 fail-closed**（不再跳過格式檢核），
   避免管理者誤清參數即開放任意副檔名（T066 L2）。
 """
 
+import logging
+
+from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.services import ParamService
+
+logger = logging.getLogger(__name__)
 
 _MB = 1024 * 1024
 _DEFAULT_MAX_MB = 50
@@ -34,7 +41,7 @@ def is_previewable(mime: str) -> bool:
     return mime.lower() in _PREVIEWABLE_MIMES
 
 
-# 副檔名 → 權威 MIME（**伺服端判定、完全不採用戶端 content_type**）。可預覽類（前 5 項）另需 magic 驗證。
+# 副檔名 → 權威 MIME（**伺服端判定、完全不採用戶端 content_type**）。各項另需檔頭驗證，見 _EXT_MAGIC。
 _EXT_TO_MIME = {
     "pdf": "application/pdf",
     "png": "image/png",
@@ -48,37 +55,58 @@ _EXT_TO_MIME = {
     "ppt": "application/vnd.ms-powerpoint",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
-# 可內嵌預覽副檔名（須 magic 驗證真實型別）；其權威 MIME 見 _EXT_TO_MIME。
-_PREVIEWABLE_EXTS = frozenset({"pdf", "png", "jpg", "jpeg", "gif"})
 
+_ZIP_MAGIC = b"PK\x03\x04"
+_OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # 舊版 Office 之 Compound File 容器
 
-def sniff_previewable_mime(head: bytes) -> str | None:
-    """由檔頭 magic bytes 判定是否為可內嵌預覽型別（PDF/PNG/JPEG/GIF）；非上述回 None。"""
-    if head.startswith(b"%PDF-"):
-        return "application/pdf"
-    if head.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if head.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if head.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    return None
+#: 副檔名 → 可接受的檔頭（任一相符即可）。涵蓋 `_EXT_TO_MIME` 全部項目（安全預設白名單）。
+#:
+#: - OOXML（docx / xlsx / pptx）另接受 OLE2：**加密**的 OOXML 是把 ZIP 包進 OLE2 容器
+#:   （EncryptedPackage），設了開啟密碼的 Word / Excel 就是這種，只認 ZIP 會誤擋
+#: - 舊版 Office（doc / xls / ppt）只認 OLE2。⚠️ 部分系統匯出的「xls」實為 HTML 表格、
+#:   Word 另存的「doc」可能是 RTF——這類檔案會被擋，需請使用者另存為真正的 Office 格式
+#:
+#: ⚠️ 只驗**容器**檔頭：任何 ZIP（如 .docm / .jar）改名 .docx、任何 OLE2（如含巨集的 .doc）改名
+#: 皆會通過——不檢查 `[Content_Types].xml`。可接受的理由：Office 類落地 MIME 非可預覽、一律以
+#: attachment 下載，無內嵌渲染風險；本表要擋的是 `MZ` 執行檔等「換副檔名就能偽裝」的檔案（#211 L1）。
+#:
+#: ⚠️ **未列於此表的副檔名維持只驗副檔名**：管理者可經 `DM_FILE_TYPES` 加入 txt / csv 等
+#: **無固定檔頭**的格式，無從比對。它們的落地 MIME 一律是 `application/octet-stream`
+#: （非可預覽、僅下載），故不構成內嵌渲染風險。
+_EXT_MAGIC: dict[str, tuple[bytes, ...]] = {
+    "pdf": (b"%PDF-",),
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "doc": (_OLE2_MAGIC,),
+    "xls": (_OLE2_MAGIC,),
+    "ppt": (_OLE2_MAGIC,),
+    "docx": (_ZIP_MAGIC, _OLE2_MAGIC),
+    "xlsx": (_ZIP_MAGIC, _OLE2_MAGIC),
+    "pptx": (_ZIP_MAGIC, _OLE2_MAGIC),
+}
 
 
 def resolve_upload_mime(file_bytes: bytes, filename: str) -> str:
     """**伺服端**由副檔名 + magic bytes 判定落地 MIME，**完全不採用戶端 content_type**（T066 M2）。
 
-    不變量：**回傳之 MIME 為可預覽 ⟺ 已 magic-byte 驗證**。
+    不變量：**回傳之 MIME 為可預覽 ⟺ 已 magic-byte 驗證**（可預覽類副檔名皆列於 `_EXT_MAGIC`）。
     - 落地 MIME 一律取 `_EXT_TO_MIME[ext]`（白名單映射；未知副檔名 → `application/octet-stream`）——杜絕
       用戶端謊報 MIME（含謊報 `text/html` / `image/svg+xml` 等非可預覽但可渲染型別）寫入 DB。
-    - 可預覽類副檔名（pdf/png/jpg/jpeg/gif）另要求檔頭 magic 為對應型別，否則 `DM_FILE_002`（真實型別
-      與副檔名不符，防 evil.exe 改名 evil.pdf 之內嵌 XSS）。
+    - 有固定檔頭的副檔名（`_EXT_MAGIC`）另要求檔頭相符，否則 `DM_FILE_005`（防 evil.exe 改名
+      evil.pdf / evil.docx，#211 L1）。
+
+    Raises:
+        AppError: 檔案內容與副檔名不符（422 DM_FILE_005）。
     """
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    mime = _EXT_TO_MIME.get(ext, "application/octet-stream")
-    if ext in _PREVIEWABLE_EXTS and sniff_previewable_mime(file_bytes[:16]) != mime:
-        raise AppError(status_code=422, detail="檔案內容與副檔名不符", error_code="DM_FILE_002")
-    return mime
+    magics = _EXT_MAGIC.get(ext)
+    if magics is not None and not file_bytes.startswith(magics):
+        # 只記副檔名：此時已通過白名單，值域受控；原始檔名為使用者輸入，不入 log
+        logger.warning("DM 上傳檔頭與副檔名不符，已拒絕 ext=%s", ext)
+        raise AppError(status_code=422, detail="檔案內容與副檔名不符", error_code="DM_FILE_005")
+    return _EXT_TO_MIME.get(ext, "application/octet-stream")
 
 
 async def resolve_upload_limits(db: AsyncSession, *, params: ParamService | None = None) -> tuple[int, frozenset[str]]:
@@ -104,15 +132,52 @@ async def resolve_upload_limits(db: AsyncSession, *, params: ParamService | None
 
 
 async def enforce_size_limit(db: AsyncSession, *, size_bytes: int, params: ParamService | None = None) -> None:
-    """僅檢核大小不逾 `DM_FILE_MAX_MB`（供 router 於 `read()` 前以 `UploadFile.size` 先擋，避免整包載入記憶體）。
+    """僅檢核大小不逾 `DM_FILE_MAX_MB`（讀入後之複檢；讀取時的把關見 `read_upload`）。
 
     Raises:
         AppError: 超過大小上限（422 DM_FILE_001）。
     """
-    svc = params or ParamService()
-    max_mb = await svc.get_int_param(db, "DM_FILE_MAX_MB", "VALUE", _DEFAULT_MAX_MB)
-    if size_bytes > max_mb * _MB:
-        raise AppError(status_code=422, detail="檔案大小超過上限", error_code="DM_FILE_001")
+    if size_bytes > await _max_upload_bytes(db, params or ParamService()):
+        raise _too_large()
+
+
+async def _max_upload_bytes(db: AsyncSession, svc: ParamService) -> int:
+    return await svc.get_int_param(db, "DM_FILE_MAX_MB", "VALUE", _DEFAULT_MAX_MB) * _MB
+
+
+def _too_large() -> AppError:
+    # 每次現場建構，不共用模組級單例（理由見下方 `_NAME_TOO_LONG_MSG` 註解）
+    return AppError(status_code=422, detail="檔案大小超過上限", error_code="DM_FILE_001")
+
+
+async def read_upload(
+    db: AsyncSession, file: UploadFile | None, *, params: ParamService | None = None
+) -> tuple[str | None, bytes | None, str | None]:
+    """讀取選填上傳檔 → `(檔名, bytes, 用戶端 content_type)`；未附檔（存草稿允許）回 `(None, None, None)`。
+
+    US5 文件上傳與 US8 廢止附件共用（#211 M1）：大小在**讀進記憶體的過程中**就把關，而非讀完再比。
+    - `UploadFile.size` 已知（Starlette 依實際寫入暫存檔的位元組數計得，客戶端無法謊報）→ 超限則一個位元組都不讀
+    - 取不到時（縱深防禦；HTTP 路徑上 Starlette 一律提供）最多只讀 `上限 + 1` 位元組，多出那 1 個即判超限
+
+    ⛔ 不要改回「分塊 append 再 `b"".join`」：chunks 與 join 結果會同時存在，峰值是上限的 **2 倍**
+    （security review 以 tracemalloc 實測 50 MiB 檔 → 約 100 MiB），比改版前整包 `read()` 還糟。
+    單次 `read(limit + 1)` 的峰值約為 1 倍上限。
+    讀入後 service 仍以 `validate_upload` 複檢（大小 / 檔名 / 副檔名），本函式不取代它。
+
+    ⚠️ 回傳之 content_type 是用戶端宣稱值，**不得**當落地 MIME——落地一律走 `resolve_upload_mime`。
+
+    Raises:
+        AppError: 超過大小上限（422 DM_FILE_001）。
+    """
+    if file is None:
+        return None, None, None
+    limit = await _max_upload_bytes(db, params or ParamService())
+    if file.size is not None and file.size > limit:
+        raise _too_large()
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise _too_large()
+    return file.filename or "", data, file.content_type or "application/octet-stream"
 
 
 #: 原始檔名之長度上限，對齊 `DM_DOC_VERSION.FILE_NAME` 與 `DM_REVIEW.OBSOLETE_FILE_NAME`
@@ -131,7 +196,7 @@ MAX_FILE_NAME_LEN = 255
 #:
 #: ⛔ 只抄訊息、**不抄 ET 的模組級 `AppError` 單例寫法**：同一個 exception 物件被重複 `raise`
 #: 時，Python 會把 `__traceback__` 掛在物件上並保留整條 frame 鏈（含各 frame 的 locals）。
-#: DM 的上傳是 `await file.read()` 整包進記憶體，被釘住的就是那份檔案位元組——一次被拒的
+#: DM 的上傳由 `read_upload` 整份讀進記憶體（只是讀取時即把關大小），被釘住的就是那份檔案位元組——一次被拒的
 #: 超長檔名上傳會讓最多 `DM_FILE_MAX_MB` 常駐到下一次拒絕為止，且殘留的 traceback 一旦被
 #: `logger.exception` 帶出來，印的是**別人那次請求**的堆疊。ET 那側是串流寫入、frame 裡只有
 #: file handle，後果較輕，故該寫法在 DM 不成立。同檔 `DM_FILE_001` / `DM_FILE_002` 亦為現場建構。

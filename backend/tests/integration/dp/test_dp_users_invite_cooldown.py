@@ -56,19 +56,16 @@ class _FakeNotify:
 
 
 @pytest.fixture(autouse=True)
-def _reset_invite_guards():
-    """隔離 module-level 冷卻單例狀態，並以假發信取代真 NotifyService（避免寫 outbox / 連 SMTP）。
+def _fake_notify_service():
+    """以假發信取代真 NotifyService（避免寫 outbox / 連 SMTP）。
 
     替身 service 仍注入 router 的 `_invite_send_cooldown` 單例，讓測試能觀察 / 清除建立端點的冷卻。
+    冷卻單例的測試間隔離由 integration conftest 統一處理（#654）。
     """
     orig_service = users_router._service
     users_router._service = UsersService(notify=_FakeNotify(), invite_cooldown=users_router._invite_send_cooldown)
-    users_router._invite_resend_cooldown._last.clear()
-    users_router._invite_send_cooldown._last.clear()
     yield
     users_router._service = orig_service
-    users_router._invite_resend_cooldown._last.clear()
-    users_router._invite_send_cooldown._last.clear()
 
 
 def _auth(user_id: str = "admin01") -> dict[str, str]:

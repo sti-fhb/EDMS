@@ -48,20 +48,30 @@
 | COMMON_503 | 503 | 系統忙碌中，請稍後再試 |
 
 > **`COMMON_503`**：系統暫時忙碌的負載卸除。屬**暫時性**錯誤，前端可提示稍後重試；
-> 勿用於一般系統錯誤（那是 `COMMON_500`）。目前兩個來源：
+> 勿用於一般系統錯誤（那是 `COMMON_500`）。目前四個來源：
 > - 密碼運算（bcrypt）之併發閘（#214）：同時進行中的運算達門檻時立即拒絕，避免請求在等待期間持續佔用 DB 連線。
-> - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`（含等鎖時間）被 PostgreSQL 中止（SQLSTATE 57014），
->   由 `main.py` 的 `query_timeout_response` 轉成本碼。
+> - 查詢逾時（#810）：單一查詢超過 `DB_STATEMENT_TIMEOUT_MS`（含等鎖時間）被 PostgreSQL 中止（SQLSTATE 57014）。
+> - 等稽核鎖逾時（#833）：寫稽核的動作（含登入）等全平台稽核鎖超過 `DB_AUDIT_LOCK_TIMEOUT_MS`（SQLSTATE 55P03）。
+> - 連線池等候逾時（#833）：連線池滿，等超過 `DB_POOL_TIMEOUT` 仍拿不到連線（`sqlalchemy.exc.TimeoutError`）。
+>
+> 後三者由 `main.py` 的 `db_busy_response` 轉成本碼。
 
-> **`COMMON_413`**：**由 nginx 產生，不是後端**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）。
-> 請求 body 超過該路徑的 `client_max_body_size`（一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，
-> 後端完全不會收到請求。後端程式碼 grep 不到這個碼是正常的，⛔ 不要當成孤兒刪掉。
+> **`COMMON_413`**：兩個來源。
+> - **nginx**（#806，`nginx/nginx.conf` 的 `@payload_too_large`）：請求 body 超過該路徑的 `client_max_body_size`
+>   （一般 API 2m、DM 上傳 51m、ET 影片 501m）時回傳，後端完全不會收到請求。⛔ 後端 grep 不到這條路徑是正常的
+> - **後端**（#833 C1，`app/core/upload_auth_precheck.py` 的 `ANONYMOUS_MAX_BODY_BYTES`）：不需登入的寫入端點
+>   （登入、註冊、忘記密碼等）body 超過 128KB。未登入者只能打這幾支，限流又在解析之後才跑，故另設較小的上限
 
 > **上傳端點的兩道上限**（#833）沿用通用碼，訊息較表列的具體：
 > - `COMMON_422`「上傳表單格式不符」：表單超過解析上限（欄位數、單一欄位大小、檔案數），
 >   `app/core/upload_form_limits.py`。發生在解析 body 時，早於身分與角色檢查
 > - `COMMON_429`「同時上傳的檔案過多，請待目前的上傳完成後再試」：同一位使用者同時進行中的
 >   上傳超過上限，`app/core/upload_auth_precheck.py`
+
+> **匯出端點**（#833）的 `COMMON_429` 有兩種訊息：
+> - 「操作過於頻繁，請稍後再試」：每分鐘次數超過門檻（每人 10、每 IP 60）
+> - 「已有匯出正在進行，請待完成後再試」：同一位使用者已有一支匯出在跑，全部匯出端點共用名額，
+>   `app/core/rate_limit.limit_concurrent_exports`
 
 > **框架層 HTTP 錯誤**（非 AppError，如路由不存在 / Method Not Allowed）：error_code 為 `HTTP_{status_code}`（如 `HTTP_404`、`HTTP_405`）。
 
@@ -127,6 +137,7 @@
 | DP_ROLE_002 | 403 | 無法取消自己的管理者角色 |
 | DP_ROLE_003 | 404 | 查無此模組或尚未提供角色管理 |
 | DP_ROLE_004 | 403 | 此帳號已停用或鎖定，無法新增權限（DP-MSG-DP02-004，#250；純撤權不擋，保留離職降權路徑）|
+| DP_AUDIT_001 | 422 | 匯出筆數超過 10,000 筆，請縮小查詢範圍（#102，稽核 CSV 匯出上限；前端依查詢總筆數先擋，本碼防直接打 API 與查詢後資料增加） |
 
 > `DP_AUTH_007` 與 `DP_AUTH_010`（登入防帳號列舉，#208）：`DP_AUTH_007` 涵蓋「查無有效 `DP_USER` 列」的**全部**情形——完全不存在、自助註冊未驗證、管理者已邀請、待驗證列已逾期——四者的 status / error_code / error_message 完全相同。
 >
@@ -172,6 +183,7 @@
 | ET_ROLE_001 | 403 | 無法停用自己之管理者角色 |
 | ET_ROLE_002 | 422 | 指定之受訓對象無效或未啟用 |
 | ET_ROLE_003 | 422 | 指定之角色代碼無效 |
+| ET_ROLE_004 | 404 | 查無此使用者帳號 |
 | ET_TAG_001 | 422 | 「全體」「全單位」為系統內建通用值，不可停用或改名 |
 | ET_TAG_002 | 409 | 受訓對象標籤名稱已存在 |
 | ET_TAG_003 | 404 | 查無此受訓對象標籤或項目類別 |
@@ -199,6 +211,7 @@
 | ET_MATERIAL_004 | 422 | 無法解析影片長度，請改用其他格式 |
 | ET_MATERIAL_005 | 409 | 同一教材不可上傳同名影片 |
 | ET_MATERIAL_006 | 422 | 影片檔名過長 |
+| ET_MATERIAL_007 | 422 | 影片儲存位置不合法（落盤路徑逃出 storage root，#240） |
 | ET_QUIZ_001 | 404 | 查無此測驗 |
 | ET_QUESTION_001 | 404 | 查無此題目 |
 | ET_QUESTION_002 | 422 | 正確選項之設定不符題型規定 |
@@ -257,6 +270,8 @@
 | ~~ET_APPROVAL_007~~ | — | ~~僅能依您所開設的課程篩選~~（**已退役**，#548 裁示 4；⛔ 編號保留不得重用）|
 
 > `ET_ROLE_001`（US1 自我保護）：ET 之 `assign` 轉接層回呼（[`../specs/dp/contracts/module-callbacks.md`](../specs/dp/contracts/module-callbacks.md) §3 / SRVET003）於 operator 取消自己之管理者角色時 raise；DP 端統一映射為 `DP-MSG-DP02-001` 呈現（見 dp/spec_us7 FR-06），命名依 DP 之「以 `_ROLE_001` 結尾判別」約定。
+>
+> `ET_ROLE_004`（#188）：`assign` 之目標帳號不存在（含軟刪除）時 raise，不寫入任何列。DP 端 `_require_usable_target` 只擋停用 / 鎖定、對查無帳號放行（模組角色表無 FK 至 `DP_USER`），故由 ET 這一側擋下孤兒授權列；DP 不映射，原樣回傳。
 >
 > `ET_TAG_001` / `002` / `003`（SRVET004 受控主檔轉接層）：比照 DM 之 `DM_CATALOG_001~003`，依 HTTP 狀態碼拆為三支——`001` 業務保護（422，**「全體」（`IS_ALL`）標籤**不可停用 / 改名，伺服器端拒絕；DP 後台之前端隱藏僅為 UX。⚠️ 保護範圍是「全體」而非全部內建標籤——種子 5 筆皆 `IS_BUILTIN=true`，以 `is_builtin` 把關會使內建標籤全不可改名，逾越 SRVET004 契約，已於 #182 更正）、`002` 名稱重複（409）、`003` 查無（404）。**不得共用單一代碼**，否則 DP 端 UI 無法單靠 error_code 分辨情境、只能解析訊息文字。
 
@@ -390,6 +405,8 @@
 | DM_FILE_001 | 422 | 檔案大小超過上限 |
 | DM_FILE_002 | 422 | 不支援的檔案格式 |
 | DM_FILE_003 | 422 | 檔名過長（上限 255 字元，對齊 FILE_NAME / OBSOLETE_FILE_NAME 欄位） |
+| DM_FILE_004 | 422 | 檔案儲存位置不合法（落盤路徑逃出 storage root，#240） |
+| DM_FILE_005 | 422 | 檔案內容與副檔名不符（檔頭 magic bytes 驗證，#211；PDF / 圖片 / Office 皆適用，無固定檔頭之格式如 txt / csv 僅驗副檔名） |
 | DM_DOC_001 | 404 | 查無此文件或無權存取 |
 | DM_DOC_002 | 403 | 舊版本不可下載，請聯絡管理者 |
 | DM_DOC_003 | 422 | 此檔案格式無法線上預覽，請下載原檔 |

@@ -1,10 +1,21 @@
 # EDMS 部署說明
 
-> **狀態：已於 2026-09-03 上線**；2026-09-22 起網址改為 `https://bms.tbsf.tw/edms/`（舊網址 `https://edms.tbsf.tw` 由 front-proxy 301 轉址，待既存信件連結過期後移除）。§2 的前置條件皆已完成（GCP 資源、WIF、VM 安裝、SMTP）。
+> **狀態：已於 2026-09-03 上線**；2026-09-22 起網址改為 `https://<PUBLIC_HOST>/edms/`（舊網址 `https://<LEGACY_HOST>` 由 front-proxy 301 轉址，待既存信件連結過期後移除）。§2 的前置條件皆已完成（GCP 資源、WIF、VM 安裝、SMTP）。
 >
 > 本檔同時是**重建環境的依據**——若日後要在新機器上重來一次，§2 就是完整的步驟。
 >
-> EDMS 與 TBMS **共用 bms-prod-02 這台 VM**。整體共存架構（分流方式、資源配額、隔離原則）由 TBMS repo 的 `docs/infra/edms-coexistence-plan.md` 定義，本檔只描述 EDMS 這一側該怎麼做。兩者衝突時**以該檔為準**。
+> EDMS 與 TBMS **共用 `<PROD_VM>` 這台 VM**。整體共存架構（分流方式、資源配額、隔離原則）由 TBMS repo 的 `docs/infra/edms-coexistence-plan.md` 定義，本檔只描述 EDMS 這一側該怎麼做。兩者衝突時**以該檔為準**。
+>
+> 🔒 本檔及其他部署相關檔案中的主機、網域、內部位址一律以佔位值表示，實際值見 TBMS repo `docs/infra/edms-deployment-values.md`（需 TBMS 存取權）。
+>
+> | 佔位值 | 意義 |
+> |---|---|
+> | `<PUBLIC_HOST>` | 對外網址的主機名稱（EDMS 位於其 `/edms/` 路徑下） |
+> | `<LEGACY_HOST>` | 改為路徑分流前的舊網址主機名稱（現由 front-proxy 301 轉址） |
+> | `<PROD_VM>` | EDMS 與 TBMS 共用的正式環境 VM |
+> | `<CLOUDFLARED_HOST>` | 執行 cloudflared 的 VM |
+> | `<FRONT_PROXY_INTERNAL_IP>` | front-proxy 所在 VM 的內網 IP（Cloudflare public hostname 的目的地） |
+> | `<MAIL_SENDER>` | 系統寄信使用的寄件信箱 |
 
 ---
 
@@ -18,9 +29,9 @@ TBMS（血庫）為主系統。**任何取捨一律以「不讓 EDMS 拉低 TBMS
 
 這一條決定了整個 CI/CD 架構：
 
-**① 不使用 self-hosted runner。** GitHub 明確建議 public repo 不要用 self-hosted runner——任何人都能開 fork PR，而 PR 觸發的 workflow 會在 runner 上執行任意程式碼。那台 runner 所在的 bms-prod-02 同時跑著血庫系統。
+**① 不使用 self-hosted runner。** GitHub 明確建議 public repo 不要用 self-hosted runner——任何人都能開 fork PR，而 PR 觸發的 workflow 會在 runner 上執行任意程式碼。那台 runner 所在的 `<PROD_VM>` 同時跑著血庫系統。
 
-**② 不授予 GitHub workflow 任何 bms-prod-02 的存取權。** 部署必然需要 docker 權限，而 **docker group 等同 root**——可掛載主機檔案系統、讀取 `/opt/tbms/.env.prod`、連上 `tbms-db`。讓 public repo 的 CD 身分取得主系統正式機的 root 等級存取，違反 §0.1。
+**② 不授予 GitHub workflow 任何 `<PROD_VM>` 的存取權。** 部署必然需要 docker 權限，而 **docker group 等同 root**——可掛載主機檔案系統、讀取 `/opt/tbms/.env.prod`、連上 `tbms-db`。讓 public repo 的 CD 身分取得主系統正式機的 root 等級存取，違反 §0.1。
 
 因此採 **pull-based 部署**：GitHub 只 build 與 push 映像，由 VM 主動拉取。GitHub 側的最大爆炸半徑收斂為「能推一個映像到 `edms-image`」。
 
@@ -33,7 +44,7 @@ flowchart TD
     GH["GitHub Actions（public repo）<br/>build + 封閉網路驗證 + push"]
     AR["Artifact Registry<br/>edms-image<br/>:latest + :short-sha"]
 
-    subgraph VM2["bms-prod-02"]
+    subgraph VM2["#lt;PROD_VM#gt;"]
         T["edms-deploy.timer<br/>每 5 分鐘檢查"]
         D["vm-deploy.sh<br/>pull → 備份 → migration → up -d"]
         subgraph ENET["edms-proxy-net + edms-net"]
@@ -77,14 +88,14 @@ flowchart TD
 | 章節 | 在哪執行 | sudo |
 |------|---------|------|
 | §2.1～§2.3（GCP 設定） | **開發者自己的電腦或 Cloud Shell**——見 [edms-gcp-setup.md](edms-gcp-setup.md)，該檔有完整指令 | 不用 |
-| §2.4（VM 前置） | **bms-prod-02** | 要 |
+| §2.4（VM 前置） | **`<PROD_VM>`** | 要 |
 | §2.5 的「本機開發起手」 | **開發者自己的電腦** | 不用 |
-| §2.6（寄信設定） | **bms-prod-02** | 要 |
-| §3（觀察與排查） | **bms-prod-02** | **docker 一律要**；systemctl／journalctl 不用 |
-| §4.1（client IP 驗收） | **bms-prod-02** | 要 |
-| §5 的 psql 維護 | **bms-prod-02** | 要 |
+| §2.6（寄信設定） | **`<PROD_VM>`** | 要 |
+| §3（觀察與排查） | **`<PROD_VM>`** | **docker 一律要**；systemctl／journalctl 不用 |
+| §4.1（client IP 驗收） | **`<PROD_VM>`** | 要 |
+| §5 的 psql 維護 | **`<PROD_VM>`** | 要 |
 
-> 本檔所稱「本機」一律指**開發者自己的電腦**，不是 bms-prod-02。
+> 本檔所稱「本機」一律指**開發者自己的電腦**，不是 `<PROD_VM>`。
 
 ---
 
@@ -133,9 +144,9 @@ flowchart TD
 
 > **未設定時部署會直接失敗，這是刻意的**——備份是執行 migration 的前提。
 
-### 2.4 VM 前置（bms-prod-02）
+### 2.4 VM 前置（`<PROD_VM>`）
 
-在 bms-prod-02 上執行，**需要 `sudo`**（`/opt` 寫入與 docker 操作皆然；一般帳號未在 `docker` 群組內）。與 §2.1～§2.3 的 GCP 設定互相獨立，兩邊可平行進行。
+在 `<PROD_VM>` 上執行，**需要 `sudo`**（`/opt` 寫入與 docker 操作皆然；一般帳號未在 `docker` 群組內）。與 §2.1～§2.3 的 GCP 設定互相獨立，兩邊可平行進行。
 
 ```bash
 # DB 資料
@@ -237,7 +248,7 @@ sudo docker exec edms-nginx wget -q -O /dev/null http://127.0.0.1/health && echo
 
 > health check 用 `127.0.0.1` 而非 `localhost`，原因見 `vm-deploy.sh` 的 Health check 段落。改的是 `POSTGRES_*` 等 DB 變數時不適用本段——那需要連 DB 帳密一併調整，不是單純重建容器。
 
-本機開發起手（在**開發者自己的電腦**上，不是 bms-prod-02）：
+本機開發起手（在**開發者自己的電腦**上，不是 `<PROD_VM>`）：
 
 ```bash
 cp .env.example .env.local     # 填入本機用的值
@@ -273,7 +284,7 @@ sudo chmod 600 /opt/edms/.env.prod
 
 #### 共用帳號的三個已知代價
 
-1. **寄件人顯示為 TBMS 的信箱**（`tbsfnoreply@gmail.com`）——收信者看到的是血庫系統的信箱寄來教育訓練通知。若日後要給院方或 SA 使用，這個混淆值得另外處理
+1. **寄件人顯示為 TBMS 的信箱**（`<MAIL_SENDER>`）——收信者看到的是血庫系統的信箱寄來教育訓練通知。若日後要給院方或 SA 使用，這個混淆值得另外處理
 2. **共用 Gmail 每日約 500 封的額度**——平常用量遠低於此，但 ET 若加入批次通知功能要留意
 3. **安全邊界**——該組 App Password 存在 `/opt/edms/.env.prod`。EDMS 為 public repo、次級系統，一旦遭入侵，攻擊者能以血庫系統的官方寄件人身分發信。**改用 EDMS 專屬帳號可消除此項**，屆時只需換 `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM` 三行並重建容器
 
@@ -281,19 +292,19 @@ sudo chmod 600 /opt/edms/.env.prod
 
 #### 驗證
 
-在 `https://bms.tbsf.tw/edms/` 走一次「忘記密碼」，確認信箱收到（連結須為 `.../edms/...`）。失敗時看 `sudo docker logs edms-backend --tail 30`。
+在 `https://<PUBLIC_HOST>/edms/` 走一次「忘記密碼」，確認信箱收到（連結須為 `.../edms/...`）。失敗時看 `sudo docker logs edms-backend --tail 30`。
 
 ### 2.7 Cloudflare
 
-`bms.tbsf.tw` 的 public hostname 指向 `http://10.140.0.3:80`，front-proxy 依 **URL 路徑前綴**把 `/edms/` 轉給本系統、`/tbms/` 轉給 TBMS。
+`<PUBLIC_HOST>` 的 public hostname 指向 `http://<FRONT_PROXY_INTERNAL_IP>:80`，front-proxy 依 **URL 路徑前綴**把 `/edms/` 轉給本系統、`/tbms/` 轉給 TBMS。
 
-> 🗓️ `edms.tbsf.tw` 指向同一目的地，proxy 對它回 301 至 `bms.tbsf.tw/edms$request_uri`（路徑與 query string 一起帶走，故既存的開通信／重設信連結仍有效）。所有既存連結過期後即可移除該 hostname。
+> 🗓️ `<LEGACY_HOST>` 指向同一目的地，proxy 對它回 301 至 `<PUBLIC_HOST>/edms$request_uri`（路徑與 query string 一起帶走，故既存的開通信／重設信連結仍有效）。所有既存連結過期後即可移除該 hostname。
 
 ---
 
 ## 3. 觀察與排查
 
-以下指令**在 bms-prod-02 上執行**。
+以下指令**在 `<PROD_VM>` 上執行**。
 
 ⚠️ **所有 `docker` 指令都要 `sudo`**，包含 `logs`、`ps`、`inspect` 這類唯讀操作——維運帳號不在 `docker` 群組，直接執行會得到 `permission denied while trying to connect to the docker API`。
 
@@ -326,7 +337,7 @@ sudo systemctl start edms-deploy.service
 
 **不一致時不會有任何錯誤訊息**：服務照跑、網站照開，但 access log 的 client IP 會變成 proxy 的容器位址（稽核追不到人），且 `rate-limit.conf` 的 `limit_req_zone $binary_remote_addr` 會把全站算成同一個來源、共用整個額度。
 
-**上線後必須實地確認**（在 **bms-prod-02** 上執行）：
+**上線後必須實地確認**（在 **`<PROD_VM>`** 上執行）：
 
 ```bash
 sudo docker logs edms-nginx --tail 20
@@ -357,7 +368,7 @@ TBMS 曾因此誤報部署失敗（服務其實正常），詳見其 `docs/infra
 
 ## 5.1 備份
 
-兩個排程，都在 bms-prod-02 上以 systemd timer 執行：
+兩個排程，都在 `<PROD_VM>` 上以 systemd timer 執行：
 
 | 時機 | 內容 | 觸發者 |
 |------|------|--------|
@@ -394,7 +405,7 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 
 資料庫還原 SOP 比照 TBMS 的 `docs/infra/db-backup-restore.md`（同樣是 `pg_restore` 到容器內）。**檔案還原**為 `gcloud storage rsync -r "${BUCKET}/files/dm_files" /opt/edms/data/dm_files`，還原後須確認 owner 仍為 `10001:10001`。
 
-⚠️ 磁碟水位：ET 影音教材單檔可能很大，而 bms-prod-02 只有 100 GB 且與 TBMS 共用。上線後要納入監看。
+⚠️ 磁碟水位：ET 影音教材單檔可能很大，而 `<PROD_VM>` 只有 100 GB 且與 TBMS 共用。上線後要納入監看。
 
 ---
 
@@ -426,7 +437,7 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 
 #806 之前全部 API 共用 501m（DM 也是），連未登入可呼叫的 `POST /api/login` 都收得下 501 MB；而 FastAPI 先把 JSON body 整包讀進記憶體才驗身分，後端又只有 1 個 worker。
 
-> 🔴 **本節原本寫 `100m` 並斷言「這是實際生效的上限，瓶頸在這裡」——數字與結論都是錯的**（已於 #360 更正）。數字停在 #305 之前；結論則從未經過實機查證。2026-09-23 實測：對 `https://bms.tbsf.tw/edms/` 送 4 MB body，proxy 鏈先回 `100 Continue`（代表已比對 `Content-Length` 並放行）、最終由 app 回 405，**全線通過**。瓶頸不在 EDMS nginx。
+> 🔴 **本節原本寫 `100m` 並斷言「這是實際生效的上限，瓶頸在這裡」——數字與結論都是錯的**（已於 #360 更正）。數字停在 #305 之前；結論則從未經過實機查證。2026-09-23 實測：對 `https://<PUBLIC_HOST>/edms/` 送 4 MB body，proxy 鏈先回 `100 Continue`（代表已比對 `Content-Length` 並放行）、最終由 app 回 405，**全線通過**。瓶頸不在 EDMS nginx。
 >
 > ⚠️ 這句話真正的危害不是數字錯，是「**瓶頸在這裡**」會讓讀者停止往下查——#360 的四個假設全繞著 body size 打轉，而真因是**部署映像缺 ffmpeg**，照那個方向查到底也找不到。
 

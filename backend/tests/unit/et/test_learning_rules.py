@@ -1,5 +1,7 @@
 """ET06 章節學習之純業務規則（US5 / #255）。"""
 
+import traceback
+
 import pytest
 
 from app.core.exceptions import AppError
@@ -59,6 +61,22 @@ class TestEnsureCanAccess:
             ensure_can_access(enrolled=False, is_owner=False)
         assert exc.value.status_code == 403
         assert exc.value.error_code == "ET_LEARN_002"
+
+    def test_重複拒絕每次都是新實例_traceback不累積(self) -> None:
+        """#289 裁示 A：`/courses/{任意 id}/learn` 不需在籍，任一登入者迴圈即可觸發。
+
+        `main.app_error_handler` 會清 traceback（裁示 B），但本錯誤在
+        `learning/service._require_access_by_course` 被 `except AppError` 攔下改拋——
+        若有人日後改成吞掉不重拋，handler 就看不到它。工廠函式是第二道防線。
+        """
+        errors: list[AppError] = []
+        for _ in range(10):
+            with pytest.raises(AppError) as exc:
+                ensure_can_access(enrolled=False, is_owner=False)
+            errors.append(exc.value)
+        # 持有全部實例時 id 不會被回收重用，故 id 相異即代表每次都是新實例。
+        assert len({id(e) for e in errors}) == len(errors)
+        assert len({len(traceback.extract_tb(e.__traceback__)) for e in errors}) == 1
 
 
 class TestPlaybackRates:

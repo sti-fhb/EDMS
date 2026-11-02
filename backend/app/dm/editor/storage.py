@@ -10,10 +10,14 @@
 一律落在根下、檔名不含使用者輸入。
 """
 
+import logging
 import os
 import uuid
 
+from app.core.exceptions import AppError
 from app.dm.document.file_paths import is_within_root, storage_root
+
+logger = logging.getLogger(__name__)
 
 # 副檔名白名單（與 DM_FILE_TYPES 語意一致；用於由原始檔名安全萃取副檔名，不接受其他字元）
 _ALLOWED_EXT_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789")
@@ -45,12 +49,16 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
 
     Returns:
         `{doc_id}/{file_id}.{ext}`——相對於 storage root 之片段，供 DB `FILE_PATH` 記錄。
+        讀取端以第一段（`doc_id`）驗檔案歸屬（#240 A1），故目錄層級不可更動。
         分隔符固定 `/`（`os.sep` 在 Windows 為 `\\`，該值搬到 POSIX 即讀不到，因為 `\\`
         在 POSIX 是合法檔名字元而非分隔符）。
 
         回傳值由**已通過圍籬檢查的絕對路徑**經 `relpath` 反推，而非另行以原始 `doc_id`
         組字串——後者會讓「被驗證的物件」與「落 DB 的物件」是兩個不同的東西，日後任一端
         重構就可能靜默產生落差。
+
+    Raises:
+        AppError: 422 `DM_FILE_004`——`doc_id` / `file_id` 受污染、解析後逃出 storage root 或本文件目錄。
 
     Note:
         落盤仍以絕對路徑進行（`makedirs` / `open` 需要），改的只是**寫進 DB 的值**——
@@ -64,9 +72,14 @@ def save_upload(*, doc_id: str, file_id: str, filename: str, data: bytes) -> str
     doc_dir = os.path.dirname(path)
     # 圍籬（防禦深度、不依賴呼叫端）：解析後之目錄與檔案路徑一律須落在 root 內，
     # 否則視為受污染之 doc_id / file_id 之路徑穿越，拒絕落盤。
-    if not is_within_root(path) or not is_within_root(doc_dir):
-        raise ValueError("不合法的落盤路徑（疑似路徑穿越）")
+    # 以 AppError 帶 error_code 回報（#240 A2）——裸 ValueError 會冒成 500。
+    # 另驗落點第一段即 doc_id：讀取端以此判定檔案歸屬（#240 A1），`DM-A/../DM-B` 之類雖仍在 root 內、
+    # 卻會落進他份文件目錄——寫進 DB 後讀取端必定 404，不如在落盤前就擋。
+    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    if not is_within_root(path) or not is_within_root(doc_dir) or rel.split("/")[0] != doc_id:
+        logger.warning("DM 上傳落盤圍籬攔截一筆逃出 storage root / 文件目錄之路徑（不記路徑）")
+        raise AppError(status_code=422, detail="檔案儲存位置不合法", error_code="DM_FILE_004")
     os.makedirs(doc_dir, exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
-    return os.path.relpath(path, root).replace(os.sep, "/")
+    return rel

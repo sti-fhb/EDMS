@@ -8,15 +8,19 @@
 """
 
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 
 import httpx
 import pytest
 from fastapi import APIRouter
 from httpx import ASGITransport
 
+from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
+from app.core.utils import utcnow
 from app.dm.deps import DmContext, get_dm_context
+from app.dm.obsolete_archive import router as obsolete_archive_router
 from app.dm.roles.authz import DM_ADMIN
 from main import app
 
@@ -29,6 +33,11 @@ _ROLES_URL = "/api/dp/roles/DM/assignments"
 async def _fake_db() -> AsyncGenerator[None, None]:
     """不連 DB。參數不合法時 handler 本體不執行；合法時會拿它去查而炸開（見下方 fixture 說明）。"""
     yield None
+
+
+def _fake_payload() -> JwtPayload:
+    now = utcnow()
+    return JwtPayload(sub="u1", auth_time=now, iat=now, exp=now + timedelta(minutes=5))
 
 
 def _assert_validation_passed(resp) -> None:
@@ -69,13 +78,17 @@ def client():
     # teardown 不會執行，已設的 override 會殘留並影響其他測試。
     app.dependency_overrides[get_dm_context] = lambda: DmContext(user_id="u1", roles=frozenset({DM_ADMIN}))
     app.dependency_overrides[get_operator] = lambda: OperatorInfo(user_id="u1")
+    # 匯出端點的使用者維度限流（#833）只依賴 token，不經 `get_dm_context`；不換掉會先回 401
+    app.dependency_overrides[get_jwt_payload] = _fake_payload
     app.dependency_overrides[get_db] = _fake_db
     for gate in roles_gates:
         app.dependency_overrides[gate] = lambda: None
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     yield httpx.AsyncClient(transport=transport, base_url="http://t")
-    for dep in (get_dm_context, get_operator, get_db, *roles_gates):
+    for dep in (get_dm_context, get_operator, get_db, get_jwt_payload, *roles_gates):
         app.dependency_overrides.pop(dep, None)
+    obsolete_archive_router._export_user_limiter._hits.clear()
+    obsolete_archive_router._export_ip_limiter._hits.clear()
 
 
 @pytest.mark.parametrize("url", [_OBSOLETE_URL, f"{_OBSOLETE_URL}/export"])

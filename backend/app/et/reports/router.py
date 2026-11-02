@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.http_cache import NO_STORE_HEADERS
-from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.core.rate_limit import (
+    RATE_WINDOW_SECONDS,
+    SlidingWindowRateLimiter,
+    limit_concurrent_exports,
+    rate_limit_by_ip,
+)
 from app.et.course.schemas import MAX_INT4
 from app.et.deps import EtContext, rate_limit_by_et_user, require_et_roles
 from app.et.reports.service import EtReportsService
@@ -43,7 +48,8 @@ router = APIRouter(
 _service = EtReportsService()
 
 
-@router.get("/weekly/students.csv")
+# 每人同時一支匯出，與其他匯出共用名額（#833）
+@router.get("/weekly/students.csv", dependencies=[Depends(limit_concurrent_exports)])
 async def download_weekly_students_csv(
     db: AsyncSession = Depends(get_db),
     ctx: EtContext = Depends(require_et_roles(ET_TEACHER, ET_ADMIN)),

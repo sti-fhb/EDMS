@@ -54,7 +54,7 @@ as-of **2026-09-23**。端點清單以 `grep -rn "Query(" backend/app --include=
 | Cloudflare 未開 Logpush、分析資料保存期短且無人可查 | 全面改 POST 可能是**過度反應** |
 | 日誌保存數十天且多人可讀 | 維持現況可能是**不足** |
 
-**取得方式**：問 TBMS 側，或查 `bms-prod-01` 的 cloudflared／Cloudflare 帳號設定。
+**取得方式**：問 TBMS 側，或查 `<CLOUDFLARED_HOST>` 的 cloudflared／Cloudflare 帳號設定。
 ⚠️ 這**不在 EDMS 的掌控範圍**，本專案無法自行查證。
 
 > 📌 取得答案後即可直接決定，**不需要重新盤點端點**——本文件第一節就是那份盤點。

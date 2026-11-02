@@ -163,15 +163,37 @@ jobs:
       - name: 執行 ruff format 檢查
         run: uv run ruff format --check .
 
+      # 多頭在本機結構性看不到（那是「分支 + main」合起來才有的狀態），
+      # CI 測的是 merge commit，這道檢查是唯一該攔下它的地方（#598）。
+      #
+      # alembic heads 會載入全部 migration 檔，其中有一支在 module 層 import settings，
+      # 故需提供能通過 settings 驗證的設定（值與 migration 步驟相同；SEED_DEMO_ACCOUNTS
+      # 只影響 upgrade、與本步驟無關）。DEBUG=true 放寬 FRONTEND_BASE_URL 的 production 護欄。
+      # 只讀 migration 版本檔、不連 DB。
+      #
+      # 🔴 不可寫成 $(uv run alembic heads | wc -l)：崩潰時 traceback 走 stderr、
+      # stdout 為空，wc -l 得 0 → 被當成「正常」印成功。須先檢查指令本身的 exit code。
       - name: 檢查 Alembic heads（多 head 時提前阻擋）
+        env:
+          DATABASE_URL: postgresql+asyncpg://edms:edms@localhost:5432/test_edms
+          JWT_SECRET_KEY: ci-test-secret-key-at-least-32-bytes-long
+          DEBUG: "true"
         run: |
-          HEAD_COUNT=$(uv run alembic heads | wc -l)
-          if [ "$HEAD_COUNT" -gt 1 ]; then
-            echo "::error::發現 ${HEAD_COUNT} 個 Alembic head，請先合併後再提交 PR"
-            uv run alembic heads
+          if ! HEADS=$(uv run alembic heads 2>&1); then
+            echo "::error::alembic heads 執行失敗（非 head 數問題），中止。"
+            echo "$HEADS"
             exit 1
           fi
-          echo "✅ Alembic head 正常（單一 head 或尚無 migration）"
+          # 數 "(head)" 標記而非行數，避免警告行被算入；grep 零命中時 exit 1，故以 || true 兜底。
+          # 0 個也視為失敗：本 repo 已有 migration，數到 0 代表輸出格式不如預期，寧紅勿綠。
+          HEAD_COUNT=$(printf '%s\n' "$HEADS" | grep -c '(head)' || true)
+          # :-0 兜底：萬一 grep 自身出錯而無輸出，[ "" -ne 1 ] 會判為 false 而放行
+          if [ "${HEAD_COUNT:-0}" -ne 1 ]; then
+            echo "::error::發現 ${HEAD_COUNT} 個 Alembic head，請先合併後再提交 PR"
+            echo "$HEADS"
+            exit 1
+          fi
+          echo "✅ Alembic head 正常（單一 head）：${HEADS}"
 
       # ── Tests（unit + integration，含覆蓋率）──
       # EDMS 認證用簡單 JWT；Email 不加密（無 ENCRYPTION_KEY）、無全域 RBAC（無 ADMIN_ROLE）

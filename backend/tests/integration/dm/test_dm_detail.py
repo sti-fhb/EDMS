@@ -515,7 +515,9 @@ async def test_http_forbidden_without_dm_role(db, client):
 async def test_http_file_download_serves(db, client, tmp_path, monkeypatch):
     """FileResponse 實際串流：目前版下載 → 200 + attachment。"""
     monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", str(tmp_path))  # 實體檔置於 root 內（#160 圍籬）
-    f = tmp_path / "a.pdf"
+    # 須落在本文件目錄下（#240 A1 檔案歸屬圍籬），與 save_upload 實際落盤位置一致
+    f = tmp_path / "DM-SOP-000060" / "a.pdf"
+    f.parent.mkdir()
     f.write_bytes(b"%PDF-1.4 test")
     doc = DmDocument(
         doc_id="DM-SOP-000060",
@@ -574,6 +576,43 @@ async def test_http_missing_physical_file_returns_404_not_500(db, client):
     assert resp.status_code == 404
     assert resp.json()["error_code"] == "DM_DOC_001"
     assert "secret" not in resp.text  # 落盤路徑不外洩
+
+
+async def test_http_file_of_other_document_returns_404(db, client, tmp_path, monkeypatch):
+    """檔案歸屬圍籬（#240 A1）：FILE_PATH 指向他份文件之實體檔（仍在 root 內）→ 404，不串流、不洩路徑。
+
+    授權以 URL 之 doc_id 判定通過，但該版本的檔案落在別份文件目錄——root 圍籬放行（確實在 root 內），
+    須由歸屬圍籬擋下。他份文件的檔**真實存在**，確保擋下的是歸屬檢查而非檔案不存在。
+    """
+    monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", str(tmp_path))
+    other = tmp_path / "DM-SOP-000999" / "secret.pdf"
+    other.parent.mkdir()
+    other.write_bytes(b"%PDF-1.4 other doc")
+    doc = DmDocument(
+        doc_id="DM-SOP-000063",
+        doc_name="d",
+        category_code="SOP",
+        current_version_id=None,
+        status="PUBLISHED",
+        created_user="u_author",
+        created_date=utcnow(),
+    )
+    db.add(doc)
+    await db.flush()
+    vid = await _add_version(db, "DM-SOP-000063", "1.0", path="DM-SOP-000999/secret.pdf")
+    doc.current_version_id = vid
+    await db.flush()
+    await _seed_user(db, "role3", "有角色3")
+    db.add(DmUserRole(user_id="role3", role_code=DM_EDITOR, created_user="a", created_date=utcnow()))
+    await db.flush()
+    token = create_access_token(sub="role3", ttl_minutes=15)
+    resp = await client.get(
+        f"/api/dm/documents/DM-SOP-000063/versions/{vid}/file?disposition=preview",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error_code"] == "DM_DOC_001"
+    assert "DM-SOP-000999" not in resp.text and "secret" not in resp.text
 
 
 async def test_http_file_download_survives_storage_root_move(db, client, tmp_path, monkeypatch):

@@ -16,7 +16,12 @@ from app.core.db import get_db
 from app.core.http_cache import NO_STORE_HEADERS
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
-from app.core.rate_limit import RATE_WINDOW_SECONDS, SlidingWindowRateLimiter, rate_limit_by_ip
+from app.core.rate_limit import (
+    RATE_WINDOW_SECONDS,
+    SlidingWindowRateLimiter,
+    limit_concurrent_exports,
+    rate_limit_by_ip,
+)
 from app.et.course.schemas import MAX_BIGINT
 from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
@@ -197,7 +202,8 @@ async def survey_result(
 @router.get(
     "/courses/{course_id}/students.csv",
     response_class=Response,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    # 每人同時一支匯出，與其他匯出共用名額（#833）
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(limit_concurrent_exports)],
 )
 async def export_students_csv(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
@@ -220,7 +226,8 @@ async def export_students_csv(
 @router.get(
     "/courses/{course_id}/survey-result.csv",
     response_class=Response,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    # 每人同時一支匯出，與其他匯出共用名額（#833）
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(limit_concurrent_exports)],
 )
 async def export_survey_csv(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],

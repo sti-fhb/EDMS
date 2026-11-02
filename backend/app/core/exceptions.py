@@ -4,6 +4,11 @@ from fastapi import HTTPException
 class AppError(HTTPException):
     """統一錯誤處理，禁止自訂其他例外 class。
 
+    ⚠️ **可變物件**：重複 raise 同一個實例會讓 `__traceback__` 只增不減（#289）。模組層級
+    常數仍可用——`main.app_error_handler` 回應前會清掉 traceback；但未掛限流的匿名可達端點
+    應改用工廠函式（handler 看不到 `except AppError` 吞掉不重拋的例外）。判準與理由見
+    `.claude/rules/sti-backend-modules.md`「模組層級常數 vs 工廠函式」。
+
     Args:
         status_code: HTTP 狀態碼。
         detail: 錯誤訊息（內部 debug 用，同時作為 error_message 回傳）。

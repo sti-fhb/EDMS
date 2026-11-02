@@ -22,13 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.operator import OperatorInfo
 from app.core.utils import taipei_date, utcnow
-from app.dp.params.service import ParamService
 from app.et.enrollment.repository import EtEnrollmentRepository
 from app.et.enrollment.service import EtEnrollmentService
 from app.et.stats.repository import EtStatsRepository
 from app.et.stats.rules import CourseCompletion, days_left, percent, rank_lagging_courses, summarize
 from app.et.stats.schemas import AdminCard, CourseRate, StudentCard, TeacherCard, TeacherCourseLine
 from app.et.tracking.repository import EtTrackingRepository
+from app.services import ParamService
 
 logger = logging.getLogger(__name__)
 

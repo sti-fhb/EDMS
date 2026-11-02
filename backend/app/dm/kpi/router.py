@@ -9,12 +9,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.http_cache import NO_STORE_HEADERS
-from app.dm.deps import DmContext, get_dm_context
+from app.core.rate_limit import (
+    EXPORT_IP_RATE_MAX,
+    EXPORT_USER_RATE_MAX,
+    RATE_WINDOW_SECONDS,
+    SlidingWindowRateLimiter,
+    limit_concurrent_exports,
+    rate_limit_by_ip,
+    rate_limit_by_user,
+)
+from app.dm.deps import DmContext, get_dm_admin_context, get_dm_context
 from app.dm.kpi.schemas import KpiListResponse
 from app.dm.kpi.service import KpiService
 
 router = APIRouter(prefix="/api/dm", tags=["dm-kpi"])
 _service = KpiService()
+
+#: 匯出限流（#833 B4），門檻理由見 `core/rate_limit.EXPORT_USER_RATE_MAX`。
+_EXPORT_SCOPE = "dm-kpi-export"
+_export_user_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_USER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_export_ip_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 
 
 @router.get("/kpi/documents", response_model=KpiListResponse)
@@ -30,7 +44,16 @@ async def list_kpi(
     return await _service.search(db, roles=ctx.roles, keyword=keyword, category=category, page=page, limit=limit)
 
 
-@router.get("/kpi/documents/export")
+@router.get(
+    "/kpi/documents/export",
+    # 先過 DM 管理者閘再限流：非管理者在閘口 403、不佔名額（理由見 `get_dm_admin_context`）。
+    dependencies=[
+        Depends(get_dm_admin_context),
+        Depends(rate_limit_by_user(_export_user_limiter, _EXPORT_SCOPE)),
+        Depends(rate_limit_by_ip(_export_ip_limiter, _EXPORT_SCOPE)),
+        Depends(limit_concurrent_exports),
+    ],
+)
 async def export_kpi(
     ctx: DmContext = Depends(get_dm_context),
     db: AsyncSession = Depends(get_db),

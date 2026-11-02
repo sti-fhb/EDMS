@@ -81,6 +81,30 @@ raise AppError(status_code=404, detail="站點不存在", error_code="DP_SITE_00
 { "error_code": "DP_SITE_001", "error_message": "站點不存在" }
 ```
 
+#### 模組層級常數 vs 工廠函式（#289）
+
+**陷阱**：`AppError` 是可變物件。CPython raise 一個「已帶 `__traceback__` 的既有實例」時，會把本次傳播的 frame **附加**上去而非取代；模組層級常數永遠被 module globals 持有 → traceback 只增不減，每筆釘住一個 frame 及其 locals（請求 body、含 bearer token 的 `Request`）。實測 100 次 raise 累積 400 筆。
+
+**平台兜底**：`main.py` 的 `app_error_handler` 回應前會沿 `__cause__` / `__context__` 串鏈清掉 traceback，故**走到 handler 的路徑**用常數是安全的。
+
+| 寫法 | 何時用 |
+|------|--------|
+| 模組層級常數 `_NOT_FOUND = AppError(...)` | **預設可用**。現有數十處維持原狀，不必統一改寫 |
+| 工廠函式 `def _not_found() -> AppError: return AppError(...)` | **未掛限流的匿名可達端點**（任一登入者即可對任意 id 迴圈觸發）的拒絕路徑 |
+
+```python
+def _not_found() -> AppError:
+    return AppError(status_code=404, detail="查無此課程內容", error_code="ET_LEARN_001")
+
+raise _not_found()
+```
+
+**為什麼兩種寫法並存（不是半途而廢，請勿「統一」）**：handler 只涵蓋**被 FastAPI 攔到**的例外。`except AppError` 之後**不重拋**（吞掉、改回預設值）的路徑，例外根本不會走到 handler，常數的 traceback 照樣成長。全面改寫要動數十處，也防不住日後再犯，所以 handler 是主要手段。工廠函式只用在「今天就能被穩定觸發」的少數路徑，當第二道防線。現行範例：`et/learning/rules.py::_no_access`、`et/learning/service.py::_not_found` / `_file_not_found`、`et/survey_fill/`（`_not_enrolled` / `_no_survey` / `_malformed`）。
+
+> ⚠️ learning 那三處是 #289 裁示**點名**改的。裁示依據的「learning router 未掛限流」前提已因 #296 改變（現為每人 120、每 IP 900 次/分），但三處仍維持工廠函式——限流只降低累積速率，不會讓累積停止，**請勿因此改回常數**。判準是否改為不看限流，待 SA 裁示（見 #289 留言）。
+>
+> 已知殘洞：handler 看不到被 `except AppError` 吞掉不重拋的例外。若被吞掉的是模組層級常數，traceback 照樣累積（例：`dm/integration/service.py::_NOT_FOUND` 被 ET 多處吞掉）。是否擴大工廠函式的適用範圍，待 SA 裁示（見 #289 留言）。
+
 ---
 
 ### `BaseModel` / `BaseModelHardDelete` / `BaseModelNoDelete` / `AuditLogBaseModel` · `app/core/base_model.py`

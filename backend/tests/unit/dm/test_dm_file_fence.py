@@ -119,3 +119,103 @@ def test_absolute_injection_outside_root_still_blocked(tmp_path, monkeypatch):
     assert is_within_root(outside) is False
     with pytest.raises(AppError):
         resolve_within_root(outside, not_found=_NF)
+
+
+# ── 檔案歸屬圍籬 expect_prefix（#240 A1）──────────────────────
+# root 圍籬只驗「在 root 內」，不驗「屬於本文件」。授權是以 doc_id 判定的，檔案邊界必須
+# 對齊同一個 doc_id，否則一筆寫錯的 FILE_PATH 就能讓有 A 文件閱覽權的人讀到 B 文件。
+
+_DOC = "DM-SOP-000001"
+_OTHER = "DM-SOP-000999"
+
+
+def test_expect_prefix_own_doc_resolves(tmp_path, monkeypatch):
+    """FILE_PATH 位於本文件目錄下 → 照常解析。"""
+    root = _set_root(tmp_path, monkeypatch)
+    rel = f"{_DOC}/abc123.pdf"
+    assert resolve_within_root(rel, not_found=_NF, expect_prefix=_DOC) == os.path.realpath(os.path.join(root, rel))
+
+
+def test_expect_prefix_other_doc_rejected_without_leaking_path(tmp_path, monkeypatch, caplog):
+    """FILE_PATH 指向他份文件（仍在 root 內）→ 404，且 log 不含路徑或他份文件代碼。"""
+    _set_root(tmp_path, monkeypatch)
+    with caplog.at_level("WARNING"), pytest.raises(AppError) as e:
+        resolve_within_root(f"{_OTHER}/abc123.pdf", not_found=_NF, expect_prefix=_DOC)
+    assert e.value.status_code == 404 and e.value.error_code == "DM_DOC_001"
+    assert caplog.records, "歸屬不符須記安全事件"
+    assert _OTHER not in caplog.text and str(tmp_path) not in caplog.text
+
+
+def test_expect_prefix_legacy_absolute_path(tmp_path, monkeypatch):
+    """既有絕對路徑資料：以其相對於 root 之片段判定歸屬（向後相容不得因此失效）。"""
+    root = _set_root(tmp_path, monkeypatch)
+    own = os.path.join(root, _DOC, "abc123.pdf")
+    other = os.path.join(root, _OTHER, "abc123.pdf")
+    assert resolve_within_root(own, not_found=_NF, expect_prefix=_DOC) == os.path.realpath(own)
+    with pytest.raises(AppError):
+        resolve_within_root(other, not_found=_NF, expect_prefix=_DOC)
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        f"{_DOC}0/abc123.pdf",  # 字首相同的他份文件（DM-SOP-0000010）
+        f"{_DOC}/../{_OTHER}/abc123.pdf",  # 先進本文件目錄再 `..` 繞去他份
+        _DOC,  # 文件目錄本身，不是其下的檔案
+        "abc123.pdf",  # 直接落在 root、不屬任何文件
+    ],
+)
+def test_expect_prefix_lookalikes_rejected(tmp_path, monkeypatch, rel):
+    """字首相似、`..` 繞道、目錄本身、無歸屬之路徑一律不算本文件的檔案。"""
+    _set_root(tmp_path, monkeypatch)
+    with pytest.raises(AppError):
+        resolve_within_root(rel, not_found=_NF, expect_prefix=_DOC)
+
+
+def test_expect_prefix_symlink_to_other_doc_rejected(tmp_path, monkeypatch):
+    """本文件目錄下之 symlink 指向他份文件 → 以解析後之實際位置判定，擋下。"""
+    root = _set_root(tmp_path, monkeypatch)
+    os.makedirs(os.path.join(root, _DOC))
+    os.makedirs(os.path.join(root, _OTHER))
+    target = os.path.join(root, _OTHER, "secret.pdf")
+    open(target, "wb").close()
+    try:
+        os.symlink(target, os.path.join(root, _DOC, "link.pdf"))
+    except OSError:
+        pytest.skip("此平台不允許建立 symlink")
+    with pytest.raises(AppError):
+        resolve_within_root(f"{_DOC}/link.pdf", not_found=_NF, expect_prefix=_DOC)
+
+
+def test_expect_prefix_empty_fail_closed(tmp_path, monkeypatch):
+    """expect_prefix 為空字串 → fail-closed（不可退化成「不檢查」）。"""
+    _set_root(tmp_path, monkeypatch)
+    with pytest.raises(AppError):
+        resolve_within_root(f"{_DOC}/abc123.pdf", not_found=_NF, expect_prefix="")
+
+
+def test_expect_prefix_does_not_replace_root_fence(tmp_path, monkeypatch):
+    """expect_prefix 是額外一層，不可取代 root 圍籬：root 外之絕對路徑即使「看似」帶正確前綴也擋。"""
+    _set_root(tmp_path / "store", monkeypatch)
+    outside = os.path.join(str(tmp_path), _DOC, "abc123.pdf")
+    with pytest.raises(AppError):
+        resolve_within_root(outside, not_found=_NF, expect_prefix=_DOC)
+
+
+# ── 空設定值 fail-closed（#240 A4）───────────────────────────
+# `os.path.realpath("")` 回 CWD——空設定會讓圍籬範圍變成整個後端原始碼目錄。
+
+
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_empty_storage_root_fail_closed(monkeypatch, empty):
+    """空 / 全空白之 DM_FILE_STORAGE_ROOT → storage_root() 拒絕，不得回 CWD。"""
+    monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", empty)
+    with pytest.raises(RuntimeError):
+        storage_root()
+
+
+def test_empty_storage_root_blocks_reads_into_cwd(monkeypatch):
+    """空設定下讀取 CWD 內真實存在之原始碼檔，不得通過圍籬。"""
+    monkeypatch.setattr(settings, "DM_FILE_STORAGE_ROOT", "")
+    with pytest.raises(RuntimeError):
+        resolve_within_root("pyproject.toml", not_found=_NF)

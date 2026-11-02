@@ -71,7 +71,9 @@ async def _doc_with_real_file(db, tmp_path, doc_id: str, *, version_no: str = "1
 
     回目前發布版的 `version_id`。
     """
-    path = tmp_path / f"{doc_id}-{version_no}.pdf"
+    # 須落在本文件目錄下（#240 A1 檔案歸屬圍籬），與 save_upload 實際落盤位置一致
+    path = tmp_path / doc_id / f"{version_no}.pdf"
+    path.parent.mkdir(exist_ok=True)
     path.write_bytes(b"%PDF-1.4 seam")
     doc = await db.get(DmDocument, doc_id)
     if doc is None:
@@ -236,7 +238,8 @@ class TestDownloadToKpiSeam:
         tag_id = await _audience_tag_id(db, tag_name)
         assert tag_id is not None, f"AUDIENCE 標籤「{tag_name}」應由 DM seed 種入"
 
-        path = tmp_path / f"{doc_id}.pdf"
+        path = tmp_path / doc_id / "1.0.pdf"  # 本文件目錄下（#240 A1 檔案歸屬圍籬）
+        path.parent.mkdir()
         path.write_bytes(b"%PDF-1.4 seam")
         doc = DmDocument(
             doc_id=doc_id,

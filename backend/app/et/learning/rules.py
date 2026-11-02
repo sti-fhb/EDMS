@@ -31,7 +31,20 @@ PLAYBACK_RATE_OPTIONS: Final[tuple[float, ...]] = (0.75, 1.0, 1.25, 1.5, 2.0)
 #: 看得到、換一頁看不到」，沒有任何測試會自然撞到。
 COURSE_MANAGER_ROLES: Final[frozenset[str]] = frozenset({ROLE_TEACHER, ROLE_ADMIN})
 
-_NO_ACCESS = AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_LEARN_002")
+
+def _no_access() -> AppError:
+    """非在籍、非擁有者、非可預覽之課程管理者。
+
+    ⚠️ **工廠函式而非模組層級常數**（#289 裁示 A）：`/courses/{任意 id}/learn` 不需在籍、
+    不需該課程存在，任一登入者迴圈呼叫即可觸發（#296 起已掛限流，但限流只降速、不止累積）。
+    常數的 `__traceback__` 會隨每次 raise 只增不減；`main.app_error_handler` 雖會清（裁示 B），但本錯誤在
+    `service._require_access_by_course` 被 `except AppError` 攔下改拋，不能把唯一防線押在
+    handler 上。判準見 `.claude/rules/sti-backend-modules.md`「模組層級常數 vs 工廠函式」。
+    """
+    return AppError(status_code=403, detail="您尚未加入此課程", error_code="ET_LEARN_002")
+
+
+#: 被移除者才會觸發（須先在籍），不是任一登入者可對任意 id 觸發的路徑，維持常數（#289）。
 _REMOVED = AppError(status_code=403, detail="您已被該課程移除", error_code="ET_LEARN_004")
 
 
@@ -97,7 +110,7 @@ def ensure_can_access(
     # 那是「草稿的存在是秘密」；此處是第二道，兩者不可互相取代）。
     if is_course_manager and course_published:
         return
-    raise _REMOVED if removed else _NO_ACCESS
+    raise _REMOVED if removed else _no_access()
 
 
 def playback_rates(*, max_rate: float) -> tuple[float, ...]:

@@ -14,7 +14,7 @@
 #                                 # （台灣時間每月 1 日自動加存 monthly/）
 #   ./db-backup.sh pre-migrate    # CD migration 前備份 → gs://.../pre-migrate/
 #
-# 前置需求（bms-prod-02 上）：
+# 前置需求（<PROD_VM> 上）：
 #   - docker（edms-db 容器運行中）
 #   - gcloud，且 VM Service Account 具本 bucket 的寫入權限
 #   - 環境變數 EDMS_BACKUP_BUCKET（於 /opt/edms/.env.prod 設定）

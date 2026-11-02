@@ -35,6 +35,7 @@ const SERVER_FIELD: Record<string, "reason" | "reviewer_id" | "file"> = {
   DM_REVIEW_001: "reviewer_id",
   DM_FILE_001: "file",
   DM_FILE_002: "file",
+  DM_FILE_005: "file", // 檔案內容與副檔名不符（#211）
 }
 
 /**

@@ -45,7 +45,6 @@ from app.core.auth import create_access_token
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.notify.models import DpEmailLog
-from app.dp.user import router as dp_auth_router
 from app.dp.users.models import DpUser
 from app.et.catalog.models import EtCourseTag, EtTag
 from app.et.constants import (
@@ -67,23 +66,6 @@ pytestmark = pytest.mark.integration
 _COURSES = "/api/et/courses"
 _STUDENT_EMAIL = "flow-student@edms.local"
 _STUDENT_PWD = "FlowPwd2026"
-
-
-@pytest.fixture(autouse=True)
-def _reset_dp_limits():
-    """DP 的限流器與冷卻器是 module-level 單例，會累積整個測試 session 的用量。
-
-    本檔要真的走一次 register / verify / login，若前面的 DP 測試已把同 IP 的額度用掉，
-    這裡會拿到 429 而失敗在一個與被測行為無關的地方。
-    """
-    dp_auth_router._register_limiter._hits.clear()
-    dp_auth_router._login_limiter._hits.clear()
-    dp_auth_router._verify_limiter._hits.clear()
-    dp_auth_router._verify_send_cooldown._last.clear()
-    # #234 新增的單例：它跨測試存活（24 小時視窗），不清會讓第 5 次起的同 Email
-    # 註冊落入靜默路徑——而那條路徑回 202、不報錯，測試可能**為了錯的理由通過**。
-    dp_auth_router._overwrite_counter._hits.clear()
-    yield
 
 
 def _bearer(user_id: str) -> dict[str, str]:

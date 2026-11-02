@@ -10,14 +10,14 @@
 
 ## 0. 為什麼需要這些
 
-EDMS 是 **public repository**，因此 CI/CD 全在 GitHub-hosted runner 執行，**不使用 self-hosted runner**（fork PR 會在 runner 上執行任意程式碼，而該 runner 所在的 bms-prod-02 同時跑著 TBMS 血庫系統）。
+EDMS 是 **public repository**，因此 CI/CD 全在 GitHub-hosted runner 執行，**不使用 self-hosted runner**（fork PR 會在 runner 上執行任意程式碼，而該 runner 所在的 `<PROD_VM>` 同時跑著 TBMS 血庫系統）。
 
-部署採 **pull-based**：GitHub 只 build 與 push 映像，bms-prod-02 上的 systemd timer 主動拉取。GitHub 側**不取得該 VM 的任何存取權**——部署必需的 docker 權限等同 root，讓 public repo 的 CD 身分持有它並不妥當。
+部署採 **pull-based**：GitHub 只 build 與 push 映像，`<PROD_VM>` 上的 systemd timer 主動拉取。GitHub 側**不取得該 VM 的任何存取權**——部署必需的 docker 權限等同 root，讓 public repo 的 CD 身分持有它並不妥當。
 
 所以需要三樣東西：**放映像的地方**、**GitHub 推映像用的身分**、**放備份的地方**。
 
 > ✅ **本文件的操作全部是「新建資源」，不會動到 TBMS 或任何現有服務，不需要停機窗口。**
-> 唯二觸及既有事物的是 §1.2 與 §3.1——替 bms-prod-02 既有的 Service Account 新增兩項讀寫權限（只增不減）。
+> 唯二觸及既有事物的是 §1.2 與 §3.1——替 `<PROD_VM>` 既有的 Service Account 新增兩項讀寫權限（只增不減）。
 
 ---
 
@@ -25,13 +25,13 @@ EDMS 是 **public repository**，因此 CI/CD 全在 GitHub-hosted runner 執行
 
 | 項目 | 說明 |
 |------|------|
-| **在哪執行** | 你自己的機器，或 GCP Cloud Shell。**不是** bms-prod-02 |
+| **在哪執行** | 你自己的機器，或 GCP Cloud Shell。**不是** `<PROD_VM>` |
 | **要不要 `sudo`** | **不用**。本文件所有指令都是 `gcloud`／`cat`，用的是 GCP 身分而非 Linux 權限 |
 | **需要的權限** | GCP IAM 角色：Artifact Registry Admin、IAM Workload Identity Pool Admin、Service Account Admin、Storage Admin |
 
-> ⚠️ **不要 SSH 進 bms-prod-02 執行這些指令。** 那台機器上的 gcloud 是以 VM 的 Service Account 認證，該帳號**沒有**上述 admin 角色——指令會失敗，而錯誤訊息容易被誤讀成「權限給得不夠」而去替 VM 多開權限。VM 只需要 §1.2 與 §3.1 授予它的兩項讀寫權，不需要任何 admin 角色。
+> ⚠️ **不要 SSH 進 `<PROD_VM>` 執行這些指令。** 那台機器上的 gcloud 是以 VM 的 Service Account 認證，該帳號**沒有**上述 admin 角色——指令會失敗，而錯誤訊息容易被誤讀成「權限給得不夠」而去替 VM 多開權限。VM 只需要 §1.2 與 §3.1 授予它的兩項讀寫權，不需要任何 admin 角色。
 >
-> bms-prod-02 上要做的事是另一份文件的 §2.4（clone repo、`.env.prod`、systemd units），**那些才需要 `sudo`**。
+> `<PROD_VM>` 上要做的事是另一份文件的 §2.4（clone repo、`.env.prod`、systemd units），**那些才需要 `sudo`**。
 
 執行前先確認身分與專案：
 
@@ -51,7 +51,7 @@ gcloud config get-value project       # 應為 blood-system-dev；不是的話�
 export PROJECT_ID=blood-system-dev
 export PROJECT_NUM=398001699233
 export REGION=asia-east1
-export VM_SA=398001699233-compute@developer.gserviceaccount.com   # bms-prod-02 的 Service Account
+export VM_SA=398001699233-compute@developer.gserviceaccount.com   # <PROD_VM> 的 Service Account
 
 # ⚠️ GCS bucket 名稱是**全球唯一**的，可能已被其他組織註冊。
 #    若 §3 建立時回報 409／already exists，改用帶專案前綴的名稱再重跑一次，
@@ -132,7 +132,7 @@ gcloud artifacts repositories set-cleanup-policies edms-image \
 
 ### 1.2 VM 的讀取權限（容易漏）
 
-部署是 VM 主動 pull，所以 **bms-prod-02 的 Service Account 需要讀取權**，且部署腳本會用 `gcloud artifacts docker images describe` 確認映像是否就緒——同樣需要這個角色。
+部署是 VM 主動 pull，所以 **`<PROD_VM>` 的 Service Account 需要讀取權**，且部署腳本會用 `gcloud artifacts docker images describe` 確認映像是否就緒——同樣需要這個角色。
 
 ```bash
 gcloud artifacts repositories add-iam-policy-binding edms-image \
@@ -213,7 +213,7 @@ echo "EDMS_BACKUP_BUCKET             = ${BUCKET}"
 |---|---|
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | GitHub repo variables |
 | `GCP_BUILD_SERVICE_ACCOUNT` | GitHub repo variables |
-| `EDMS_BACKUP_BUCKET` | bms-prod-02 的 `/opt/edms/.env.prod` |
+| `EDMS_BACKUP_BUCKET` | `<PROD_VM>` 的 `/opt/edms/.env.prod` |
 
 前兩者填入 **GitHub repo variables**（Settings → Secrets and variables → Actions → **Variables**，不是 Secrets）——它們不是機密。
 
@@ -238,7 +238,7 @@ gcloud storage buckets create "${BUCKET}" \
 
 ### 3.1 VM 的寫入權限
 
-備份由 bms-prod-02 上的腳本執行（migration 前備份、每日備份）：
+備份由 `<PROD_VM>` 上的腳本執行（migration 前備份、每日備份）：
 
 ```bash
 gcloud storage buckets add-iam-policy-binding "${BUCKET}" \
@@ -309,8 +309,8 @@ gcloud storage buckets describe "${BUCKET}" --format="yaml(lifecycle)"
 為避免誤解，明確列出：
 
 - **不需要 self-hosted runner 的任何設定**——EDMS 不使用
-- **不需要開放 SSH、IAP 或任何進入 bms-prod-02 的通道**——GitHub 側不部署
+- **不需要開放 SSH、IAP 或任何進入 `<PROD_VM>` 的通道**——GitHub 側不部署
 - **不需要授予 EDMS 的 SA 任何 compute 權限**——它只推映像
 - **不得與 TBMS 共用** service account、bucket 或映像庫
 
-VM 端的安裝（clone repo、`.env.prod`、systemd units）見 [deployment.md](deployment.md) §2.4，那部分由具 bms-prod-02 sudo 權限者執行，與本文件的 GCP 設定互相獨立。
+VM 端的安裝（clone repo、`.env.prod`、systemd units）見 [deployment.md](deployment.md) §2.4，那部分由具 `<PROD_VM>` sudo 權限者執行，與本文件的 GCP 設定互相獨立。
