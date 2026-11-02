@@ -1,7 +1,7 @@
 """dp_email_log_redact_account_link_mails
 
 Revision ID: b27739aa4ac6
-Revises: 04fc1cf07681
+Revises: 7ade05c26fd8
 Create Date: 2026-11-02 11:17:33.929327
 
 回溯遮罩已寄出之註冊驗證信 / 邀請信 outbox 內文（#50 SA 2026-11-02 裁示 1）。
@@ -43,7 +43,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "b27739aa4ac6"
-down_revision: Union[str, None] = "04fc1cf07681"
+down_revision: Union[str, None] = "7ade05c26fd8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
