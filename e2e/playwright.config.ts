@@ -18,8 +18,11 @@ export default defineConfig({
   testDir: "./tests",
   // 開跑前確認 mailpit 可連（連不到就一次說清楚）
   globalSetup: "./support/global-setup.ts",
-  // 單條測試上限：含等信（≤ 30s）與兩次頁面往返，60s 綽綽有餘
-  timeout: 60_000,
+  // 單條測試上限。須大於「單條測試內所有等信上限的總和」再加頁面往返：忘記密碼那條要等兩封信
+  // （驗證信 + 重設信，各 ≤ MAIL_WAIT_TIMEOUT_MS = 30s）。若上限只有 60s，信件壞掉時會先撞到
+  // 泛用的 test timeout，waitForMailLink 指向 outbox / SMTP 的診斷訊息就看不到了。
+  // ⚠️ 新增等信次數或調高 MAIL_WAIT_TIMEOUT_MS 時，要一起檢查這個值。
+  timeout: 90_000,
   expect: { timeout: 10_000 },
   fullyParallel: true,
   forbidOnly: isCI,
