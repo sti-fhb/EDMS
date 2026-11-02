@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import AsyncSessionLocal
 from app.core.utils import utcnow
 from app.et.audit_target import course_audit_payload
 from app.et.course.models import EtChapter, EtItem
@@ -215,6 +216,9 @@ _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 def _append_log(log_path: str, entry: dict) -> None:
     """追加一行到搬移紀錄。0600、不跟隨連結：紀錄是 `--revert` 的輸入，只該由執行本腳本的帳號寫。"""
     fd = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _O_NOFOLLOW, 0o600)
+    # 0600 只對新建檔生效；`--log` 指向既有檔時一併收緊，否則 `--revert` 會以「他人可寫」拒讀
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry | {"at": utcnow().isoformat()}, ensure_ascii=False) + "\n")
         f.flush()
@@ -295,7 +299,9 @@ async def run(
             await db.rollback()
             failed += 1
             out(f"❌ video_id={item.video_id} 遷移失敗：{type(exc).__name__}: {exc}")
-    out(f"已遷移 {done} 筆、失敗 {failed} 筆；搬移紀錄：{log_path}")
+    # 一筆都沒動手時紀錄檔不會被建立，不印一個不存在的路徑
+    where = f"；搬移紀錄：{log_path}" if os.path.exists(log_path) else "；無搬移紀錄（未動手任何一筆）"
+    out(f"已遷移 {done} 筆、失敗 {failed} 筆{where}")
 
     remaining = plan(await load_rows(db), root).relocations
     if remaining:
@@ -430,9 +436,6 @@ async def _amain(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--log", help="搬移紀錄路徑（預設寫在影片目錄下）")
     parser.add_argument("--revert", metavar="LOG", help="依搬移紀錄回復")
     args = parser.parse_args(argv)
-
-    # 延後匯入（比照 `app.dp.audit.verify`）：只有真的要連 DB 時才載入連線設定
-    from app.core.db import AsyncSessionLocal
 
     try:
         async with AsyncSessionLocal() as db:

@@ -277,7 +277,7 @@ class TestSecurityHardening:
         elsewhere = tmp_path_factory.mktemp("elsewhere")
         os.symlink(str(elsewhere), os.path.join(root, "12"))
         _put(root, f"s7/{_NAME}")
-        with pytest.raises(ValueError):
+        with pytest.raises(NotADirectoryError):
             storage.link_into_material(f"s7/{_NAME}", 12)
         assert os.listdir(elsewhere) == [], "不得寫到 root 外"
 

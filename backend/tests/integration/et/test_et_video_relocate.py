@@ -19,6 +19,8 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.utils import utcnow
+from app.et.course.models import EtCourseContentStage
+from app.et.course.stage_rules import ENTITY_MATERIAL_VIDEO
 from app.et.material import relocate_videos, storage
 from app.et.material.models import EtMaterialVideo
 from tests.integration.et.test_et_staged_write_paths import _bearer, _course_with_content, _publish, _user
@@ -400,3 +402,69 @@ class TestSecurityHardening:
         assert code in (0, 1)
         assert await _path_of(db, v["video_id"]) == v["new"], "被竄改的行不得回復任何東西"
         assert not os.path.exists(os.path.join(root, "..", "outside.mp4"))
+
+
+class TestStagedSnapshotAfterRelocation:
+    """Review H-1（#887）：遷移前開的編輯工作階段，按「更新」不得把遷移後的路徑蓋回舊目錄。"""
+
+    async def test_既有影片的暫存快照帶舊路徑_遷移後按更新_路徑不被蓋回且可播(self, client, db, root, scoped) -> None:
+        uid = await _user(db, "ZT_RL20")
+        v = await _legacy_video(client, db, uid, root)
+        scoped.add(v["video_id"])
+        # 遷移前開工：任一內容編輯都會把整棵活表複製進暫存區，影片的 file_path 是舊路徑。
+        # 用「教材原樣存一次」開工——不改任何內容，「更新」的發布檢核才不會擋在前置
+        mid = v["material_id"]
+        detail = (await client.get(f"/api/et/materials/{mid}", headers=_bearer(uid))).json()
+        r = await client.put(
+            f"/api/et/materials/{mid}",
+            json={
+                "material_name": detail["material_name"],
+                "description_html": detail["description_html"],
+                "doc_ids": [d["doc_id"] for d in detail["docs"]],
+                "video_ids": [x["video_id"] for x in detail["videos"]],
+                "version": detail["version"],
+            },
+            headers=_bearer(uid),
+        )
+        assert r.status_code == 204, r.text
+        await db.commit()
+        snapshot = await db.scalar(
+            select(EtCourseContentStage.payload).where(
+                EtCourseContentStage.entity_type == ENTITY_MATERIAL_VIDEO,
+                EtCourseContentStage.source_id == v["video_id"],
+            )
+        )
+        assert json.loads(snapshot)["file_path"] == v["old"], "前置：快照帶的是舊路徑"
+
+        assert await relocate_videos.run(db, apply=True, log_path=os.path.join(root, "r.jsonl")) == 0
+        r = await client.post(f"/api/et/courses/{v['course_id']}/content/apply", headers=_bearer(uid))
+        assert r.status_code == 200, r.text
+        await db.commit()
+
+        assert await _path_of(db, v["video_id"]) == v["new"], "更新不得把遷移後的路徑蓋回舊目錄"
+        r = await _play(client, uid, v["video_id"])
+        assert r.status_code == 200 and r.content == _CONTENT
+
+
+class TestLogFileHandling:
+    async def test_既有的寬權限紀錄檔會被收緊(self, client, db, root, scoped) -> None:
+        uid = await _user(db, "ZT_RL21")
+        v = await _legacy_video(client, db, uid, root)
+        scoped.add(v["video_id"])
+        log = os.path.join(root, "r.jsonl")
+        open(log, "w").close()
+        os.chmod(log, 0o644)
+
+        await relocate_videos.run(db, apply=True, log_path=log)
+
+        assert os.stat(log).st_mode & 0o777 == 0o600
+
+    async def test_沒有動手任何一筆時不印紀錄路徑(self, client, db, root, scoped) -> None:
+        scoped.add(-1)  # 視野限縮到不存在的列：沒有待遷移
+        log = os.path.join(root, "never.jsonl")
+        lines: list[str] = []
+
+        await relocate_videos.run(db, apply=True, log_path=log, out=lines.append)
+
+        assert not os.path.exists(log)
+        assert all(log not in line for line in lines)

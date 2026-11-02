@@ -557,7 +557,7 @@ echo $?   # 0＝完成且驗證已生效；1＝仍有待處理的列；2＝執�
 | 退出碼 1，有「需人工確認」的列（同一支檔另被其他教材引用） | 正常資料裡一支影片只屬於一份教材，這代表有某筆資料指錯了檔。用 dry-run 列出的 `video_id` / `material_id` 交給開發確認；確認屬正常後才加 `--allow-shared` 重跑 |
 | 退出碼 1，有「遷移失敗」的列 | 依訊息排除（多為權限：目錄 owner 須為 `10001:10001`，見 §2.4）後重跑；已完成的列不會重做 |
 
-- **搬移紀錄**：每完成一筆即追加一行到 `/opt/edms/data/et_videos/.relocate-videos-<時間>.jsonl`（完成時會印出路徑）。回復時要用它，請保留
+- **搬移紀錄**：每一筆**動手前**先追加一行到 `/opt/edms/data/et_videos/.relocate-videos-<時間>.jsonl`（結束時會印出路徑；一筆都沒動手時不建立）。因為先寫後做，紀錄可能含沒做成的列，`--revert` 會自動略過。回復時要用它，請保留
 - **磁碟**：新路徑以 hard link 建立，不佔額外空間；舊路徑約一天後由孤兒影片清理（SCHET002）收掉。⚠️ 影片目錄須在支援 hard link 的檔案系統上（現行 bind mount 即是）——不支援時退回複製，每支影片都要完整複製一次，教師按「更新」也會跟著變慢
 - **搬移紀錄的權限**：以 0600 建立、只有執行腳本的帳號（容器內的 app 使用者）能讀寫。`--revert` 只接受執行者本人所有、他人不可寫的紀錄，**不要 chmod 放寬**
 - **回復**：`sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos --revert /app/var/et_videos/.relocate-videos-<時間>.jsonl`——把 FILE_PATH 改回舊值（舊路徑已被清掉時從新路徑掛回去），並撤銷驗證（回到放行模式）

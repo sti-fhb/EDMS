@@ -375,3 +375,28 @@ class TestApplyDoesNotLegitimize:
         video = await _live_video_of_new_material(db, ids)
         assert video.file_path == foreign, "不在本教材暫存目錄的檔，保留原路徑、不掛過來"
         assert (await _play(client, uid, video.video_id)).status_code == 404
+
+
+class TestTargetDirAnomaly:
+    """Review M-1（#887）：目標目錄不是實體目錄屬部署異常，圍籬生效後須整批回滾、不得寫進必然 404 的影片。"""
+
+    async def test_目標目錄是連結_圍籬生效後中止更新(self, client, db, root, monkeypatch, tmp_path_factory) -> None:
+        uid = await _user(db, "ZT_VO14")
+        ids = await _staged_new_material(client, db, uid)
+        await _upload(client, uid, ids["staged_material_id"])
+        await db.commit()
+        storage.mark_ownership_fence_enforced(root)
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+        real_link = storage.link_into_material
+
+        def link_with_bad_target(file_path: str, material_id: int, **kw) -> str:
+            # 套用當下才知道 MATERIAL_ID：在掛檔前把目標目錄換成連結
+            os.symlink(str(elsewhere), os.path.join(root, str(material_id)))
+            return real_link(file_path, material_id, **kw)
+
+        monkeypatch.setattr(storage, "link_into_material", link_with_bad_target)
+        r = await client.post(f"{_COURSES}/{ids['course_id']}/content/apply", headers=_bearer(uid))
+
+        assert r.status_code == 500
+        assert r.json()["error_code"] == "ET_STAGE_002"
+        assert os.listdir(elsewhere) == [], "不得寫到 root 外"

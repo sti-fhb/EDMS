@@ -594,10 +594,16 @@ async def _upsert(
                 values[spec.fk] = (
                     course.course_id if node.parent_stage_id is None else live_id_by_stage[node.parent_stage_id]
                 )
-            if spec.entity_type == ENTITY_MATERIAL_VIDEO and node.source_id is None and "file_path" in values:
-                values["file_path"] = await _adopt_video_file(
-                    values["file_path"], values["material_id"], material_stage_id=node.parent_stage_id
-                )
+            if spec.entity_type == ENTITY_MATERIAL_VIDEO and "file_path" in values:
+                if node.source_id is not None:
+                    # 🔴 既有影片的路徑**不由暫存快照決定**（#871 review H-1）：沒有任何編輯路徑會改
+                    # 既有影片的 `FILE_PATH`（上傳只新增列），快照裡的值只是開工當下的副本。照寫的話，
+                    # 開工後才跑的影片目錄遷移會在這一刻被蓋回舊目錄，圍籬生效後學員靜默 404。
+                    del values["file_path"]
+                else:
+                    values["file_path"] = await _adopt_video_file(
+                        values["file_path"], values["material_id"], material_stage_id=node.parent_stage_id
+                    )
             if spec.entity_type == ENTITY_ITEM:
                 # 反向連結：教材 / 測驗已於本迴圈稍早建好（`APPLY_ORDER` 保證）。
                 #

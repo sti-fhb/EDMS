@@ -414,12 +414,16 @@ def _ensure_real_dir(root: str, rel_dir: str, *, on_error: Exception | None = No
     """建立 `{root}/{rel_dir}` 並確認它是實體目錄（不是指向他處的連結），回其絕對路徑。
 
     `os.makedirs(exist_ok=True)` 遇到既有的目錄連結會照樣放行，之後寫進去的檔就落在 root 外。
+
+    預設拋 `NotADirectoryError`（`OSError`）而非 `ValueError`：這是影片目錄的**部署 / 檔案系統異常**，
+    不是「來源不合格」。`stage_apply._adopt_video_file` 依此分流——前者在圍籬生效後須整批回滾，
+    後者保留原路徑即可。
     """
     target = os.path.join(root, rel_dir)
     os.makedirs(target, exist_ok=True)
     if os.path.realpath(target) != os.path.normpath(target):
         logger.warning("ET 影片目錄圍籬攔截一個非實體目錄（不記路徑）")
-        raise on_error if on_error is not None else ValueError("目標目錄不是 storage root 下的實體目錄")
+        raise on_error if on_error is not None else NotADirectoryError("目標目錄不是 storage root 下的實體目錄")
     return target
 
 
@@ -492,7 +496,8 @@ def link_into_material(file_path: str, material_id: int, *, allowed_source_dirs:
     `{stage_id}`）；遷移腳本不傳，改以「同一支檔被不同教材引用」另行偵測。
 
     Raises:
-        ValueError: 來源逃出 root、不是一般檔、不在 `allowed_source_dirs`，或目標目錄不是實體目錄。
+        ValueError: 來源逃出 root、不是一般檔，或不在 `allowed_source_dirs`。
+        NotADirectoryError: 目標目錄不是實體目錄（影片目錄的部署異常，見 `_ensure_real_dir`）。
         FileNotFoundError: 來源不存在。
         FileExistsError: 目標位置已有**另一支**同名檔。
         OSError: 其他檔案系統錯誤。
