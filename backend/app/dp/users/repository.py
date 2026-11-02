@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dp.users.account_status import account_usable_clause
 from app.dp.users.models import DpUser
 
@@ -23,8 +24,13 @@ class UsersRepository:
         conditions = [DpUser.deleted == 0]
 
         if keyword:
-            pattern = f"%{keyword}%"
-            conditions.append(or_(DpUser.user_name.ilike(pattern), DpUser.email.ilike(pattern)))
+            pattern = contains(keyword)
+            conditions.append(
+                or_(
+                    DpUser.user_name.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                    DpUser.email.ilike(pattern, escape=LIKE_ESCAPE_CHAR),
+                )
+            )
 
         if status == "active":
             # 與 #250 之 is_account_usable / DM 指定審核者下拉共用同一條件，避免多份判定漂移

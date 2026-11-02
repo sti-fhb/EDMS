@@ -66,16 +66,18 @@
 
 `AuditLogRepository` 刻意不提供 update / delete；查詢端無寫入端點（改 / 刪一律 405）。
 
-### 2. DB 層 GRANT（部署 / ops 層，非 migration）
+### 2. DB 層：GRANT + trigger（#22）
 
-應用連線 DB 帳號對本表**僅授予 `INSERT` / `SELECT`**、撤除 `UPDATE` / `DELETE`，使即便應用碼遭繞過亦無法竄改既有稽核（縱深防禦）。隨部署套用，例：
+兩道各自獨立，使即便應用碼遭繞過亦無法竄改既有稽核（縱深防禦）：
 
-```sql
-REVOKE UPDATE, DELETE, TRUNCATE ON "DP_AUDIT_LOG" FROM <app_role>;
-GRANT INSERT, SELECT ON "DP_AUDIT_LOG" TO <app_role>;
-```
+| 層 | 落點 | 內容 |
+|---|---|---|
+| GRANT | `scripts/db-app-role.sql`（部署 / ops 層，非 migration） | app 執行期角色對本表**僅 `INSERT` / `SELECT`**，不可 DDL；migration 改以 owner 連線（`MIGRATION_DATABASE_URL`，正式環境只帶進 migration 容器） |
+| trigger | migration `7ade05c26fd8` | `TRG_DP_AUDIT_LOG_DENY_MODIFY` 拒絕 `UPDATE` / `DELETE` / `TRUNCATE`，owner / superuser 的一般 DML 亦擋 |
 
-> 不落 Alembic migration：migration 以 schema owner 執行 DDL，GRANT / REVOKE 屬部署環境之角色治理（見 issue #22）。
+> GRANT 不落 Alembic migration：migration 以 schema owner 執行 DDL，GRANT / REVOKE 屬部署環境之角色治理。角色切換步驟見 `docs/infra/deployment.md` §2.8。
+>
+> 測試要模擬竄改時（如驗鏈測試），在測試交易內 `ALTER TABLE "DP_AUDIT_LOG" DISABLE TRIGGER …` 後再 UPDATE，rollback 即恢復——見 `tests/integration/dp/test_dp_audit_verify_chain.py::_tamper`。
 
 ### 3. 驗鏈工具 `verify_chain`（T052）
 

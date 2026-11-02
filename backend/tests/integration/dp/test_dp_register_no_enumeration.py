@@ -80,7 +80,6 @@ async def _admin_invite(db, *, email: str, hours: int = 24) -> None:
             token_hash=hash_token(f"invite-{email}"),
             email=email,
             user_name="受邀者",
-            pwd_hash=None,
             kind=KIND_ADMIN_INVITE,
             invite_id=f"INV{abs(hash(email)) % 10**8:08d}",
             expires_date=now + timedelta(hours=hours),
@@ -399,7 +398,6 @@ async def test_逾期的_pending_仍走覆蓋路徑(client, db, kind: str) -> No
                 token_hash=hash_token(f"stale-{email}"),
                 email=email,
                 user_name="舊的自己",
-                pwd_hash=None,
                 kind="SELF_REGISTER",
                 expires_date=now - timedelta(hours=1),
                 created_user="self",  # CREATED_USER 是 varchar(20)，不可放 Email

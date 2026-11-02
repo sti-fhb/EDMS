@@ -87,10 +87,11 @@ raise AppError(status_code=404, detail="站點不存在", error_code="DP_SITE_00
 
 **平台兜底**：`main.py` 的 `app_error_handler` 回應前會沿 `__cause__` / `__context__` 串鏈清掉 traceback，故**走到 handler 的路徑**用常數是安全的。
 
-| 寫法 | 何時用 |
-|------|--------|
-| 模組層級常數 `_NOT_FOUND = AppError(...)` | **預設可用**。現有數十處維持原狀，不必統一改寫 |
-| 工廠函式 `def _not_found() -> AppError: return AppError(...)` | **未掛限流的匿名可達端點**（任一登入者即可對任意 id 迴圈觸發）的拒絕路徑 |
+**判準**（#289 SA 裁示 2026-11-02）：
+
+- **新程式一律用工廠函式**，不再新增模組層級的 `AppError` 常數。
+- 既有常數不強制全面改寫；但**會被 `except AppError` 攔下且不重拋**的，必須改成工廠函式（handler 的清理碰不到這種路徑）。
+- 限流只降低累積速率，不構成保留常數的理由。
 
 ```python
 def _not_found() -> AppError:
@@ -99,11 +100,11 @@ def _not_found() -> AppError:
 raise _not_found()
 ```
 
-**為什麼兩種寫法並存（不是半途而廢，請勿「統一」）**：handler 只涵蓋**被 FastAPI 攔到**的例外。`except AppError` 之後**不重拋**（吞掉、改回預設值）的路徑，例外根本不會走到 handler，常數的 traceback 照樣成長。全面改寫要動數十處，也防不住日後再犯，所以 handler 是主要手段。工廠函式只用在「今天就能被穩定觸發」的少數路徑，當第二道防線。現行範例：`et/learning/rules.py::_no_access`、`et/learning/service.py::_not_found` / `_file_not_found`、`et/survey_fill/`（`_not_enrolled` / `_no_survey` / `_malformed`）。
+「攔下且不重拋」指 `except AppError` 之後回預設值、`continue`、記 log 就結束，例外不再往外傳。攔下後改拋另一個例外（`raise X from exc` / `raise X from None`）不算：被攔下的那個仍掛在新例外的 `__cause__` / `__context__` 上，handler 會沿串鏈清掉。判斷時要看**呼叫端**，不是定義端：常數定義在 A 模組，吞掉它的可能是 B 模組（例：`dm/integration/service.py` 原本的 `_NOT_FOUND` 常數被 ET 5 處吞掉）。
 
-> ⚠️ learning 那三處是 #289 裁示**點名**改的。裁示依據的「learning router 未掛限流」前提已因 #296 改變（現為每人 120、每 IP 900 次/分），但三處仍維持工廠函式——限流只降低累積速率，不會讓累積停止，**請勿因此改回常數**。判準是否改為不看限流，待 SA 裁示（見 #289 留言）。
->
-> 已知殘洞：handler 看不到被 `except AppError` 吞掉不重拋的例外。若被吞掉的是模組層級常數，traceback 照樣累積（例：`dm/integration/service.py::_NOT_FOUND` 被 ET 多處吞掉）。是否擴大工廠函式的適用範圍，待 SA 裁示（見 #289 留言）。
+**為什麼兩種寫法並存（不是半途而廢，請勿「統一」）**：handler 涵蓋所有**被 FastAPI 攔到**的例外，所以既有數十處常數只要會傳到 handler，就是安全的，全面改寫只是搬動程式碼、沒有降低風險。handler 碰不到的只有「被 `except AppError` 吞掉、不重拋」的路徑，所以強制改寫只針對這一類。新程式一律用工廠函式，是因為寫的當下無法保證日後沒有呼叫端吞掉它。現存的常數因此是**刻意保留**的，不是改到一半。
+
+現行工廠函式：`dm/integration/service.py::_not_found`（被吞掉，Q1 改）、`et/learning/rules.py::_no_access`、`et/learning/service.py::_not_found` / `_file_not_found`、`et/survey_fill/`（`_not_enrolled` / `_no_survey` / `_malformed`）。learning 與 survey_fill 那幾處都有掛限流，維持工廠函式，**請勿因有限流改回常數**。
 
 ---
 

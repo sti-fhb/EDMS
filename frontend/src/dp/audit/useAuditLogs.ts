@@ -4,11 +4,14 @@ import { useCallback, useState } from "react"
 import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
-import { toApiError } from "../../services/http"
+import { toBlobApiError } from "../../services/http"
 import { auditApi } from "./auditService"
 import type { AuditFilterParams, AuditLogRow, AuditOption } from "./auditService"
 
 const DEFAULT_LIMIT = 20
+
+/** 單次匯出筆數上限（#102）。與後端 `query_service.EXPORT_MAX_ROWS` 同值，兩邊須一起改。 */
+const EXPORT_MAX_ROWS = 10000
 
 /** 選項未載入時的共用空陣列（見 useAuditOptions 的說明）。 */
 const NO_OPTIONS: AuditOption[] = []
@@ -84,7 +87,14 @@ export function useAuditLogs() {
 
   const setPage = useCallback((page: number) => setQuery((prev) => ({ ...prev, page })), [])
 
+  const total = data?.meta?.total ?? 0
+
   const exportCsv = useCallback(async () => {
+    // 前端先擋省一次請求；後端仍會再擋（直接打 API、查詢後資料又增加），訊息同一句
+    if (total > EXPORT_MAX_ROWS) {
+      message.error(`匯出筆數超過 ${EXPORT_MAX_ROWS.toLocaleString("en-US")} 筆，請縮小查詢範圍`)
+      return
+    }
     setExporting(true)
     try {
       const blob = await auditApi.exportCsv(toParams(query))
@@ -95,15 +105,16 @@ export function useAuditLogs() {
       anchor.click()
       URL.revokeObjectURL(url)
     } catch (err) {
-      message.error(toApiError(err).errorMessage)
+      // blob 請求的錯誤 body 也是 Blob，`toApiError` 讀不到後端訊息（如 DP_AUDIT_001）
+      message.error((await toBlobApiError(err)).errorMessage)
     } finally {
       setExporting(false)
     }
-  }, [query, message])
+  }, [query, total, message])
 
   return {
     items: data?.data ?? [],
-    total: data?.meta?.total ?? 0,
+    total,
     loading: isPending,
     page: query.page,
     limit: query.limit,

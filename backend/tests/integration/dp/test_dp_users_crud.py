@@ -89,11 +89,10 @@ async def test_create_invite_writes_pending_no_user_sends_and_audits(db):
         await db.execute(select(func.count()).select_from(DpUser).where(DpUser.email == "new@edms.local"))
     ).scalar_one()
     assert cnt == 0
-    # 寫 pending：ADMIN_INVITE、pwd_hash 為 None、有 invite_id
+    # 寫 pending：ADMIN_INVITE、有 invite_id（本表無密碼欄位，#668）
     pending = await AuthRepository().get_pending_by_email(db, "new@edms.local")
     assert pending is not None
     assert pending.kind == "ADMIN_INVITE"
-    assert pending.pwd_hash is None
     assert pending.invite_id
     # 寄邀請信（ACCOUNT_INVITE + activate_link）
     assert len(notify.calls) == 1
@@ -131,7 +130,6 @@ async def test_create_invite_on_expired_pending_reinvites(db):
         token_hash="oldhash",
         email="exp@edms.local",
         user_name="舊名",
-        pwd_hash=None,
         expires_date=utcnow() - timedelta(minutes=1),
         now=utcnow(),
         kind="ADMIN_INVITE",
@@ -160,13 +158,12 @@ async def test_create_invite_on_expired_pending_reinvites(db):
 
 
 async def _seed_self_register(db, *, email, offset_min):
-    """塞一筆 SELF_REGISTER 待驗證列（#212 起 pwd_hash 恆為 None）。"""
+    """塞一筆 SELF_REGISTER 待驗證列（不帶密碼，#212）。"""
     await AuthRepository().create_pending_registration(
         db,
         token_hash=f"selfhash-{email}",
         email=email,
         user_name="自助",
-        pwd_hash=None,
         expires_date=utcnow() + timedelta(minutes=offset_min),
         now=utcnow(),
     )
@@ -211,7 +208,6 @@ async def test_create_invite_aborts_if_self_register_row_renewed_mid_flight(db):
         token_hash="renewed-token",
         email=email,
         user_name="本人重新註冊",
-        pwd_hash=None,
         expires_date=utcnow() + timedelta(minutes=30),
         now=utcnow(),
     )
@@ -270,7 +266,6 @@ async def test_reinvite_invalidates_old_invite_token(db):
         token_hash=hash_token("old-plain-token"),
         email="tok@edms.local",
         user_name="舊名",
-        pwd_hash=None,
         expires_date=utcnow() - timedelta(minutes=1),
         now=utcnow(),
         kind="ADMIN_INVITE",
@@ -300,7 +295,6 @@ async def test_list_invites_only_admin_invite(db):
         token_hash="selfhash",
         email="self@edms.local",
         user_name="自助",
-        pwd_hash="x",
         expires_date=utcnow() + timedelta(minutes=30),
         now=utcnow(),
     )
@@ -308,6 +302,21 @@ async def test_list_invites_only_admin_invite(db):
     emails = {r.email for r in res["data"]}
     assert "inv@edms.local" in emails
     assert "self@edms.local" not in emails
+
+
+async def test_list_invites_keyword_treats_underscore_literally(db):
+    """#275：邀請清單關鍵字含 `_` 時視為字面；對照組姓名 / Email 皆只差 `_` 一字。"""
+    svc = _svc()
+    await svc.create_user(
+        db, data=UserCreate(email="admin_01_t275@edms.local", user_name="admin_01_t275"), operator=_OP
+    )
+    await svc.create_user(
+        db, data=UserCreate(email="adminX01_t275@edms.local", user_name="adminX01_t275"), operator=_OP
+    )
+
+    res = await svc.list_invites(db, keyword="admin_01_t275", page=1, limit=20)
+
+    assert [r.email for r in res["data"]] == ["admin_01_t275@edms.local"]
 
 
 async def test_resend_invite_rotates_token_keeps_invite_id_and_resends(db):
@@ -364,6 +373,16 @@ async def test_list_filters_by_keyword_and_status(db):
     assert {u.user_id for u in locked["data"]} == {"c1"}
     active = await svc.list_users(db, keyword=None, status="active", page=1, limit=20)
     assert {u.user_id for u in active["data"]} == {"a1"}
+
+
+async def test_list_users_keyword_treats_underscore_literally(db):
+    """#275：使用者清單關鍵字含 `_` 時視為字面；對照組姓名 / Email 皆只差 `_` 一字。"""
+    await _make_user(db, "u_t275a", email="admin_01_t275@edms.local", name="admin_01_t275")
+    await _make_user(db, "u_t275b", email="adminX01_t275@edms.local", name="adminX01_t275")
+
+    res = await _svc().list_users(db, keyword="admin_01_t275", status=None, page=1, limit=20)
+
+    assert [u.user_id for u in res["data"]] == ["u_t275a"]
 
 
 # ---- 停用 / 啟用（AC3/4/7）----

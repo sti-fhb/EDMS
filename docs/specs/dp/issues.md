@@ -768,7 +768,7 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 
 **後端**（`app/dp/audit/` — 補查詢 / 匯出，與既有 `log_action` 寫入同模組）：
 - **T042 稽核查詢**：`GET /api/dp/audit/logs`——多條件（`operator`〔姓名 / Email / ID〕、`date_from` / `date_to`、`module`、`action_type`、`result`〔SUCCESS / FAIL〕）+ `paginate()` 後端分頁（**依 `CREATED_DATE` 倒序**）；列表回：時間（至秒）/ 操作者 / 模組 / 功能（`FUNC_NAME`）/ 類別 / **結果（`RESULT`）** / 對象（`TARGET_ID`）/ 來源 IP；明細（同筆或展開）回 **`RESULT` / `DESCRIPTION`** / `BEFORE_VALUE` / `AFTER_VALUE`（JSON 字串，`TEXT` 欄）；**僅管理者**（AUDIT-002）；**不提供任何刪改端點**（對應 FR-01/02/04/05）
-- **T043 CSV 匯出**：`GET /api/dp/audit/logs/export`——**依查詢條件全量**（無分頁上限）匯出符合紀錄；欄位對齊列表 + 前後值；`text/csv`、UTF-8（含 BOM 供 Excel 正確顯示中文，編碼細節 SD 自決）（對應 FR-02/03）
+- **T043 CSV 匯出**：`GET /api/dp/audit/logs/export`——**依查詢條件全量**（無分頁上限）匯出符合紀錄；欄位對齊列表 + 前後值；`text/csv`、UTF-8（含 BOM 供 Excel 正確顯示中文，編碼細節 SD 自決）（對應 FR-02/03）（2026-11-02 #102 改為單次上限 10,000 筆，見 spec_us10 FR-DP-US10-03）
 
 **前端**（`frontend/src/dp/audit/`，填實 `AuditPage` stub）：
 - **T043 查詢列**：操作者（文字）/ 模組（全部 / DP / ET / DM 下拉）/ 操作類別（全部 / LOGIN / LOGOUT / CREATE / UPDATE / DELETE 下拉）/ **執行結果（全部 / SUCCESS / FAIL 下拉）** / 期間起訖（date ～ date）+ 查詢 / 匯出鈕
@@ -783,7 +783,7 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
 
 - [ ] 以多條件（操作者、期間起訖、模組、操作類別、**執行結果 SUCCESS / FAIL**）查詢 → 列出符合之 `DP_AUDIT_LOG`（後端分頁、時間倒序，列表含結果欄）；**兩管理者皆可查全部**（含不分模組之登入等事件）（FR-01/02、AC1）
 - [ ] 展開單筆明細 → 顯示完整欄位：操作者、時間（至秒）、功能 / 模組代碼、操作類別、**執行結果（SUCCESS / FAIL）**、**事件描述**、來源 IP、異動對象、**異動前後值（JSON 字串）**（FR-02/05、AC2）
-- [ ] 點「匯出 CSV」→ 依**當前查詢條件**匯出全部符合紀錄，內容與查詢結果一致（FR-03、AC3）
+- [ ] 點「匯出 CSV」→ 依**當前查詢條件**匯出全部符合紀錄，內容與查詢結果一致（FR-03、AC3）（2026-11-02 #102 改為單次上限 10,000 筆，見 spec_us10 FR-DP-US10-03）
 - [ ] 查無符合紀錄 → 顯示空狀態提示 DP-MSG-DP05-001（FR-02、AC4）
 - [ ] 頁面與 API **無任何刪除 / 修改功能**——日誌 append-only、不可於介面竄改 / 刪除（FR-04、AC5）
 - [ ] ET / DM 資安事件（帳號 / 角色權限 / 系統操作）統一寫入同一張 `DP_AUDIT_LOG`、本頁可查；業務歷程（DM 文件變更 / 閱讀、ET 學習 / 作答）**不在此**（FR-05、AC6）
@@ -805,7 +805,7 @@ DP 後台操作記錄查詢頁（`dp-audit`）：ET / DM 管理者以**多條件
   - **方案 B**：fail-closed 真擋——interim 無人可存取本頁（與模組其他頁不一致、無法手動驗證）。
   - → 傾向方案 A（與模組一致、頁面可測），T049 統一回歸；最終裁示由 SA 於 `/sti-plan` SA Q 確認。
 - **執行結果 / 事件描述必呈現**（FR-05；`/sti-sa-precheck #10` 補）：`DP_AUDIT_LOG` 之 `RESULT`（SUCCESS / FAIL）與 `DESCRIPTION`（事件描述）為 FR-05 明訂記錄欄位，**列表 + 明細皆須呈現**、且 `result` 為查詢條件——否則「查失敗登入 / 越權拒絕」等核心資安稽核情境無法在頁面辨識。`RESULT` 值域見 data-model 代碼表（登入成功 / 失敗以 `RESULT` 區分，非 ACTION_TYPE）。
-- **CSV 匯出**（FR-03）：依查詢條件**全量**（無分頁），與列表同條件；`text/csv` + UTF-8 BOM（Excel 中文）；欄位含結果 / 事件描述 / 前後值。大量匯出之上限 / 串流細節 SD 自決（可先全量、後續視效能加上限）。
+- **CSV 匯出**（FR-03）：依查詢條件**全量**（無分頁），與列表同條件；`text/csv` + UTF-8 BOM（Excel 中文）；欄位含結果 / 事件描述 / 前後值。大量匯出之上限 / 串流細節 SD 自決（可先全量、後續視效能加上限）。（2026-11-02 #102 改為單次上限 10,000 筆，見 spec_us10 FR-DP-US10-03）
 - **Error codes**（實作 / `/sti-plan` 對齊 `sti-error-codes`）：越權（AUDIT-002）可**重用 `DP_AUTH_006`（需模組管理者權限，403）**或新增 `DP_AUDIT_001`（SD / SA 定）；AUDIT-001（查無紀錄）為**空結果 UI 提示、非 error code**（列表回空 `data` + `meta.total=0`）。
 - **保留期 / 容量**（FR-06）：日誌保留 ≥ 1 年、容量失效自動因應（覆寫最舊）並留軌跡、每日備份與容量告警——屬 **IT 維運範圍**，spec 明列**不屬系統功能**，本 issue **不實作**（僅標註）。
 - **前端路由已備**：`/dp/audit` 路由 + `AuditPage` stub 已存在（#0 骨架），本 issue 填實。

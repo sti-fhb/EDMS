@@ -59,11 +59,11 @@ class DpPendingRegistration(BaseModelHardDelete):
     在此之前這句話是空話，SCHDP001 並未清這張表，逾期列會永久累積（而本表匿名可寫）。
 
     兩種來源以 KIND 區分（US4 #67），#212 之後**兩者形狀一致**：
-    - SELF_REGISTER（US2 自助註冊）：PWD_HASH 恆為 NULL，使用者於驗證連結自設密碼。
-    - ADMIN_INVITE（US4 管理者邀請）：PWD_HASH 恆為 NULL，使用者於啟用連結自設密碼。
+    - SELF_REGISTER（US2 自助註冊）：不帶密碼，使用者於驗證連結自設密碼。
+    - ADMIN_INVITE（US4 管理者邀請）：不帶密碼，使用者於啟用連結自設密碼。
 
-    ⚠️ `PWD_HASH` 因此已無任何寫入非 NULL 的路徑（欄位保留待 #668 評估移除）。本表匿名可寫，
-    密碼素材不得存於此——這正是 #212 修掉的 pre-hijack 破口，勿把密碼加回本表。
+    ⚠️ 本表**沒有密碼欄位**（原 `PWD_HASH` 自 #212 起恆為 NULL，#668 移除）。本表匿名可寫，
+    密碼素材不得存於此——這正是 #212 修掉的 pre-hijack 破口，勿把密碼欄位加回本表。
     """
 
     __tablename__ = "DP_PENDING_REGISTRATION"
@@ -85,8 +85,6 @@ class DpPendingRegistration(BaseModelHardDelete):
     token_hash: Mapped[str] = mapped_column("TOKEN_HASH", String(64), nullable=False)
     email: Mapped[str] = mapped_column("EMAIL", String(255), nullable=False)
     user_name: Mapped[str] = mapped_column("USER_NAME", String(50), nullable=False)
-    # 兩種 KIND 皆恆為 NULL（#212）：密碼一律由使用者於落點頁當場設定，不經本表
-    pwd_hash: Mapped[Optional[str]] = mapped_column("PWD_HASH", String(100), nullable=True)
     kind: Mapped[str] = mapped_column("KIND", String(20), nullable=False)
     expires_date: Mapped[datetime] = mapped_column("EXPIRES_DATE", DateTime(timezone=True), nullable=False)
     # 邀請之對外識別碼：待啟用邀請尚無 USER_ID，故另給一鍵供重寄 / 取消端點指認單筆邀請，

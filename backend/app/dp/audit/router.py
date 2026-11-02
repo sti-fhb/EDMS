@@ -18,6 +18,15 @@ from app.core.http_cache import NO_STORE_HEADERS
 from app.core.module_admin import require_any_module_admin
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import MAX_LIMIT, PagedResponse
+from app.core.rate_limit import (
+    EXPORT_IP_RATE_MAX,
+    EXPORT_USER_RATE_MAX,
+    RATE_WINDOW_SECONDS,
+    SlidingWindowRateLimiter,
+    limit_concurrent_exports,
+    rate_limit_by_ip,
+    rate_limit_by_user,
+)
 from app.core.utils import format_taipei_date, utcnow
 from app.dp.audit.query_service import (
     ACTION_OPTIONS,
@@ -31,6 +40,12 @@ from app.dp.audit.schemas import AuditLogResponse, AuditOptionsResponse
 router = APIRouter(prefix="/api/dp/audit", tags=["dp-audit"], dependencies=[Depends(require_any_module_admin())])
 
 _service = AuditQueryService()
+
+#: 匯出限流（#833 B4），門檻理由見 `core/rate_limit.EXPORT_USER_RATE_MAX`。掛在 route 上，排在
+#: router-level 的管理者閘之後：非管理者在閘口就 403，不佔名額。
+_EXPORT_SCOPE = "dp-audit-export"
+_export_user_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_USER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_export_ip_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
 
 _Module = Literal["DP", "ET", "DM"]
 # ⚠️ 必須涵蓋所有**寫得進去**的 action_type，否則該值在下拉選得到、查詢卻被擋成 422。
@@ -100,7 +115,14 @@ def _export_filename(now: datetime) -> str:
     return f"audit_log_{format_taipei_date(now).replace('-', '')}.csv"
 
 
-@router.get("/logs/export")
+@router.get(
+    "/logs/export",
+    dependencies=[
+        Depends(rate_limit_by_user(_export_user_limiter, _EXPORT_SCOPE)),
+        Depends(rate_limit_by_ip(_export_ip_limiter, _EXPORT_SCOPE)),
+        Depends(limit_concurrent_exports),
+    ],
+)
 async def export_audit_logs(
     operator_info: OperatorInfo = Depends(get_operator),
     db: AsyncSession = Depends(get_db),
@@ -112,7 +134,10 @@ async def export_audit_logs(
     date_from: Optional[date] = Query(default=None),
     date_to: Optional[date] = Query(default=None),
 ) -> Response:
-    """依當前查詢條件全量匯出 CSV（無分頁）；匯出本身寫一筆 `EXPORT` 稽核（#675）。"""
+    """依當前查詢條件匯出 CSV（無分頁，上限 10,000 筆，超過回 `DP_AUDIT_001`，#102）。
+
+    匯出本身寫一筆 `EXPORT` 稽核（#675）。
+    """
     content = await _service.export_csv(
         db,
         operator_id=operator_info.user_id,

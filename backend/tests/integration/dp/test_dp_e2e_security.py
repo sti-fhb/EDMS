@@ -62,7 +62,6 @@ async def _seed_pending(db, *, email):
             token_hash=hash_token(generate_reset_token()),
             email=email,
             user_name="待驗證",
-            pwd_hash=hash_password(_PWD),
             kind="SELF_REGISTER",
             expires_date=now + timedelta(minutes=30),
             created_user="SYSTEM",

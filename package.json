@@ -3,8 +3,10 @@
   "packageManager": "pnpm@10.34.5",
   "scripts": {
     "ci:local": "bash scripts/local-ci.sh all",
+    "ci:local:e2e": "bash scripts/local-ci.sh all --e2e",
     "ci:quick": "bash scripts/local-ci.sh quick",
     "ci:backend": "bash scripts/local-ci.sh backend",
-    "ci:frontend": "bash scripts/local-ci.sh frontend"
+    "ci:frontend": "bash scripts/local-ci.sh frontend",
+    "e2e": "pnpm --dir e2e test"
   }
 }
