@@ -1,7 +1,7 @@
 import ipaddress
 import os
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,7 +38,15 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=8)
 
     # 資料庫
+    # app 執行期連線。正式環境應為最小權限角色（對 DP_AUDIT_LOG 只有 INSERT / SELECT、不可 DDL），
+    # 角色由 scripts/db-app-role.sql 建立（#22，見 docs/infra/deployment.md）。
     DATABASE_URL: str
+    # migration 專用連線（資料表 owner）。未設定 / 空值時退回 DATABASE_URL，故合併本設定前的部署
+    # 不改任何設定也能照常跑 migration；DATABASE_URL 換成最小權限角色後，這裡就必須設成 owner。
+    # 正式環境只帶進 migration 的一次性容器（scripts/vm-deploy.sh 讀 /opt/edms/.env.migrate），
+    # 常駐的 app 容器不持有它。
+    # 讀取一律經 `migration_database_url`，不要直接讀本欄位。
+    MIGRATION_DATABASE_URL: str | None = None
 
     # 連線池
     DB_POOL_SIZE: int = Field(default=5, ge=1)
@@ -63,9 +71,7 @@ class Settings(BaseSettings):
     #    正常情況兩者都在數秒內完成；等到 60 秒代表系統已出問題。2026-10-27 使用者確認此取捨。
     #    （⛔ 不要引用「上傳影片期間課程被鎖住」當例子：上傳是檔案落地後才取鎖，見 `material/service.upload_video`。）
     #
-    # 不受此限的連線：migration（`alembic/env.py`）顯式設 0。
-    # ⚠️ 稽核鏈驗證 CLI（`dp/audit/verify.py`）目前**仍受此限**：稽核表大到單句逾時，CLI 回退出碼 2
-    #    「執行錯誤」（不會誤報斷鏈）。屆時再比照 migration 處理。
+    # 不受此限的連線：migration（`alembic/env.py`）、稽核鏈驗證 CLI（`dp/audit/verify._cli_session`，#833 C3）顯式設 0。
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
     # 等稽核鏈 advisory lock 的上限（毫秒；#833 B2），等滿回 503「系統忙碌」。
     #
@@ -215,6 +221,39 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_migration_url_same_database(self) -> "Settings":
+        """MIGRATION_DATABASE_URL 只能換帳號，不能換庫：host / port / 資料庫名（含 query 的 host / port）
+        須與 DATABASE_URL 相同（#22）。
+
+        兩者指向不同庫時 migration 會套到 app 沒在用的那個庫——部署表面成功、app 卻 schema 不符；
+        本機則可能讓「只覆寫 DATABASE_URL」的 alembic 指令打到 `.env` 裡的另一個庫。
+        訊息只列欄位名，不回顯連線字串（含密碼）。
+        """
+        migration = (self.MIGRATION_DATABASE_URL or "").strip()
+        if not migration:
+            return self
+
+        def _target(url: str) -> tuple[str | None, int, str, list[str], list[str]]:
+            p = urlparse(url)
+            try:
+                port = p.port or 5432
+            except ValueError:
+                port = -1  # 格式錯誤：讓比對失敗，交由連線時報錯
+            # query 的 host / port（如 `?host=/run/postgresql`）會覆寫實際連線目標，一併比對
+            query = parse_qs(p.query)
+            return (
+                (p.hostname or "").lower() or None,
+                port,
+                p.path.lstrip("/"),
+                query.get("host", []),
+                query.get("port", []),
+            )
+
+        if _target(migration) != _target(self.DATABASE_URL):
+            raise ValueError("MIGRATION_DATABASE_URL 的 host / port / 資料庫名須與 DATABASE_URL 相同（只能換帳號密碼）")
+        return self
+
     @field_validator("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT", mode="before")
     @classmethod
     def _strip_storage_root(cls, v: Any) -> Any:
@@ -262,6 +301,11 @@ class Settings(BaseSettings):
                     "無磁碟機之絕對路徑依當前磁碟機解析，換啟動磁碟機即讀不到既有檔案"
                 )
         return self
+
+    @property
+    def migration_database_url(self) -> str:
+        """alembic 實際使用的連線：有設 MIGRATION_DATABASE_URL（非空白）就用它，否則退回 DATABASE_URL。"""
+        return (self.MIGRATION_DATABASE_URL or "").strip() or self.DATABASE_URL
 
     @property
     def cors_origins_list(self) -> list[str]:

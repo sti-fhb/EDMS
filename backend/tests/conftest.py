@@ -24,6 +24,11 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-not-for-production-32b+")
 # （見 app.core.config._validate_frontend_base_url）在 CI（無 .env、FRONTEND_BASE_URL 落回
 # localhost 預設）擋下 settings 載入，導致全數測試 collection error。
 os.environ.setdefault("DEBUG", "true")
+# MIGRATION_DATABASE_URL 一律清空（#22），刻意不用 setdefault：Settings 會從 backend/.env 補讀它，
+# 開發者在 .env 設了指向 dev 庫的值時，與測試庫不同庫 → 「只能換帳號、不能換庫」的 validator 在 import
+# 時就擋下，整批測試在 collection 階段全紅。環境變數優先於 .env，空字串視同未設定（退回 DATABASE_URL）。
+# integration 的 alembic 子程序另在 tests/integration/conftest.py 顯式帶入測試庫。
+os.environ["MIGRATION_DATABASE_URL"] = ""
 
 # pytest-xdist 並行：每個 worker 改用自己的資料庫，避免多行程互相 DROP SCHEMA。
 # 必須在 app.core.config.settings 第一次 import 之前改寫（否則 settings 會 cache 舊庫名）。

@@ -67,6 +67,10 @@ jobs:
               # PR 上一次都不會跑。代價是日後改 ci.yml 都會跑完整 backend job（數分鐘），
               # 相對於「合併一道沒驗過的檢查」這是划算的。
               - '.github/workflows/ci.yml'
+              # nginx 設定的守門測試在後端（`test_nginx_connection_limits.py`、`test_core_upload_auth_precheck.py`、
+              # `test_core_file_response_release.py`、`test_security_invariants.py`）。不列的話，只改 nginx/ 的 PR
+              # 會 skip backend job，那些守門一次都不跑（#833 B3 security review）
+              - 'nginx/**'
             frontend:
               - 'frontend/**'
               # 同上，理由對稱：改到本檔的前端區塊時，若不讓 frontend job 跑起來，

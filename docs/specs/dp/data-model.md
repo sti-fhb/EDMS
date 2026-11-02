@@ -231,7 +231,7 @@ erDiagram
 | ROW_HASH | VARCHAR(64) | Y | 鏈式完整性雜湊（本列內容 + 前列 ROW_HASH 之 SHA-256）|
 
 索引：`(CREATED_DATE)`、`(CREATED_USER, CREATED_DATE)`、`(MODULE, ACTION_TYPE, CREATED_DATE)`。
-落地：應用 DB 帳號對本表僅 GRANT INSERT / SELECT；保留至少 1 年（每日備份屬 IT 維運）。
+落地：應用 DB 帳號對本表僅 GRANT INSERT / SELECT；資料庫另以 trigger 拒絕 UPDATE / DELETE / TRUNCATE（#22，見 `docs/infra/deployment.md` §2.8）；保留至少 1 年（每日備份屬 IT 維運）。
 
 ### DP_PARAM_M — 功能參數主檔
 
