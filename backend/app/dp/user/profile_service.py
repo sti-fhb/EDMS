@@ -21,7 +21,7 @@ from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.password_rules import PasswordRules, rules_for_user
 from app.dp.user.repository import AuthRepository
-from app.dp.users.models import DpUser
+from app.dp.user.schemas import MeResponse
 from app.services import AuditLogService, ParamService
 
 _FUNC_NAME = "DP-PROFILE"
@@ -41,8 +41,11 @@ class ProfileService:
         self._params = params or ParamService()
         self._audit = audit or AuditLogService()
 
-    async def get_me(self, db: AsyncSession, *, user_id: str) -> DpUser:
-        """讀本人個人資料（姓名 / Email / PENDING_EMAIL）。
+    async def get_me(self, db: AsyncSession, *, user_id: str) -> MeResponse:
+        """讀本人個人資料（姓名 / Email / 待驗證新信箱）。
+
+        pending_email 只在驗證連結仍有效時回傳；逾期 / 作廢後 PENDING_EMAIL 欄位雖仍有殘值，
+        一律回 None，畫面即不再顯示「變更審核中」（#904，判定集中於 repository `_pending_email_active`）。
 
         Raises:
             AppError: 查無帳號（404 DP_USER_008）；認證後理論上必存在，為型別安全仍防呆。
@@ -50,7 +53,8 @@ class ProfileService:
         user = await self._repo.get_by_user_id(db, user_id)
         if user is None:
             raise AppError(status_code=404, detail="查無此帳號", error_code="DP_USER_008")
-        return user
+        pending_email = await self._repo.get_active_pending_email(db, user_id, now=utcnow())
+        return MeResponse(user_id=user.user_id, email=user.email, user_name=user.user_name, pending_email=pending_email)
 
     async def password_rules(self, db: AsyncSession, *, user_id: str) -> PasswordRules:
         """本人設定新密碼時適用之門檻（#623），供變更密碼視窗與強制變更密碼頁渲染提示。

@@ -65,6 +65,32 @@ describe("ProfilePage 個人資料維護", () => {
     expect(await screen.findByText(/變更審核中：pending@example.com/)).toBeInTheDocument()
   })
 
+  it("驗證連結逾期（後端回 pending_email=null）→ 不顯示審核中，可直接再申請（#904）", async () => {
+    // 逾期判定在後端（/me 回 null）；再申請成功後重新取 /me，新的待驗證 Email 才出現橫幅
+    let pending: string | null = null
+    server.use(
+      http.get("/api/dp/user/me", () =>
+        HttpResponse.json({ user_id: "u1", email: "me@example.com", user_name: "測試員", pending_email: pending }),
+      ),
+      http.put("/api/dp/user/me/email", () => {
+        pending = "again@example.com"
+        return HttpResponse.json({ message: "ok", retry_after: 600 }, { status: 202 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<ProfilePage />)
+
+    await screen.findByDisplayValue("me@example.com")
+    expect(screen.queryByText(/變更審核中/)).not.toBeInTheDocument()
+    const sendButton = screen.getByRole("button", { name: "寄驗證信" })
+    expect(sendButton).toBeEnabled()
+
+    await user.type(screen.getByLabelText("變更為新 Email"), "again@example.com")
+    await user.click(sendButton)
+
+    expect(await screen.findByText(/變更審核中：again@example.com/)).toBeInTheDocument()
+  })
+
   it("變更密碼對話框：填舊 / 新 / 確認送出 → 成功提示", async () => {
     const user = userEvent.setup()
     renderWithProviders(<ProfilePage />)
