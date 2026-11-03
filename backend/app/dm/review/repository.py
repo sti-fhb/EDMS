@@ -307,9 +307,7 @@ class ReviewCenterRepository:
             audience=audience, retrieval=retrieval, current_audience=None if current == audience else current
         )
 
-    async def _tag_names(
-        self, db: AsyncSession, *, doc_id: str, version_id: int | None
-    ) -> tuple[list[str], list[str]]:
+    async def _tag_names(self, db: AsyncSession, *, doc_id: str, version_id: int | None) -> tuple[list[str], list[str]]:
         """查單一來源之 (可見對象, 檢索標籤) 名稱；`version_id` 為 None 時取文件層現值。"""
         unit_tag = aliased(DmTag, name="dm_unit_tag")
         base = select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
@@ -437,11 +435,7 @@ class ReviewCenterRepository:
             return [], []
         tag_ids = {t for pair in pairs for t in pair if t is not None}
         enabled = set(
-            (
-                await db.scalars(
-                    select(DmTag.tag_id).where(DmTag.tag_id.in_(tag_ids), DmTag.is_enabled.is_(True))
-                )
-            ).all()
+            (await db.scalars(select(DmTag.tag_id).where(DmTag.tag_id.in_(tag_ids), DmTag.is_enabled.is_(True)))).all()
         )
         kept = [p for p in pairs if all(t is None or t in enabled for t in p)]
         dropped = [p for p in pairs if p not in kept]
