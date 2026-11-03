@@ -74,5 +74,10 @@ async def test_例外原文寫入log(monkeypatch, caplog) -> None:
 
     records = [r for r in caplog.records if r.name == "app.dp.schedules.service"]
     assert len(records) == 1
-    assert _library_message() in records[0].getMessage()
-    assert "SCHDP001" in records[0].getMessage()
+    record = records[0]
+    assert "SCHDP001" in record.getMessage()
+    # 原文走 traceback（有遮罩兜底），不進訊息本體（沒有遮罩），見 sti-backend-logging.md
+    assert record.exc_info is not None
+    assert isinstance(record.exc_info[1], ValueError)
+    assert str(record.exc_info[1]) == _library_message()
+    assert _library_message() not in record.getMessage()
