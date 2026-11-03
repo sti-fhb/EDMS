@@ -7,6 +7,7 @@
 輸出解析寫錯，CI 一概不會知道。純函式測得再滿也驗不到接線。
 """
 
+import logging
 import subprocess
 
 import pytest
@@ -114,6 +115,32 @@ class TestProbeFailureBranches:
         with pytest.raises(AppError) as exc:
             await probe_duration_sec("whatever.mp4")
         assert exc.value.error_code == "ET_MATERIAL_004"
+
+    async def test_被訊號終止時回_422_並記_warning(self, monkeypatch, caplog) -> None:
+        """結束碼為負 = 被訊號終止（POSIX），不是檔案的問題（#833 C4）。
+
+        最常見的是 `SIGKILL`：容器記憶體上限觸發 OOM，核心挑中 ffprobe 砍掉。使用者看到的
+        錯誤跟「檔案壞了」一樣，缺了這行 log，維運只會叫使用者換檔案。
+        """
+        monkeypatch.setattr(video_probe, "_run_ffprobe", lambda p: self._completed(returncode=-9, stdout=b""))
+        with caplog.at_level("WARNING"):
+            with pytest.raises(AppError) as exc:
+                await probe_duration_sec("whatever.mp4")
+
+        assert exc.value.error_code == "ET_MATERIAL_004"
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1, "被訊號終止須留下一筆 WARNING"
+        message = warnings[0].getMessage()
+        assert "訊號 9 終止" in message, "要記下是哪個訊號（正數，不是結束碼 -9）"
+        assert "記憶體" in message, "要指出最可能的原因"
+
+    async def test_一般非零結束碼不記_log(self, monkeypatch, caplog) -> None:
+        """結束碼為正 = ffprobe 自己判定讀不了這個檔，是使用者檔案的問題，不該在 log 製造噪音。"""
+        monkeypatch.setattr(video_probe, "_run_ffprobe", lambda p: self._completed(returncode=1, stdout=b""))
+        with caplog.at_level("WARNING"):
+            with pytest.raises(AppError):
+                await probe_duration_sec("whatever.mp4")
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     async def test_輸出無法解析回_422(self, monkeypatch) -> None:
         monkeypatch.setattr(video_probe, "_run_ffprobe", lambda p: self._completed(returncode=0, stdout=b"N/A"))

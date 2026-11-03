@@ -144,6 +144,7 @@ async def probe_duration_sec(path: str) -> int:
             無法解析。**四種情形共用同一個錯誤碼**（使用者能做的事一樣：換個檔案），
             但「ffprobe 不存在」會另記 ERROR log——那是環境問題不是檔案問題，
             症狀會是「所有影片都傳不上去」，缺了這行 log 會被誤判為程式壞掉。
+            「被訊號終止」（多為記憶體上限）同理另記 WARNING（#833 C4）。
     """
     try:
         completed = await asyncio.to_thread(_run_ffprobe, path)
@@ -157,6 +158,16 @@ async def probe_duration_sec(path: str) -> int:
         logger.warning("ffprobe 解析影片長度逾時（不記檔案路徑）")
         raise _UNPARSEABLE from None
 
+    if completed.returncode < 0:
+        # 結束碼為負 = 被訊號終止（POSIX），不是檔案的問題（#833 C4）。最常見的是 SIGKILL（9）：
+        # 後端容器撞到記憶體上限，核心的 OOM killer 挑中 ffprobe。使用者看到的仍是「換個檔案」，
+        # 這行 log 是維運唯一能分辨「檔案壞了」與「資源不夠」的線索（排查步驟見 docker-compose.prod.yml）。
+        logger.warning(
+            "ffprobe 被訊號 %d 終止，影片長度未取得"
+            "（訊號 9 多為後端容器記憶體上限；其他訊號可能是檔案讓 ffprobe 崩潰）",
+            -completed.returncode,
+        )
+        raise _UNPARSEABLE
     if completed.returncode != 0:
         raise _UNPARSEABLE
 
