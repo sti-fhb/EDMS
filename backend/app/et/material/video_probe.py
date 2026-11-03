@@ -121,7 +121,7 @@ def _run_ffprobe(path: str) -> subprocess.CompletedProcess[bytes]:
             "-of",
             "default=noprint_wrappers=1:nokey=1",
             # 只讀 metadata 用不到多執行緒；不設的話執行緒數隨主機核心數成長，吃後端容器的
-            # `pids_limit`（docker-compose.prod.yml，#905 B17）
+            # 行程數上限（docker-compose.prod.yml 的 `deploy.resources.limits.pids`，#905 B17）
             "-threads",
             "1",
             path,

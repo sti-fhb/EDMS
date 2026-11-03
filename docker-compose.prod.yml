@@ -57,8 +57,10 @@
 #     sudo docker inspect -f '{{.State.Health.Status}}' edms-backend   → healthy / unhealthy
 #     sudo docker inspect -f '{{json .State.Health.Log}}' edms-backend → 最近幾次檢查的結果
 #   要自動重啟需另加 autoheal 之類的容器，它得掛 Docker socket（等同主機 root），屬另案取捨
-# - `pids_limit`：擋 fork bomb 與子行程失控。用此鍵而非較新的 `deploy.resources.limits.pids`——
-#   VM 上的 compose 版本未知，舊版不認後者會讓部署整個失敗
+# - `deploy.resources.limits.pids`：擋 fork bomb 與子行程失控。⛔ **不要改用 `pids_limit`**：VM 上的
+#   compose 把兩者視為同一個設定，服務已有 `deploy.resources.limits`（cpus / memory）時再寫
+#   `pids_limit`，會以「can't set distinct values on 'pids_limit' and 'deploy.resources.limits.pids'」
+#   拒絕載入整份設定檔——`vm-deploy.sh` 卡在 pull、部署停擺一天以上沒人發現（#896 → 本次修正）
 # - 尚未處理（需要 VM 上的資訊，另行交辦）：磁碟上限（見上方）、`memswap_limit`（要先知道 VM 有沒有 swap）
 #
 # ── 容器 log 輪替（#810）────────────────────────────────────────────────
@@ -80,9 +82,9 @@ services:
         limits:
           cpus: "1.5"
           memory: 2g
-    # 單一 uvicorn worker；執行緒（anyio 執行緒池 40、asyncio 預設執行器、bcrypt 執行器、APScheduler）
-    # 加上上傳時的 ffprobe 子行程（每個本身也有數個執行緒），正常約一百上下。執行緒也算在內
-    pids_limit: 256
+          # 單一 uvicorn worker；執行緒（anyio 執行緒池 40、asyncio 預設執行器、bcrypt 執行器、APScheduler）
+          # 加上上傳時的 ffprobe 子行程（每個本身也有數個執行緒），正常約一百上下。執行緒也算在內
+          pids: 256
     # 打容器內的後端（uvicorn 聽 0.0.0.0:8000；⚠️ 用 127.0.0.1 而非 localhost，後者可能先解析成 ::1）。
     # 映像是 python:3.12-slim、沒有 curl／wget，改用標準函式庫。非 200（含 DB 連不上的 503）、
     # 連不上、逾時都以非 0 結束。timeout 10 秒：連線池滿時 `/health` 要等滿 `DB_POOL_TIMEOUT`（10 秒）
@@ -133,8 +135,8 @@ services:
         limits:
           cpus: "0.5"
           memory: 256m
-    # master 加 2 個 worker（nginx/tune-main-conf.sh 固定 worker 數）
-    pids_limit: 64
+          # master 加 2 個 worker（nginx/tune-main-conf.sh 固定 worker 數）
+          pids: 64
     logging: *log-rotation
     networks:
       - edms-net
@@ -148,10 +150,10 @@ services:
         limits:
           cpus: "1.0"
           memory: 2g
-    # 每條連線一個行程：max_connections 預設 100（後端最多 15 條，其餘是維護通道），加上背景行程、
-    # autovacuum（3）與平行查詢 worker（max_worker_processes 8），約 120
-    pids_limit: 200
-    # ⚠️ pids_limit 與 shm_size 改的是容器設定：**首次部署會重建 edms-db 一次**（發生在備份與 migration 之前）。
+          # 每條連線一個行程：max_connections 預設 100（後端最多 15 條，其餘是維護通道），加上背景行程、
+          # autovacuum（3）與平行查詢 worker（max_worker_processes 8），約 120
+          pids: 200
+    # ⚠️ pids 與 shm_size 改的是容器設定：**首次部署會重建 edms-db 一次**（發生在備份與 migration 之前）。
     # ⚠️ 上面的 200 依 max_connections 預設 100 估；`command` 加 `-c max_connections=…` 調大時要一起重估
     # 平行查詢的動態共享記憶體放在 /dev/shm；Docker 預設只給 64 MB，不夠時查詢直接失敗
     # （"could not resize shared memory segment"）。算進上面的 2 GB 記憶體上限
