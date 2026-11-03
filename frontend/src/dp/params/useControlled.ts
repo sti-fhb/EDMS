@@ -24,9 +24,13 @@ const _SAVED_MSG = "已儲存並即時生效"
  * ⛔ **不要加回「至少」**。原註解寫「在途草稿之版本層標籤快照未計入（#388），此數字為下限」
  * ——那只看了低估的一半。`DM_DOC_TAG` 僅在核准發布時寫入
  * （`dm/review/repository.py` 的 `apply_version_tags_to_doc`），所以：
- *   - 草稿的標籤在 `DM_VERSION_TAG`，**不計入** → 低估
- *   - 已廢止文件的 `DM_DOC_TAG` 列**留著、計入** → 高估
- * 兩個方向同時存在，它不是任何一邊的界線。拿掉「至少」後文字與實際計算完全相符。
+ *   - ~~草稿的標籤在 `DM_VERSION_TAG`，**不計入** → 低估~~ **已於 #388 修掉**，
+ *     後端改為併計 `DRAFT` / `PENDING_REVIEW` 版本之快照列
+ *   - 已廢止文件的 `DM_DOC_TAG` 列**留著、計入** → 高估（仍在）
+ *
+ * 🔴 低估那半補上後 ⛔ **依然成立**，別因為「查不到低估了」就推翻它——高估那半還在，
+ * 數字仍不是下限。（殘餘低估僅剩 `REJECTED` 版本之快照，見後端 `_IN_FLIGHT_VERSION_STATUSES`；
+ * 量級小且須先轉回 `DRAFT` 才能再送簽。）拿掉「至少」後文字與實際計算完全相符。
  */
 function affectedText(docs: number | null, viewers: number | null): string | null {
   const parts = [
