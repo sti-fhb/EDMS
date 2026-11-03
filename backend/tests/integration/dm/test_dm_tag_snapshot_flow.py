@@ -777,9 +777,13 @@ async def test_停用標籤的既有生效引用不得因核准而被收回(db):
 
 async def _third_audience_id(db) -> int:
     """取第三個可見對象標籤；seed 不足時自建一個 ZT 前綴的。"""
-    ids = list((await db.scalars(
-        select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE").order_by(DmTag.tag_id).limit(3)
-    )).all())
+    ids = list(
+        (
+            await db.scalars(
+                select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE").order_by(DmTag.tag_id).limit(3)
+            )
+        ).all()
+    )
     if len(ids) >= 3:
         return ids[2]
     tag = DmTag(tag_group_code="AUDIENCE", tag_name="ZT第三個職位", created_user="e", created_date=utcnow())
