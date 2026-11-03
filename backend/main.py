@@ -85,7 +85,9 @@ async def lifespan(app: "FastAPI"):
     await warm_up_password_backend()
     warn_if_scan_access_ttl_override()
     stop_event = asyncio.Event()
-    task = asyncio.create_task(run_forever(SmtpMailer(), stop_event))
+    task = asyncio.create_task(
+        run_forever(SmtpMailer(), stop_event, poll_interval_seconds=settings.MAIL_WORKER_POLL_INTERVAL_SECONDS)
+    )
     scheduler = await start_scheduler()
     try:
         yield
@@ -230,8 +232,8 @@ def _release_tracebacks(exc: BaseException) -> None:
     即此形狀）；若它也是常數，它的 traceback 在本 handler 看不到的地方照樣成長。
 
     ⛔ 本函式涵蓋不到「`except AppError` 之後**不重拋**」的路徑——那個例外根本不會走到
-    handler。故未掛限流的匿名可達端點仍應用工廠函式（`sti-backend-modules.md`「模組層級常數 vs
-    工廠函式」）。
+    handler。故會被這樣吞掉的錯誤必須用工廠函式，新程式也一律用工廠函式（`sti-backend-modules.md`
+    「模組層級常數 vs 工廠函式」）。
     """
     seen: set[int] = set()
     pending: list[BaseException] = [exc]

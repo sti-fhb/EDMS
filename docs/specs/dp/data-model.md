@@ -116,7 +116,7 @@ erDiagram
         VARCHAR CALLER_MODULE
         VARCHAR RECIPIENT
         VARCHAR SUBJECT "渲染快照"
-        TEXT BODY "渲染快照（敏感系統信SENT後遮罩）"
+        TEXT BODY "渲染快照（一次性連結信SENT後或FAILED逾時效後遮罩）"
         VARCHAR STATUS "PENDING/SENT/FAILED"
         INT RETRY_COUNT
         VARCHAR ERROR_MSG
@@ -181,12 +181,12 @@ erDiagram
 ### DP_PENDING_REGISTRATION — 待驗證 / 待啟用的帳號（#56 自助註冊 + US4 管理者邀請；硬刪除、無 DELETED）
 
 帳號啟用前**不寫 `DP_USER`**，先把申請暫存於本表；點連結通過才建 `DP_USER`。兩種來源以 `KIND` 區分：
-- `SELF_REGISTER`（US2 自助註冊）：**不帶密碼**（`PWD_HASH` 為 NULL，#212），使用者於驗證連結**自設密碼**才建 `DP_USER`。
-- `ADMIN_INVITE`（US4 管理者邀請）：**不帶密碼**（`PWD_HASH` 為 NULL），使用者於啟用連結**自設密碼**才建 `DP_USER`。
+- `SELF_REGISTER`（US2 自助註冊）：**不帶密碼**（#212），使用者於驗證連結**自設密碼**才建 `DP_USER`。
+- `ADMIN_INVITE`（US4 管理者邀請）：**不帶密碼**，使用者於啟用連結**自設密碼**才建 `DP_USER`。
 
-> 兩種 KIND 自 #212 起形狀一致：本表**匿名可寫**（自助註冊為公開端點），密碼素材不得存於此——原設計把註冊當下填的密碼存進本表，使任何人可用他人 Email 註冊並填自己的密碼（帳號預先劫持）。`PWD_HASH` 因此已無任何寫入非 NULL 的路徑（欄位保留待 **#668** 評估移除）。
+> 兩種 KIND 自 #212 起形狀一致：本表**匿名可寫**（自助註冊為公開端點），密碼素材不得存於此——原設計把註冊當下填的密碼存進本表，使任何人可用他人 Email 註冊並填自己的密碼（帳號預先劫持）。
 
-> ⚠️ 此不變量目前**只由整合測試斷言**守著（三條 `assert pending.pwd_hash is None`），而它們覆蓋的只有**既有的兩條寫入路徑**；日後新增、繞過既有 repository 的寫入路徑不在其內——與同表 `KIND` 於 #215 選 DB CHECK 而非應用層斷言的理由同構。#668 即處理這一層。
+> **本表沒有密碼欄位**：原 `PWD_HASH` 自 #212 起已無任何寫入非 NULL 的路徑，#668 將其移除。「本表不存密碼」因此由 schema 本身保證，不再依賴應用層斷言（與同表 `KIND` 於 #215 選 DB CHECK 的理由同構）；要把密碼放回本表須先經 migration。
 
 一 Email 一筆待驗證（EMAIL UNIQUE），重新申請 / 重寄以 Email 覆蓋；consume 後硬刪除。逾期列由每日排程 SCHDP001 清理，**逾期滿 1 天才刪**（留一天供當天的客服追查，#226）。使用者管理頁「待啟用邀請」頁籤只撈 `KIND=ADMIN_INVITE`——故一筆殘留的 `SELF_REGISTER` 逾期列在 UI 上完全看不見，這是 #226 要修的另一半（管理者代建同一 Email 原本恆回誤導的 409）。
 
@@ -197,7 +197,6 @@ erDiagram
 | TOKEN_HASH | VARCHAR(64) | Y | PK；驗證 token 之 SHA-256（明文僅入信中連結）|
 | EMAIL | VARCHAR(255) | Y | UNIQUE；待驗證帳號 Email（驗證通過後成為 `DP_USER.EMAIL`）|
 | USER_NAME | VARCHAR(50) | Y | 姓名（驗證通過搬入 `DP_USER`）|
-| PWD_HASH | VARCHAR(100) | N | bcrypt 雜湊（驗證通過搬入 `DP_USER`）；`ADMIN_INVITE` 於建立時為 NULL、啟用設密碼時回填 |
 | KIND | VARCHAR(20) | Y | 來源：`SELF_REGISTER` / `ADMIN_INVITE`（決定啟用流程與清單過濾）；值域由 `CK_DP_PENDING_REGISTRATION_KIND` 於 DB 層封閉（#215）——`NOT NULL` 擋不住空字串或錯字，而一筆 KIND 錯字的列在所有 UI 上都看不見卻佔住 `EMAIL` 唯一鍵 |
 | EXPIRES_DATE | TIMESTAMP | Y | 驗證連結逾期即失效（TTL 平台級參數，沿用 30 分鐘）|
 | INVITE_ID | VARCHAR(30) | N | 邀請之對外識別碼；**僅 `KIND=ADMIN_INVITE` 有值**（自助註冊列維持 NULL）。待啟用邀請尚無 `USER_ID`，故另給一鍵供重寄 / 取消端點（`/invites/{invite_id}/…`）指認單筆邀請，亦為稽核 `TARGET_ID` 之來源。原名 `RES_ID`，2026-08-13 正名（#158）|
@@ -231,7 +230,7 @@ erDiagram
 | ROW_HASH | VARCHAR(64) | Y | 鏈式完整性雜湊（本列內容 + 前列 ROW_HASH 之 SHA-256）|
 
 索引：`(CREATED_DATE)`、`(CREATED_USER, CREATED_DATE)`、`(MODULE, ACTION_TYPE, CREATED_DATE)`。
-落地：應用 DB 帳號對本表僅 GRANT INSERT / SELECT；保留至少 1 年（每日備份屬 IT 維運）。
+落地：應用 DB 帳號對本表僅 GRANT INSERT / SELECT；資料庫另以 trigger 拒絕 UPDATE / DELETE / TRUNCATE（#22，見 `docs/infra/deployment.md` §2.8）；保留至少 1 年（每日備份屬 IT 維運）。
 
 ### DP_PARAM_M — 功能參數主檔
 
@@ -297,7 +296,7 @@ erDiagram
 | CALLER_MODULE | VARCHAR(5) | Y | — | 呼叫方模組（DP / ET / DM）|
 | RECIPIENT | VARCHAR(255) | Y | — | 收件人（一列一收件人，單筆失敗獨立重試）|
 | SUBJECT | VARCHAR(200) | Y | — | 渲染後主旨快照 |
-| BODY | TEXT | Y | — | 渲染後內文快照。例外：(DP, `PWD_RESET`) / (DP, `EMAIL_CHANGE_VERIFY`) 含一次性明文連結，寄出成功轉 SENT 時改寫為固定字串「[已遮罩：本信含一次性連結，寄出後清除原文]」；PENDING 保留原文供重試、FAILED（終態）依 SA 裁示保留原文（#50）|
+| BODY | TEXT | Y | — | 渲染後內文快照。例外：(DP, `PWD_RESET`) / (DP, `EMAIL_CHANGE_VERIFY`) / (DP, `ACCOUNT_VERIFY`) / (DP, `ACCOUNT_INVITE`) 含一次性明文連結，寄出成功轉 SENT 時改寫為固定字串「[已遮罩：本信含一次性連結，寄出後清除原文]」；FAILED（終態）於建立後超過該範本對應之連結時效參數時由 `SCHDP001` 改寫為同一字串（渲染失敗之空 BODY 不改寫）；PENDING 保留原文供重試（#50）|
 | STATUS | VARCHAR(10) | Y | PENDING | PENDING / SENT / FAILED |
 | RETRY_COUNT | INT | Y | 0 | 已重試次數（上限為平台級 `MAIL` 參數）|
 | ERROR_MSG | VARCHAR(500) | N | — | 最後失敗原因 |
@@ -414,7 +413,7 @@ erDiagram
 
 | JOB_ID | MODULE | 說明 |
 |--------|--------|------|
-| SCHDP001 | DP | 每日：閒置帳號禁用 + 密碼到期提醒 |
+| SCHDP001 | DP | 每日：閒置帳號禁用 + 密碼到期提醒 + 清理逾期待驗證列 + 遮罩逾連結時效之寄送失敗信件 |
 | SCHET001 / SCHET002 | ET | ET 週報 / 提醒、到期關閉 + 加急提醒（handler 由 ET 提供）|
 | SCHDM001 | DM | DM KPI 週報 + 未讀提醒（handler 由 DM 提供）|
 

@@ -443,11 +443,17 @@ class EtLearningService:
         路徑一律經 `storage.resolve_within_root` 解析：`FILE_PATH` 存的是相對於
         `ET_VIDEO_STORAGE_ROOT` 的片段（#241），自行 `os.path.join` 等於開一個路徑
         穿越面。
+
+        `expect_prefix=MATERIAL_ID`（#871）：票以 `video_id` 授權，檔案須落在該影片所屬教材的
+        目錄下——一筆寫錯的 `FILE_PATH` 不得讓學員讀到他份教材的影片。
         """
         video = await self._repo.get_video(db, video_id)
         if video is None:
             raise _file_not_found()
-        return resolve_within_root(video.file_path, not_found=_file_not_found()), video.file_name
+        resolved = resolve_within_root(
+            video.file_path, not_found=_file_not_found(), expect_prefix=str(video.material_id)
+        )
+        return resolved, video.file_name
 
     async def doc_file(
         self, db: AsyncSession, material_id: int, doc_id: str, *, user_id: str, roles: frozenset[str] = frozenset()

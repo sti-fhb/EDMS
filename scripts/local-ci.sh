@@ -3,10 +3,15 @@
 # EDMS Local CI — 在本地模擬 GitHub CI 的所有檢查
 #
 # 用法：
-#   ./scripts/local-ci.sh          # 跑全部（不含 E2E）
-#   ./scripts/local-ci.sh quick    # 只跑 lint / format / type-check（最快）
-#   ./scripts/local-ci.sh backend  # 只跑後端
-#   ./scripts/local-ci.sh frontend # 只跑前端
+#   ./scripts/local-ci.sh             # 跑全部（不含 E2E）
+#   ./scripts/local-ci.sh quick       # 只跑 lint / format / type-check（最快）
+#   ./scripts/local-ci.sh backend     # 只跑後端
+#   ./scripts/local-ci.sh frontend    # 只跑前端
+#   ./scripts/local-ci.sh all --e2e   # 跑全部 + E2E（Playwright，見 e2e/README.md）
+#   ./scripts/local-ci.sh --e2e       # 同上（未指定模式時為 all）
+#
+# E2E 預設不跑：慢、且需額外前置（PostgreSQL 上的 e2e_ 專用庫、mailpit、chromium），
+# 不該拖慢日常開發（#57）。結果彙總會明確標示本次「含 / 不含 E2E」。
 #
 # 需要整合測試時，請確保 PostgreSQL 正在運行且 backend/.env.test 已設定。
 # 前端尚未建立時（frontend/ 不存在）會自動 skip 前端檢查，不報錯。
@@ -17,16 +22,37 @@ set -uo pipefail
 # 不使用 set -e：run_step 自行管理成功/失敗狀態，允許某步失敗後繼續執行其他檢查
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MODE="${1:-all}"
+MODE=""
+RUN_E2E=false
 
-# 白名單驗證：緊接 MODE 賦值之後，防止重構時順序被打亂
-case "$MODE" in
-    all|quick|backend|frontend) ;;
-    *)
-        echo "用法: $0 [all|quick|backend|frontend]"
-        exit 1
-        ;;
-esac
+usage() {
+    echo "用法: $0 [all|quick|backend|frontend] [--e2e]"
+}
+
+# 參數：至多一個模式 + 選填 --e2e（順序不拘）
+for arg in "$@"; do
+    case "$arg" in
+        --e2e) RUN_E2E=true ;;
+        all|quick|backend|frontend)
+            if [[ -n "$MODE" ]]; then usage; exit 1; fi
+            MODE="$arg"
+            ;;
+        *) usage; exit 1 ;;
+    esac
+done
+MODE="${MODE:-all}"
+
+# quick 的定位是「最快的靜態檢查」，與 E2E 相牴觸，直接拒絕而非默默忽略 --e2e
+if [[ "$MODE" == "quick" && "$RUN_E2E" == "true" ]]; then
+    echo "quick 模式不跑測試，不可與 --e2e 併用"
+    exit 1
+fi
+
+if [[ "$RUN_E2E" == "true" ]]; then
+    E2E_LABEL="含 E2E"
+else
+    E2E_LABEL="不含 E2E"
+fi
 
 # 前置檢查：確認必要工具已安裝（前端工具在有 frontend/ 時才要求）
 for cmd in uv git; do
@@ -43,6 +69,66 @@ NC='\033[0m' # No Color
 PASSED=()
 FAILED=()
 SKIPPED=()
+
+# ──────────────────────────────────────────────────────────
+# 併行測試偵測（#635）
+# ──────────────────────────────────────────────────────────
+# 這台機器由多個 session 共用，而後端階段是 `pytest -n auto`（12 核 → 12 worker）。
+# 只要有人照專案文件跑標準的本機 CI，另一個 session 的前端 vitest 就會假紅——那是
+# 工具預設與共用機器的**結構衝突**，不是誰的疏忽，所以會反覆發生。
+#
+# ⛔ 刻意「警告」而不是「擋下」：腳本分不出**孤兒 worker**（沒有人在跑、worker 卻還在）
+#    與活人。直接擋會把「等到天荒地老」變成預設行為，也會讓背景／非互動執行整組失敗。
+#    決定權留給看得到 cwd 的人。環境變數 EDMS_CI_BLOCK_ON_BUSY=1 可升級成擋下。
+#
+# 🔴 指紋清單的**唯一事實來源**在 `scripts/detect-test-procs.ps1` 的 $pattern。
+#    新增 runner 改那一處；`.claude/rules/sti-testing.md` 的步驟 0 指向它，不另抄一份。
+CONCURRENT_REPORT=""
+
+detect_concurrent_tests() {
+    local script="${ROOT_DIR}/scripts/detect-test-procs.ps1"
+    # fail-open：偵測器自身的任何問題都只印一行說明，CI 不因它而失敗。
+    [[ -f "$script" ]] || { echo -e "${YELLOW}⚠ 找不到 detect-test-procs.ps1，略過併行測試偵測${NC}"; return 0; }
+    command -v powershell >/dev/null 2>&1 || { echo -e "${YELLOW}⚠ 無 powershell，略過併行測試偵測${NC}"; return 0; }
+
+    local raw
+    if ! raw="$(powershell -NoProfile -ExecutionPolicy Bypass -File "$script" 2>/dev/null | tr -d '\r')"; then
+        echo -e "${YELLOW}⚠ 併行測試偵測失敗，略過（CI 不因此失敗）${NC}"
+        return 0
+    fi
+    [[ -n "$raw" ]] || return 0   # 機器乾淨：不增加任何輸出雜訊
+
+    local pid name cpu wt cmd cores="?" lines=""
+    while IFS=$'\t' read -r pid name cpu wt cmd; do
+        [[ -z "$pid" ]] && continue
+        if [[ "$pid" == "#CORES" ]]; then cores="$name"; continue; fi
+        lines+="    PID ${pid}  ${name}  cpu=${cpu}%  worktree=${wt}"$'\n'
+        # 🔴 命令列是 Windows 路徑，含 `\E`、`\b`、`\t` 等序列。本報告最後由 `echo -e`
+        # 輸出（要處理顏色碼），而 `echo -e` 會把它們當跳脫字元吃掉：實測
+        # `TBMS_git\EDMS\backend` 被印成 `TBMS_gitDMSackend`（\E→ESC、\b→退格）。
+        # 先把反斜線加倍，`echo -e` 解析後正好還原成一個。
+        lines+="        ${cmd//\\/\\\\}"$'\n'
+    done <<< "$raw"
+
+    CONCURRENT_REPORT="$(cat <<EOF
+${YELLOW}⚠ 偵測到其他測試行程正在跑（本機 ${cores} 核，與本輪互搶 CPU）${NC}
+${lines}    兩種情況，先分辨是哪一種：
+      • ${YELLOW}有主人${NC}：某個 session 正在跑 → 等它跑完，或請對方降併發度
+      • ${YELLOW}孤兒${NC}：沒有人在跑、worker 卻還在（中止背景測試不會收掉 xdist worker）
+        → 問過一輪沒人認領就直接收掉，${RED}「等對方跑完」對孤兒是錯的建議${NC}
+    ⚠ cpu=0% ${YELLOW}不代表沒影響${NC}：那是取樣瞬間值，且 venv 的 launcher shim 恆為 0%
+      （同一個 worker 會出現兩列，有 CPU 的那層才是真的在跑）
+    判讀細節見 .claude/rules/sti-testing.md〈前端「假紅」判定〉步驟 0
+EOF
+)"
+    echo ""
+    echo -e "$CONCURRENT_REPORT"
+
+    if [[ "${EDMS_CI_BLOCK_ON_BUSY:-}" == "1" ]]; then
+        echo -e "${RED}EDMS_CI_BLOCK_ON_BUSY=1 已設定，中止本輪${NC}"
+        exit 2
+    fi
+}
 
 run_step() {
     local name="$1"
@@ -231,11 +317,45 @@ run_frontend() {
 }
 
 # ──────────────────────────────────────────────────────────
+# E2E（Playwright，僅 --e2e 時執行）
+#
+# Playwright 會自行起 E2E 專用的後端（:8101）與前端（:4174），不碰 dev server 與 dev DB。
+# 前置（PostgreSQL 上的 e2e_ 專用庫、mailpit、chromium）見 e2e/README.md。
+# ──────────────────────────────────────────────────────────
+run_e2e() {
+    echo ""
+    echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║         E2E (Playwright)             ║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
+
+    command -v pnpm &>/dev/null || { echo -e "${RED}ERROR: pnpm not found${NC}"; FAILED+=("E2E (pnpm missing)"); return; }
+
+    # 明確要求跑 E2E 卻缺依賴 → 記為失敗而非 skip：使用者下了 --e2e，「綠燈但其實沒跑」比紅燈更糟
+    if [[ ! -d "$ROOT_DIR/e2e/node_modules" ]]; then
+        echo -e "${RED}  ✘ 尚未安裝 E2E 依賴：cd e2e && pnpm install && pnpm install:browser${NC}"
+        FAILED+=("E2E: Playwright (依賴未安裝)")
+        return
+    fi
+    if [[ ! -d "$ROOT_DIR/frontend/node_modules" ]]; then
+        echo -e "${RED}  ✘ E2E 需建置前端，請先：cd frontend && pnpm install${NC}"
+        FAILED+=("E2E: Playwright (前端依賴未安裝)")
+        return
+    fi
+
+    cd "$ROOT_DIR/e2e"
+    run_step "E2E: type-check" pnpm type-check
+    run_step "E2E: Playwright" pnpm test
+    cd "$ROOT_DIR"
+}
+
+# ──────────────────────────────────────────────────────────
 # 執行
 # ──────────────────────────────────────────────────────────
 
-echo -e "${BLUE}EDMS Local CI${NC} — mode: ${YELLOW}${MODE}${NC}"
+echo -e "${BLUE}EDMS Local CI${NC} — mode: ${YELLOW}${MODE}${NC}（${E2E_LABEL}）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+detect_concurrent_tests
 
 case "$MODE" in
     all|quick)
@@ -250,12 +370,16 @@ case "$MODE" in
         ;;
 esac
 
+if [[ "$RUN_E2E" == "true" ]]; then
+    run_e2e
+fi
+
 # ──────────────────────────────────────────────────────────
 # 結果彙總
 # ──────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "${BLUE}結果彙總${NC}"
+echo -e "${BLUE}結果彙總${NC}（${E2E_LABEL}）"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [[ ${#PASSED[@]} -gt 0 ]]; then
@@ -275,10 +399,27 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
         echo -e "  ${RED}✘${NC} $step"
     done
     echo ""
-    echo -e "${RED}CI 失敗：${#FAILED[@]} 個檢查未通過${NC}"
+    # 🔴 明文列出失敗項，不要只靠 ✔ / ✘ 符號（#635）。
+    # 實際事故（2026-10-14）：有人 grep `✖` 判讀自己的結果，而本腳本印的是 `✘`
+    # ——U+2716 vs U+2718，不同碼位。於是只撈到 ✔ 行，把「後端全綠」回報出去，
+    # 而實際有兩道紅。⚠️ 符號比對漏掉時，錯的方向剛好是**看起來全綠**。
+    # 明文摘要讓「有沒有失敗」不必由讀者從缺漏去推論——缺漏是最容易被合理化掉的訊號。
+    local_ci_failed_list="$(printf '%s, ' "${FAILED[@]}")"
+    echo "FAILED: ${local_ci_failed_list%, }"
+    echo ""
+    echo -e "${RED}CI 失敗（${E2E_LABEL}）：${#FAILED[@]} 個檢查未通過${NC}"
+    # 併行測試的警告在開頭印過一次，這裡**再印一次**：前端真的紅的時候，
+    # 警告就在紅字旁邊，正是需要它的那一刻（開頭那次早被 10 分鐘的 log 埋掉了）。
+    if [[ -n "$CONCURRENT_REPORT" ]]; then
+        echo ""
+        echo -e "$CONCURRENT_REPORT"
+    fi
     exit 1
 else
     echo ""
-    echo -e "${GREEN}CI 通過：${#PASSED[@]} 個檢查成功，${#SKIPPED[@]} 個跳過${NC}"
+    echo -e "${GREEN}CI 通過（${E2E_LABEL}）：${#PASSED[@]} 個檢查成功，${#SKIPPED[@]} 個跳過${NC}"
+    if [[ "$RUN_E2E" != "true" ]]; then
+        echo -e "${YELLOW}  未跑 E2E；需要時加 --e2e（或 pnpm ci:local:e2e）${NC}"
+    fi
     exit 0
 fi

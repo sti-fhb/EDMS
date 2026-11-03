@@ -128,7 +128,15 @@ def apply_migrations():
         text=True,
         # SEED_DEMO_ACCOUNTS=false：測試 DB 不種示範帳號（migration 7b24b5dea3ad）。
         # 那 5 個帳號會混進「列全部使用者 / 全部管理者 / DM_VIEWER 母體」等斷言的預期值。
-        env={**os.environ, "PYTHONIOENCODING": "utf-8", "SEED_DEMO_ACCOUNTS": "false"},
+        # MIGRATION_DATABASE_URL 鎖成測試庫（#22）：alembic 優先用它，而 Settings 會從 backend/.env
+        # 補讀未設定的變數——開發者在 .env 設了指向 dev DB 的值，測試的 migration 就會跑到 dev DB 上，
+        # 上方「DATABASE_URL 含 test」的防呆完全看不到。
+        env={
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "SEED_DEMO_ACCOUNTS": "false",
+            "MIGRATION_DATABASE_URL": settings.DATABASE_URL,
+        },
         encoding="utf-8",
         errors="replace",
     )

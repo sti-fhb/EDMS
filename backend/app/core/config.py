@@ -1,7 +1,7 @@
 import ipaddress
 import os
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,7 +38,29 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_COUNT: int = Field(default=0, ge=0, le=8)
 
     # 資料庫
+    # app 執行期連線。正式環境應為最小權限角色（對 DP_AUDIT_LOG 只有 INSERT / SELECT、不可 DDL），
+    # 角色由 scripts/db-app-role.sql 建立（#22，見 docs/infra/deployment.md）。
     DATABASE_URL: str
+    # migration 專用連線（資料表 owner）。未設定 / 空值時退回 DATABASE_URL，故合併本設定前的部署
+    # 不改任何設定也能照常跑 migration；DATABASE_URL 換成最小權限角色後，這裡就必須設成 owner。
+    # 正式環境只帶進 migration 的一次性容器（scripts/vm-deploy.sh 讀 /opt/edms/.env.migrate），
+    # 常駐的 app 容器不持有它。
+    # 讀取一律經 `migration_database_url`，不要直接讀本欄位。
+    MIGRATION_DATABASE_URL: str | None = None
+
+    # SQLAlchemy 引擎的 echo：開啟後**每一次查詢連同綁定參數值**都會印進 log（#197 AC 5）。
+    #
+    # 🔴 **刻意與 `DEBUG` 解耦，請勿改回 `echo=settings.DEBUG`。** 原本兩者共用一個開關，而
+    # `DEBUG` 同時閘住三道 production 護欄（見下方三個 `_validate_*`）。本檔自己記錄過 `DEBUG`
+    # 被當逃生門用的情境（「現場只能以 DEBUG=true 繞過」，見 `_validate_mail_tls_exclusive`）
+    # ——真有人在正式環境開 `DEBUG` 救火，就會連帶把病人／員工個資印進 log。
+    #
+    # ⚠️ 而且那層**不受 `core/log_redaction` 保護**：echo 走獨立的 `sqlalchemy.engine` logger、
+    # 參數值在訊息本體而非 `exc_info`，`install_exception_redaction` 管不到（該檔「未涵蓋的既有
+    # 暴露面」有明文）。
+    #
+    # dev 要看 SQL 時在 `.env` 設 `DB_ECHO=true` 即可，不需要連帶打開 production 護欄的逃生門。
+    DB_ECHO: bool = False
 
     # 連線池
     DB_POOL_SIZE: int = Field(default=5, ge=1)
@@ -106,6 +128,10 @@ class Settings(BaseSettings):
     MAIL_SSL_TLS: bool = False
     # 測試 / E2E 跳過實際寄送（信件仍寫 outbox、不連 SMTP）
     MAIL_SUPPRESS_SEND: bool = False
+    # 發信 worker 輪距（秒）。E2E 設 1，否則每封信最壞要等滿一輪才寄出（#57）。
+    # ⚠️ worker 每輪最多寄 DP_PARAM MAIL.RATE_PER_MIN 封——那個「每分鐘」是靠本值 = 60 撐起來的，
+    # 調短等於把發信速率上限放大，故 production 不得低於 60（見 _validate_mail_worker_poll_interval）。
+    MAIL_WORKER_POLL_INTERVAL_SECONDS: int = Field(default=60, ge=1, le=3600)
 
     # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（invite_id）重寄的最小間隔秒數，
     # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
@@ -132,11 +158,13 @@ class Settings(BaseSettings):
     # 未設定或查無帳號時 seed 跳過並記 log，不使 migration 失敗（CI / 新環境不受影響）。
     ET_BOOTSTRAP_ADMIN_EMAIL: str = ""
 
-    # 示範測試帳號 seed（migration 7b24b5dea3ad）開關。預設種入——一般環境（本機 / 部署）
-    # 皆需要一組可登入的帳號做手動驗證。**測試環境一律設 false**：測試 DB 同樣以
+    # 示範測試帳號 seed（migration 7b24b5dea3ad）開關。未設定時依 DEBUG 決定：dev（DEBUG=true）
+    # 預設種入，供本機手動驗證登入；正式模式（DEBUG=false）預設不種（見
+    # _default_seed_demo_accounts_off_in_production）。明示設定一律依設定值。**測試環境一律設 false**：測試 DB 同樣以
     # `alembic upgrade head` 建置，這些帳號會混進「列全部使用者 / 全部管理者 / DM_VIEWER
     # 母體」等斷言的預期值（CI 實測 7 條 integration 測試因此失敗），
     # 見 tests/integration/conftest.py 之 apply_migrations 與 .github/workflows/ci.yml。
+    # ⚠️ 日後輪替示範帳號密碼，一律在目標環境直接操作，不再以 migration 寫入雜湊。
     SEED_DEMO_ACCOUNTS: bool = True
 
     @model_validator(mode="after")
@@ -162,6 +190,21 @@ class Settings(BaseSettings):
         """
         if self.MAIL_STARTTLS and self.MAIL_SSL_TLS:
             raise ValueError("MAIL_STARTTLS 與 MAIL_SSL_TLS 不可同時為 true")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_mail_worker_poll_interval(self) -> "Settings":
+        """production（非 DEBUG）護欄：發信 worker 輪距不得低於 60 秒。
+
+        worker 每輪最多寄 `MAIL.RATE_PER_MIN` 封（`dp/notify/worker.py`），該參數的「每分鐘」
+        語意建立在輪距 = 60 秒之上。輪距縮成 1 秒，實際上限就變成 60 倍，可能超出郵件主機的
+        寄信額度而被擋信。縮短輪距只為 E2E 不必每封信等一分鐘（#57），production 用不到。
+        """
+        if not self.DEBUG and self.MAIL_WORKER_POLL_INTERVAL_SECONDS < 60:
+            raise ValueError(
+                "MAIL_WORKER_POLL_INTERVAL_SECONDS 在 production（DEBUG=false）不得低於 60："
+                "worker 每輪最多寄 MAIL.RATE_PER_MIN 封，縮短輪距會放大發信速率上限"
+            )
         return self
 
     @model_validator(mode="after")
@@ -213,6 +256,52 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _default_seed_demo_accounts_off_in_production(self) -> "Settings":
+        """正式模式（DEBUG=false）未設定 `SEED_DEMO_ACCOUNTS` 時視為 false。
+
+        欄位預設 true 是為 dev 便利；依 DEBUG 決定預設值無法寫在欄位宣告上，故於此改寫。
+        以 `model_fields_set` 判斷「未設定」（比照 `_validate_trusted_proxy_count_explicit`）：
+        環境變數、.env 檔、建構參數任一來源設了值即依設定值，含正式模式明示 true。
+        alembic 的 env.py 亦載入同一份 settings，seed migration 讀到的是改寫後的值。
+        """
+        if not self.DEBUG and "SEED_DEMO_ACCOUNTS" not in self.model_fields_set:
+            self.SEED_DEMO_ACCOUNTS = False
+        return self
+
+    @model_validator(mode="after")
+    def _validate_migration_url_same_database(self) -> "Settings":
+        """MIGRATION_DATABASE_URL 只能換帳號，不能換庫：host / port / 資料庫名（含 query 的 host / port）
+        須與 DATABASE_URL 相同（#22）。
+
+        兩者指向不同庫時 migration 會套到 app 沒在用的那個庫——部署表面成功、app 卻 schema 不符；
+        本機則可能讓「只覆寫 DATABASE_URL」的 alembic 指令打到 `.env` 裡的另一個庫。
+        訊息只列欄位名，不回顯連線字串（含密碼）。
+        """
+        migration = (self.MIGRATION_DATABASE_URL or "").strip()
+        if not migration:
+            return self
+
+        def _target(url: str) -> tuple[str | None, int, str, list[str], list[str]]:
+            p = urlparse(url)
+            try:
+                port = p.port or 5432
+            except ValueError:
+                port = -1  # 格式錯誤：讓比對失敗，交由連線時報錯
+            # query 的 host / port（如 `?host=/run/postgresql`）會覆寫實際連線目標，一併比對
+            query = parse_qs(p.query)
+            return (
+                (p.hostname or "").lower() or None,
+                port,
+                p.path.lstrip("/"),
+                query.get("host", []),
+                query.get("port", []),
+            )
+
+        if _target(migration) != _target(self.DATABASE_URL):
+            raise ValueError("MIGRATION_DATABASE_URL 的 host / port / 資料庫名須與 DATABASE_URL 相同（只能換帳號密碼）")
+        return self
+
     @field_validator("DM_FILE_STORAGE_ROOT", "ET_VIDEO_STORAGE_ROOT", mode="before")
     @classmethod
     def _strip_storage_root(cls, v: Any) -> Any:
@@ -260,6 +349,11 @@ class Settings(BaseSettings):
                     "無磁碟機之絕對路徑依當前磁碟機解析，換啟動磁碟機即讀不到既有檔案"
                 )
         return self
+
+    @property
+    def migration_database_url(self) -> str:
+        """alembic 實際使用的連線：有設 MIGRATION_DATABASE_URL（非空白）就用它，否則退回 DATABASE_URL。"""
+        return (self.MIGRATION_DATABASE_URL or "").strip() or self.DATABASE_URL
 
     @property
     def cors_origins_list(self) -> list[str]:

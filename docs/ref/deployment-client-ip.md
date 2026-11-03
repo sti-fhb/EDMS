@@ -225,10 +225,39 @@ FastAPI 在跑 dependency（含身分驗證）**之前**就把整個 body 讀進
 
 ## 本機制未涵蓋的範圍
 
-- **IPv6 位址輪替**：限流分桶用完整位址，持有 IPv6 /64 的攻擊者可每個請求換一個
-  來源位址，不需偽造任何 header 即可打散限流桶。屬限流分桶粒度議題，另案處理。
+- ~~**IPv6 位址輪替**~~：**已於 #198 處理**——限流分桶改以 `core/rate_limit.ip_bucket`
+  將 IPv6 收斂至 **/64**（IPv4 維持 /32，理由見該函式 docstring）。本段保留劃掉的原文，
+  是因為它曾被引用為「已知未涵蓋」；直接刪掉會讓引用它的人以為自己記錯。
 - **log 中的個資**：`DP_AUDIT_LOG` 之外，各模組 `logger.exception()` 的遮罩狀況見
   `app/core/log_redaction.py` 的「未涵蓋的既有暴露面」段落。
+
+## 限流分桶的運維語意（#198）
+
+⚠️ **走 IPv6 進來的使用者以 /64 計額**，也就是**同一個網段共用一份配額**（登入 10 次／分鐘）。
+
+- **IPv4 使用者不受影響**：他們本來就共用 NAT 出口那一桶
+- 🔴 **但「一個 /64 ＝ 一個人」只對行動網路（每支手機一個）、VPS（每台一個）、家用固網
+  （一戶一個）成立。企業／院內 LAN 沒有 NAT，一個 VLAN 就是一個 /64**，幾十到幾百台主機
+  共用同一個前綴 ⇒ 交班尖峰時整個科室可能撞到同一份配額
+
+**出現成批 `COMMON_429` 時的第一步**——先確認來源是不是 IPv6：
+
+```sql
+-- 回 0 ⇒ 沒有 IPv6 來源，本節不適用，往別的方向查
+SELECT count(*) FROM "DP_AUDIT_LOG" WHERE "SOURCE_IP" LIKE '%:%';
+
+-- 有的話看哪個前綴塞了幾個人
+SELECT network(set_masklen("SOURCE_IP"::inet, 64)) AS prefix64,
+       count(DISTINCT "CREATED_USER") AS users, count(*) AS events
+FROM "DP_AUDIT_LOG"
+WHERE "SOURCE_IP" LIKE '%:%' AND "CREATED_DATE" > now() - interval '30 days'
+GROUP BY 1 ORDER BY users DESC LIMIT 20;
+```
+
+`users` 出現兩位數 ⇒ 需要重新推導登入門檻。⚠️ **不能只把 `LOGIN_RATE_MAX` 調大**：
+`_login_limiter` 是同一個實例同時裝 `login:ip:*` 與 `login:acct:*`（`dp/user/router.py:57`／
+`:217`／`:220`），放寬 IP 維度會連帶放寬單一帳號的密碼嘗試次數。要分開調得先把兩個維度
+拆成各自的 limiter 實例。
 
 ## 部署檢查清單
 

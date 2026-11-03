@@ -23,6 +23,7 @@
 # 前置需求：
 #   /opt/edms/repo          此 repo 的 clone（public，不需認證）
 #   /opt/edms/.env.prod     機密設定，含 EDMS_BACKUP_BUCKET
+#   /opt/edms/.env.migrate  （選用）migration 專用的 owner 連線，見 docs/infra/deployment.md §2.8
 #   /opt/edms/data/postgres DB 資料
 #   /opt/edms/postgres/     DB 對外連線的憑證與 pg_hba.conf（見 TBMS repo 的 docs/infra/db-external-access.md §二）
 #   external network edms-proxy-net
@@ -172,7 +173,34 @@ bash scripts/db-backup.sh pre-migrate
 
 log "執行 migration..."
 # 容器內指令一律以絕對路徑 /app/.venv/bin/ 執行：映像不含 uv（新舊映像皆有此路徑）。
-"${COMPOSE[@]}" run --rm edms-backend /app/.venv/bin/alembic upgrade head
+#
+# migration 與執行期分用 DB 帳號（#22）：owner 連線只放在 /opt/edms/.env.migrate，只帶進
+# 這個一次性的 migration 容器（run --rm，跑完即刪），常駐的 edms-backend 讀不到它。
+# 檔案不存在時與先前相同——alembic 退回 DATABASE_URL。
+# 以 `-e 變數名`（不帶值）從本指令的環境帶入，連線字串不會出現在指令列 / ps。
+if [ -f /opt/edms/.env.migrate ]; then
+  # 內含 owner 密碼：權限須為 root 擁有、群組與其他人無任何權限（如 600 / 400）
+  MIGRATE_PERM=$(stat -c '%U %a' /opt/edms/.env.migrate)
+  if [ ! -r /opt/edms/.env.migrate ]; then
+    log "❌ /opt/edms/.env.migrate 無法讀取，中止"
+    exit 1
+  fi
+  if [[ ! "${MIGRATE_PERM}" =~ ^root\ [0-7]00$ ]]; then
+    log "❌ /opt/edms/.env.migrate 的擁有者 / 權限為 ${MIGRATE_PERM}，須為 root 且 600，中止"
+    exit 1
+  fi
+  # 去掉引號與 CRLF 行尾（在 Windows 編輯過的檔案，\r 會被帶進連線字串）
+  MIGRATION_URL=$(sed -n 's/^MIGRATION_DATABASE_URL=//p' /opt/edms/.env.migrate | tr -d "\"'\r" | head -1)
+  if [ -z "${MIGRATION_URL}" ]; then
+    log "❌ /opt/edms/.env.migrate 存在但沒有 MIGRATION_DATABASE_URL，中止"
+    exit 1
+  fi
+  MIGRATION_DATABASE_URL="${MIGRATION_URL}" \
+    "${COMPOSE[@]}" run --rm -e MIGRATION_DATABASE_URL edms-backend /app/.venv/bin/alembic upgrade head
+  unset MIGRATION_URL
+else
+  "${COMPOSE[@]}" run --rm edms-backend /app/.venv/bin/alembic upgrade head
+fi
 
 log "啟動所有服務..."
 "${COMPOSE[@]}" up -d --remove-orphans

@@ -19,6 +19,30 @@ logger.warning("停用帳號嘗試登入 user=%s", user_id)
 - 用 `%s` 參數化，禁 f-string / 字串拼接
 - `except` 區塊用 `logger.exception()` 帶 stack trace
 
+### ⚠️ `logger.exception()` 的 traceback 有兜底，訊息本體沒有
+
+`app/core/log_redaction.install_exception_redaction`（`main.py` import 時安裝）以
+`setLogRecordFactory` 把每筆紀錄的 **`exc_text` 預先填成去識別化的版本**。所以
+`logger.exception()` 帶出的 traceback——含 SQLAlchemy 的 `[SQL: …] [parameters: …]`
+與 asyncpg 的 `DETAIL:` 行——**會被遮罩**，不需要呼叫端自己處理。
+
+🔴 **但訊息本體（`msg % args`）完全不經遮罩。** 兜底只管 `exc_info`：
+
+```python
+# ✅ traceback 走兜底
+logger.exception("寄信失敗 user=%s", user_id)
+
+# ⛔ 例外或個資當成參數傳進訊息本體 —— 沒有任何東西會遮它
+logger.exception("寄信失敗 %s", exc)
+logger.error("查無此人 email=%s", email)          # 要記就用 mask_email(email)
+```
+
+**判準**：值要出現在**訊息裡**時，呼叫端自己負責（`mask_email`、只記 `user_id`）；
+值只出現在**例外的 traceback 裡**時，交給兜底，不要為此改寫 `except` 的寫法。
+
+⛔ 兜底涵蓋不到的三種情況，見 `app/core/log_redaction.py` 檔頭的「未涵蓋的既有暴露面」
+（訊息本體、Starlette lifespan、`sqlalchemy.engine` 的 echo）。**不要假設「反正有遮罩」。**
+
 ## 禁用
 
 - `print()` / `sys.stdout.write()` / `sys.stderr.write()`

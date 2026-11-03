@@ -40,6 +40,10 @@ FROM nginx:alpine AS runtime
 # ⚠️ layer 快取不看 Alpine 套件庫：出版用的 build 須重跑本階段（見該 workflow 的 no-cache-filters）。
 RUN apk upgrade --no-cache
 
+# 主設定只改連線格位（#833 B3），就地修改映像自帶的檔案：比對不到預期的原始樣式就讓建置失敗，見該腳本說明
+COPY nginx/tune-main-conf.sh /tmp/tune-main-conf.sh
+RUN sh /tmp/tune-main-conf.sh /etc/nginx/nginx.conf && rm /tmp/tune-main-conf.sh
+
 COPY --from=builder /app/dist /usr/share/nginx/html
 # 00- 字首確保 limit_req_zone 與 log_format／map（皆為 http 層）早於 default.conf 載入
 COPY nginx/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf

@@ -1,6 +1,8 @@
 """core.config 設定測試——涵蓋 #16 T001 新增之 JWT / SMTP 設定。"""
 
+import ast
 import os
+from pathlib import Path
 
 import pytest
 
@@ -230,6 +232,54 @@ def test_trusted_proxy_count_not_required_in_debug() -> None:
     assert s.TRUSTED_PROXY_COUNT == 0
 
 
+def _settings_for_seed(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "FRONTEND_BASE_URL": "https://edms.example.com",
+        # 聚焦 SEED_DEMO_ACCOUNTS 預設值，避開其餘 production 護欄
+        "TRUSTED_PROXY_COUNT": 0,
+        "DM_FILE_STORAGE_ROOT": _ABS_DM_ROOT,
+        "ET_VIDEO_STORAGE_ROOT": _ABS_ET_ROOT,
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def _no_seed_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「未設定」須連環境變數一併排除——`_env_file=None` 只隔離 .env 檔，不隔離 os.environ。"""
+    monkeypatch.delenv("SEED_DEMO_ACCOUNTS", raising=False)
+
+
+@pytest.mark.usefixtures("_no_seed_env")
+def test_seed_demo_accounts_defaults_false_in_production() -> None:
+    """正式模式未設定 → 預設不種示範帳號（不沿用欄位預設 true）。"""
+    s = _settings_for_seed(DEBUG=False)
+    assert s.SEED_DEMO_ACCOUNTS is False
+
+
+def test_seed_demo_accounts_explicit_true_honored_in_production() -> None:
+    """正式模式明示 true → 依設定值種入。"""
+    s = _settings_for_seed(DEBUG=False, SEED_DEMO_ACCOUNTS=True)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
+def test_seed_demo_accounts_env_true_honored_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """部署以環境變數 / env_file 注入（非建構參數），該來源同樣算已設定。"""
+    monkeypatch.setenv("SEED_DEMO_ACCOUNTS", "true")
+    s = _settings_for_seed(DEBUG=False)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
+@pytest.mark.usefixtures("_no_seed_env")
+def test_seed_demo_accounts_defaults_true_in_debug() -> None:
+    """dev（DEBUG=true）未設定 → 維持預設種入，供本機手動驗證登入。"""
+    s = _settings_for_seed(DEBUG=True)
+    assert s.SEED_DEMO_ACCOUNTS is True
+
+
 def test_trusted_proxy_count_upper_bound() -> None:
     """上限 8：明顯誤設（如把毫秒數填進來）於啟動即擋。"""
     with pytest.raises(ValueError):
@@ -380,3 +430,222 @@ def test_scan_access_ttl_out_of_range_fails_startup(value: int) -> None:
     message = str(exc_info.value)
     assert "invalid environment variables" in message
     assert "SCAN_ACCESS_TTL_MIN" in message
+
+
+# --- MAIL_WORKER_POLL_INTERVAL_SECONDS（發信 worker 輪距；E2E 縮短以免每封信等滿 60 秒，#57）---
+
+
+def test_mail_worker_poll_interval_defaults_to_60(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未設定時維持 60 秒——與 DP_PARAM MAIL.RATE_PER_MIN 的「每分鐘」語意對齊。"""
+    monkeypatch.delenv("MAIL_WORKER_POLL_INTERVAL_SECONDS", raising=False)
+    assert _settings_with_scan_ttl().MAIL_WORKER_POLL_INTERVAL_SECONDS == 60
+
+
+def test_mail_worker_poll_interval_short_value_allowed_in_debug() -> None:
+    """dev / CI / E2E（DEBUG=true）可縮短輪距。"""
+    assert _settings_with_scan_ttl(MAIL_WORKER_POLL_INTERVAL_SECONDS=1).MAIL_WORKER_POLL_INTERVAL_SECONDS == 1
+
+
+@pytest.mark.parametrize("value", [0, -1, 3601])
+def test_mail_worker_poll_interval_out_of_range_fails_startup(value: int) -> None:
+    """超出 1～3600 秒經 _build_settings 轉為啟動失敗，訊息點名欄位。"""
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=True,
+            MAIL_WORKER_POLL_INTERVAL_SECONDS=value,
+        )
+    assert "MAIL_WORKER_POLL_INTERVAL_SECONDS" in str(exc_info.value)
+
+
+def test_mail_worker_poll_interval_below_60_rejected_in_production() -> None:
+    """production 不得低於 60 秒：worker 每輪最多寄 RATE_PER_MIN 封，輪距縮短等於把發信速率上限放大。"""
+    with pytest.raises(ValueError, match="MAIL_WORKER_POLL_INTERVAL_SECONDS"):
+        Settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=False,
+            FRONTEND_BASE_URL="https://edms.example.com",
+            TRUSTED_PROXY_COUNT=0,
+            DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+            ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+            MAIL_WORKER_POLL_INTERVAL_SECONDS=59,
+        )
+
+
+def test_mail_worker_poll_interval_longer_value_allowed_in_production() -> None:
+    """production 調長（降低輪詢頻率）不影響速率上限語意，照收。"""
+    s = Settings(
+        _env_file=None,
+        DATABASE_URL="postgresql+asyncpg://t:t@localhost/t",
+        JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+        DEBUG=False,
+        FRONTEND_BASE_URL="https://edms.example.com",
+        TRUSTED_PROXY_COUNT=0,
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+        MAIL_WORKER_POLL_INTERVAL_SECONDS=120,
+    )
+    assert s.MAIL_WORKER_POLL_INTERVAL_SECONDS == 120
+
+
+# --- MIGRATION_DATABASE_URL（#22：migration 與 app 執行期分用 DB 角色）---
+
+
+def _settings_with_db_urls(**overrides: object) -> Settings:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://app:p@localhost/edms",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "DEBUG": True,
+    }
+    kwargs.update(overrides)
+    return Settings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_migration_url_falls_back_to_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未設定時退回 DATABASE_URL——合併後既有部署不改任何設定也能照常跑 migration。"""
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    assert _settings_with_db_urls().migration_database_url == "postgresql+asyncpg://app:p@localhost/edms"
+
+
+def test_migration_url_prefers_dedicated_setting() -> None:
+    """有設定時 migration 改用它（資料表 owner），app 執行期仍用 DATABASE_URL（最小權限角色）。"""
+    s = _settings_with_db_urls(MIGRATION_DATABASE_URL="postgresql+asyncpg://owner:p@localhost/edms")
+    assert s.migration_database_url == "postgresql+asyncpg://owner:p@localhost/edms"
+    assert s.DATABASE_URL == "postgresql+asyncpg://app:p@localhost/edms"
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_migration_url_blank_treated_as_unset(blank: str) -> None:
+    """空值（`.env` 留 `MIGRATION_DATABASE_URL=` 範本行）視同未設定，不可拿空字串去連線。"""
+    assert _settings_with_db_urls(MIGRATION_DATABASE_URL=blank).migration_database_url == (
+        "postgresql+asyncpg://app:p@localhost/edms"
+    )
+
+
+def test_alembic_env_uses_migration_url() -> None:
+    """`alembic/env.py` 的線上 / 離線兩條路徑都必須取 `migration_database_url`，不可直接讀 DATABASE_URL。
+
+    直接讀 DATABASE_URL 的話，切到最小權限角色後 migration 會以 app 角色執行而在 DDL 失敗。
+    以 AST 檢查屬性存取，不靠字串比對（註解裡出現同一段字不算數）。
+    """
+    env = Path(__file__).resolve().parents[2] / "alembic" / "env.py"
+    attrs = [
+        n.attr
+        for n in ast.walk(ast.parse(env.read_text(encoding="utf-8")))
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "settings"
+    ]
+    assert attrs.count("migration_database_url") == 2
+    assert "DATABASE_URL" not in attrs
+
+
+@pytest.mark.parametrize(
+    "migration_url",
+    [
+        "postgresql+asyncpg://owner:p@otherhost/edms",
+        "postgresql+asyncpg://owner:p@localhost:5433/edms",
+        "postgresql+asyncpg://owner:p@localhost/edms_dev",
+        "postgresql+asyncpg://owner:p@localhost/edms?host=/run/postgresql",
+    ],
+    ids=["host", "port", "database", "query-host"],
+)
+def test_migration_url_must_target_same_database(migration_url: str) -> None:
+    """只能換帳號、不能換庫：指向別的 host / port / 庫時啟動即擋，訊息不回顯連線字串。"""
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_settings(
+            _env_file=None,
+            DATABASE_URL="postgresql+asyncpg://app:p@localhost/edms",
+            JWT_SECRET_KEY="unit-test-secret-key-at-least-32-bytes-long",
+            DEBUG=True,
+            MIGRATION_DATABASE_URL=migration_url,
+        )
+    message = str(exc_info.value)
+    assert "MIGRATION_DATABASE_URL" in message
+    assert "owner:p" not in message
+
+
+def test_migration_url_same_database_explicit_default_port_accepted() -> None:
+    """同一個庫、只差在有沒有寫出預設埠 5432 → 視為相同。"""
+    s = _settings_with_db_urls(MIGRATION_DATABASE_URL="postgresql+asyncpg://owner:p@LOCALHOST:5432/edms")
+    assert s.migration_database_url.startswith("postgresql+asyncpg://owner:p@")
+
+
+def test_pytest_ignores_migration_url_from_dotenv() -> None:
+    """tests/conftest.py 把 MIGRATION_DATABASE_URL 清空：backend/.env 設了指向 dev 庫的值也不影響測試。
+
+    少了這一步，那個值會被 Settings 從 .env 補讀，與測試庫不同庫而在 import 時被 validator 擋下，
+    整批測試在 collection 階段失敗（CI 沒有 .env，看不到）。
+    """
+    from app.core.config import settings
+
+    assert os.environ["MIGRATION_DATABASE_URL"] == ""
+    assert settings.migration_database_url == settings.DATABASE_URL
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB_ECHO 與 DEBUG 解耦（#197 AC 5）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _settings(**overrides: object) -> Settings:
+    """建立 hermetic 的 Settings（只給必填 + 指定覆寫）。"""
+    base: dict[str, object] = {
+        "_env_file": None,
+        "DATABASE_URL": "postgresql+asyncpg://t:t@localhost/t",
+        "JWT_SECRET_KEY": "unit-test-secret-key-at-least-32-bytes-long",
+        "DEBUG": True,
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def test_db_echo_預設關閉() -> None:
+    """SQLAlchemy 的 echo 會把**每次查詢的綁定參數**原樣印進 log，預設必須是關的。"""
+    assert _settings().DB_ECHO is False
+
+
+def test_開啟_debug_不會連帶打開_db_echo() -> None:
+    """🔴 本條是 #197 AC 5 的核心：echo 與 DEBUG **解耦**。
+
+    解耦之前 `db.py` 寫的是 `echo=settings.DEBUG`，於是 DEBUG 這一個開關同時控制
+    三道 production 護欄（`config.py` 的 FRONTEND_BASE_URL / TRUSTED_PROXY_COUNT /
+    儲存根）**與**全量 SQL 參數記錄。
+
+    而 `config.py` 自己記錄過 DEBUG 被當逃生門用的情境（「現場只能以 DEBUG=true 繞過」）
+    ——真的有人在正式環境開 DEBUG 救火，SQLAlchemy 就開始把病人／員工個資印進 log，
+    而 `core/log_redaction` **涵蓋不到 `sqlalchemy.engine` 這條 logger**（該檔「未涵蓋的
+    既有暴露面」有明文）。
+    """
+    assert _settings(DEBUG=True).DB_ECHO is False, "DEBUG 不得連帶打開 SQL 參數記錄"
+
+
+def test_db_echo_可獨立開啟() -> None:
+    """正向錨點：解耦不是把功能拿掉——要看 SQL 時設一個鍵就有，且**不必開 DEBUG**。
+
+    沒有這條的話，上面兩條用「永遠回 False」也會通過。
+    刻意用 production（`DEBUG=False`）情境，才證得了「不靠 DEBUG 也開得起來」。
+    """
+    s = _settings(
+        DEBUG=False,
+        DB_ECHO=True,
+        FRONTEND_BASE_URL="https://edms.example.com",  # 以下三項為 DEBUG=false 的既有護欄
+        TRUSTED_PROXY_COUNT=0,
+        DM_FILE_STORAGE_ROOT=_ABS_DM_ROOT,
+        ET_VIDEO_STORAGE_ROOT=_ABS_ET_ROOT,
+    )
+    assert s.DB_ECHO is True
+
+
+def test_engine_的_echo_取自_db_echo_而非_debug() -> None:
+    """守門：`db.py` 建 engine 時用的是 `DB_ECHO`。
+
+    ⚠️ 以原始碼比對而非讀 `engine.echo`——module-level 的 `engine` 在 import 時就以當下的
+    settings 建好，測試改不了它。要驗的是「下一個人不會把它改回 `settings.DEBUG`」。
+    """
+    source = (Path(__file__).resolve().parents[2] / "app" / "core" / "db.py").read_text(encoding="utf-8")
+    assert "echo=settings.DB_ECHO" in source, "engine 的 echo 應取自 DB_ECHO"
+    assert "echo=settings.DEBUG" not in source, "⛔ 不得改回與 DEBUG 綁在一起（#197 AC 5）"

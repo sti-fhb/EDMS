@@ -94,6 +94,7 @@ flowchart TD
 | §3（觀察與排查） | **`<PROD_VM>`** | **docker 一律要**；systemctl／journalctl 不用 |
 | §4.1（client IP 驗收） | **`<PROD_VM>`** | 要 |
 | §5 的 psql 維護 | **`<PROD_VM>`** | 要 |
+| §5.3（ET 影片目錄遷移，一次性） | **`<PROD_VM>`** | 要 |
 
 > 本檔所稱「本機」一律指**開發者自己的電腦**，不是 `<PROD_VM>`。
 
@@ -179,7 +180,7 @@ sudo systemctl enable --now edms-deploy.timer
 
 ```
 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
-DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms
+DATABASE_URL=postgresql+asyncpg://edms:...@edms-db:5432/edms   # 切換後改為 edms_app，見 §2.8
 TRUSTED_PROXY_COUNT=2
 JWT_SECRET_KEY=<各環境獨立產生>
 ENCRYPTION_KEY=<各環境獨立產生，Base64、解碼後 32 bytes>
@@ -190,11 +191,13 @@ EDMS_BACKUP_BUCKET=gs://...
 
 `TRUSTED_PROXY_COUNT=2` 的來由：front-proxy 以單一值覆寫 `X-Forwarded-For`、edms-nginx 再追加一段，抵達後端固定為 2 段（判定規則見 [deployment-client-ip.md](../ref/deployment-client-ip.md)）。front-proxy 改動 XFF 處理方式時，本值須同步調整，且須先改本值、再上線 front-proxy 的變更——段數少於本值時後端退回連線對端，全站會被算成同一個來源。改值後的套用步驟見 §2.5「修改 `/opt/edms/.env.prod` 後套用」。
 
+正式模式預設不種示範帳號（`SEED_DEMO_ACCOUNTS` 未設定時視為 `false`）。
+
 完整欄位以 [`.env.example`](../../.env.example) 為準。production（`DEBUG=false`）另有數項會在啟動時擋下的護欄：`FRONTEND_BASE_URL` 不得指向 localhost、`TRUSTED_PROXY_COUNT` 必須明示、兩個儲存根目錄必須為絕對路徑。
 
 ⚠️ 兩點容易出錯：
 
-- **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` 必須與 `DATABASE_URL` 內的值一致。** 不一致時 DB 容器會正常啟動、health check 卻過不了，症狀看起來像後端有問題
+- **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` 必須與 owner 連線的值一致**——切換到 §2.8 最小權限角色前是 `DATABASE_URL`；切換後 owner 連線改放 `/opt/edms/.env.migrate`，`.env.prod` 不再放 `POSTGRES_PASSWORD`，`DATABASE_URL` 是 `edms_app`（不要改回 owner）。 不一致時 DB 容器會正常啟動、health check 卻過不了，症狀看起來像後端有問題
 - **`EDMS_BACKUP_BUCKET` 用維運人員實際建立的 bucket 名稱**（GCS 名稱全球唯一，可能不是預設的 `gs://edms-db-backup`）。填錯的話部署會停在備份那步——這是刻意的，沒有快照就不動 schema
 
 #### 安裝後驗收
@@ -222,6 +225,7 @@ journalctl -u edms-deploy.service -n 30
 | `.env.example` | 範本，列出 docker compose 需要的所有變數 | ✅ |
 | `.env.local` | **本機開發**用，由 `docker-compose.override.yml` 引用。從 `.env.example` 複製後填值 | ❌ |
 | `/opt/edms/.env.prod` | **正式環境**，放在 VM 上。`vm-deploy.sh` 部署時複製進 `/opt/edms/repo/.env.prod` | ❌ |
+| `/opt/edms/.env.migrate` | （選用）migration 專用的 owner 連線，只帶進 migration 容器，見 §2.8 | ❌ |
 | `backend/.env.example`、`frontend/.env.example` | 供「不透過 docker」直接跑起服務時使用 | ✅ |
 
 `MAIL_*` 一組設定於 `/opt/edms/.env.prod`，見 §2.6。
@@ -299,6 +303,117 @@ sudo chmod 600 /opt/edms/.env.prod
 `<PUBLIC_HOST>` 的 public hostname 指向 `http://<FRONT_PROXY_INTERNAL_IP>:80`，front-proxy 依 **URL 路徑前綴**把 `/edms/` 轉給本系統、`/tbms/` 轉給 TBMS。
 
 > 🗓️ `<LEGACY_HOST>` 指向同一目的地，proxy 對它回 301 至 `<PUBLIC_HOST>/edms$request_uri`（路徑與 query string 一起帶走，故既存的開通信／重設信連結仍有效）。所有既存連結過期後即可移除該 hostname。
+
+### 2.8 DB 角色：app 以最小權限角色連線（#22）
+
+稽核表 `DP_AUDIT_LOG` 為 append-only。DB 層分兩道，各自獨立：
+
+| 層 | 落點 | 何時生效 |
+|---|---|---|
+| trigger 拒絕 `UPDATE` / `DELETE` / `TRUNCATE`（含 owner、superuser 的一般 DML） | migration `7ade05c26fd8` | 部署時自動 |
+| app 執行期角色對稽核表只有 `INSERT` / `SELECT`、不可 DDL | `scripts/db-app-role.sql`（刻意不放 migration，避免 schema 綁死部署層的角色治理） | **維運依下方步驟另行切換** |
+
+兩個角色：
+
+| 角色 | 用途 | 設定 |
+|---|---|---|
+| `edms`（`POSTGRES_USER`，資料表 owner） | 執行 migration、備份、維護 | `/opt/edms/.env.migrate` 的 `MIGRATION_DATABASE_URL` |
+| `edms_app` | app 執行期 | `/opt/edms/.env.prod` 的 `DATABASE_URL` |
+
+**migration 憑證與執行期設定分離**：owner 連線只放在 `/opt/edms/.env.migrate`。`vm-deploy.sh` 只把它帶進跑 migration 的一次性容器（`run --rm`），常駐的 `edms-backend` 讀不到。切換完成後，`.env.prod` 不得含任何 owner 憑證——包括 `POSTGRES_PASSWORD`（見步驟 5）。
+
+`/opt/edms/.env.migrate` 不存在時 alembic 退回用 `DATABASE_URL`——所以**合併這個版本不需要先改任何設定**，切換前一切照舊（app 仍以 owner 連線，但 trigger 已生效）。
+
+`edms_app` 的權限（腳本冪等，每次執行都把權限收斂到這個狀態）：
+
+| 對象 | 權限 |
+|---|---|
+| 一般資料表 | `SELECT` / `INSERT` / `UPDATE` / `DELETE` |
+| `DP_AUDIT_LOG` | `SELECT` / `INSERT` |
+| `alembic_version` | `SELECT` |
+| sequence | `USAGE` / `SELECT` |
+| owner 日後（新 migration）建立的資料表與 sequence | 同上，由 `ALTER DEFAULT PRIVILEGES` 自動帶入，不必重跑腳本 |
+| DDL、`TRUNCATE`、`REFERENCES`、`TRIGGER` | 無 |
+
+#### 切換步驟（在 `<PROD_VM>` 上，一次性）
+
+順序不可顛倒：**先建角色 → 建 `.env.migrate` → 再改 `.env.prod` → 重建容器**。
+
+```bash
+cd /opt/edms/repo
+
+# 1. 建立 / 收斂 edms_app 的權限（以 owner 身分執行；可重複執行）
+sudo docker exec -i edms-db psql -U edms -d edms -v ON_ERROR_STOP=1 -v app_role=edms_app \
+  < scripts/db-app-role.sql
+
+# 2. 設定 edms_app 的密碼（互動輸入，密碼不會出現在指令列與 shell history）
+sudo docker exec -it edms-db psql -U edms -d edms -c '\password edms_app'
+
+# 3. 預檢：從 backend 容器以 edms_app 實際連一次 DB（與 app 同一條網路路徑），應印出 edms_app。
+#    連不上就先停在這裡——多半是 /opt/edms/postgres/pg_hba.conf 沒放行 edms_app 從 edms-net 連入。
+sudo docker exec -it edms-backend /app/.venv/bin/python -c "
+import asyncio, asyncpg, getpass
+async def main():
+    c = await asyncpg.connect(host='edms-db', user='edms_app', database='edms', password=getpass.getpass('edms_app 密碼: '))
+    print(await c.fetchval('SELECT current_user'))
+    await c.close()
+asyncio.run(main())"
+
+# 4. 建立 /opt/edms/.env.migrate，只放一行（值＝目前 .env.prod 的 DATABASE_URL，即 owner 的連線）：
+#      MIGRATION_DATABASE_URL=postgresql+asyncpg://edms:<owner 密碼>@edms-db:5432/edms
+#    host / port / 資料庫名須與 DATABASE_URL 相同，只能換帳號密碼（不同時後端啟動即擋下）
+sudo install -m 600 -o root -g root /dev/null /opt/edms/.env.migrate
+sudo vi /opt/edms/.env.migrate
+
+# 5. 編輯 /opt/edms/.env.prod：
+#      DATABASE_URL=postgresql+asyncpg://edms_app:<步驟 2 的密碼>@edms-db:5432/edms
+#      刪除 POSTGRES_PASSWORD 這一行（只在 DB 第一次初始化時使用，既有資料目錄不需要；
+#      在新機器重建環境時才暫時放回）
+#    密碼含 @ : / # ? % 等字元時須 percent-encode。
+
+# 6. 套用：照 §2.5「修改 /opt/edms/.env.prod 後套用」重建 edms-backend
+#    （edms-db 的 env_file 也是 .env.prod，下次部署時會因設定變動被重建一次，資料不受影響）
+```
+
+⚠️ 只改 `DATABASE_URL`、漏建 `.env.migrate` 的話，下一次部署的 migration 會以 `edms_app` 執行而失敗（沒有 DDL 權限）。`vm-deploy.sh` 在 migration 失敗時中止、不會啟動新版，不致於半套用，但部署會卡住直到補上設定。
+
+#### 驗證
+
+```bash
+# app 的連線角色應為 edms_app
+sudo docker exec edms-db psql -U edms -d edms -tAc \
+  "SELECT usename, count(*) FROM pg_stat_activity WHERE datname = 'edms' GROUP BY 1"
+
+# edms_app 對稽核表的權限：依序應為 t t f f f f f
+#   （INSERT / SELECT / UPDATE / DELETE / TRUNCATE / TRIGGER / REFERENCES）
+sudo docker exec edms-db psql -U edms -d edms -tAc \
+  "SELECT has_table_privilege('edms_app', '\"DP_AUDIT_LOG\"', p)
+   FROM unnest(ARRAY['INSERT','SELECT','UPDATE','DELETE','TRUNCATE','TRIGGER','REFERENCES']) p"
+
+# edms_app 不是任何角色的成員：應為 0
+sudo docker exec edms-db psql -U edms -d edms -tAc \
+  "SELECT count(*) FROM pg_auth_members WHERE member = 'edms_app'::regrole"
+
+# 常駐的 backend 容器不含 owner 憑證：應為 0
+sudo docker exec edms-backend sh -c 'env | grep -cE "^(POSTGRES_PASSWORD|MIGRATION_DATABASE_URL)="'
+
+# 驗鏈工具以 app 角色唯讀執行（退出碼 0＝完好）
+sudo docker exec edms-backend /app/.venv/bin/python -m app.dp.audit.verify
+```
+
+再走一次登入 → 登出，確認功能正常（登入會寫稽核）。
+
+#### 還原（切換後出問題時）
+
+把 `.env.prod` 的 `DATABASE_URL` 改回 owner 的連線（值在 `.env.migrate`），再照 §2.5 重建 `edms-backend`。`.env.migrate` 與 `edms_app` 角色留著不影響運作。
+
+#### 日常注意
+
+- migration 一律以 owner（`.env.migrate`）執行；手動跑 migration 時比照 `vm-deploy.sh` 的寫法帶入，不要把它寫進 `.env.prod`。若改用其他角色建表，新表不會自動授權給 `edms_app`，app 會出現 `permission denied`——以 owner 重跑一次步驟 1 即可補齊
+- 日後若有 migration 重建或分割 `DP_AUDIT_LOG`，須在同一 migration 重建 trigger，部署後以 owner 重跑步驟 1
+- 日後真的需要修補稽核表資料時，作法見 migration `7ade05c26fd8` 的 docstring（同一交易內暫停 trigger、並記錄理由），不要直接停用 trigger 了事
+- 備份還原（§5.1）：`pg_dump` 帶出 GRANT 與預設權限、但不含角色本身——還原到**新叢集**後先跑一次步驟 1、2 再啟動 app。還原一律整庫重建後 `pg_restore`；「清空資料表再灌資料」的方式會被 trigger 擋下
+- 院內交付版（TBMS repo `scripts/onprem-packaging/`）需比照設定兩個角色
 
 ---
 
@@ -417,7 +532,40 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 | **備份還原未演練** | §5.1 寫了還原步驟但沒跑過。「備份沒演練過等於沒有」 |
 | **檔案 rsync 未在有實際檔案時驗過** | 首次執行時兩個目錄都是空的。上傳第一份文件後應手動跑一次 `sudo systemctl start edms-backup.service` 確認 |
 | **未納入監控** | 容器掛掉不會有人知道。TBMS 有 `monitoring.md` 定義的 VM 層告警，EDMS 尚未納入 |
+| **最小權限 DB 角色切換** | 待維運執行 §2.8，完成後刪除本列 |
 | **第一個帳號為手動 bootstrap** | 因當時無 SMTP，帳號與 ET／DM 角色是直接以 app 的 ORM 寫入的，未走正規註冊流程 |
+
+---
+
+## 5.3 一次性作業：ET 影片目錄遷移（#871）
+
+**在 `<PROD_VM>` 上執行，需要 `sudo`。** 含 #871 的版本部署後執行一次；不停機、可重跑、可回復。
+
+**為何要做**：#871 之前，暫存模式新增的教材，影片目錄名與所屬教材編號不一致。播放端自 #871 起驗「影片檔須落在所屬教材目錄下」，但**跑完本作業之前只記 log、照常放行**——所以部署本身不會讓任何影片播不出來；本作業做完，驗證才真正生效。
+
+```bash
+# 1. dry-run：列出將搬移的影片與 FILE_PATH 變更，不做任何變更
+sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos
+
+# 2. 執行（逐筆先建新路徑、再改 DB；每筆各自 commit）
+sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos --apply
+echo $?   # 0＝完成且驗證已生效；1＝仍有待處理的列；2＝執行錯誤
+```
+
+| 結果 | 處置 |
+|------|------|
+| 退出碼 0、最後一行「歸屬圍籬已生效」 | 完成。抽播幾支影片確認 |
+| 退出碼 1，有「檔案不存在」的列 | **先確認 `/opt/edms/data/et_videos` 有掛上**（`sudo docker exec edms-backend ls /app/var/et_videos`）。目錄沒掛上時所有影片都會被判成「不存在」——此時**不要**加 `--accept-missing`。確認掛載正常、那幾支確實早已遺失（改前改後都是 404）後，再加 `--accept-missing` 重跑 |
+| 退出碼 1，有「需人工確認」的列（同一支檔另被其他教材引用） | 正常資料裡一支影片只屬於一份教材，這代表有某筆資料指錯了檔。用 dry-run 列出的 `video_id` / `material_id` 交給開發確認；確認屬正常後才加 `--allow-shared` 重跑 |
+| 退出碼 1，有「遷移失敗」的列 | 依訊息排除（多為權限：目錄 owner 須為 `10001:10001`，見 §2.4）後重跑；已完成的列不會重做 |
+
+- **搬移紀錄**：每一筆**動手前**先追加一行到 `/opt/edms/data/et_videos/.relocate-videos-<時間>.jsonl`（結束時會印出路徑；一筆都沒動手時不建立）。因為先寫後做，紀錄可能含沒做成的列，`--revert` 會自動略過。回復時要用它，請保留
+- **磁碟**：新路徑以 hard link 建立，不佔額外空間；舊路徑約一天後由孤兒影片清理（SCHET002）收掉。⚠️ 影片目錄須在支援 hard link 的檔案系統上（現行 bind mount 即是）——不支援時退回複製，每支影片都要完整複製一次，教師按「更新」也會跟著變慢
+- **搬移紀錄的權限**：以 0600 建立、只有執行腳本的帳號（容器內的 app 使用者）能讀寫。`--revert` 只接受執行者本人所有、他人不可寫的紀錄，**不要 chmod 放寬**
+- **回復**：`sudo docker exec edms-backend /app/.venv/bin/python -m app.et.material.relocate_videos --revert /app/var/et_videos/.relocate-videos-<時間>.jsonl`——把 FILE_PATH 改回舊值（舊路徑已被清掉時從新路徑掛回去），並撤銷驗證（回到放行模式）
+- **新環境**：沒有任何影片時同樣執行一次 `--apply`，它只會寫入標記檔使驗證生效
+- **驗證開關**：即 `/opt/edms/data/et_videos/.ownership-fence-enforced` 這個檔，由 `--apply` 在確認沒有待遷移的列後才寫入。**不要手動建立**
+- ⚠️ **只還原 DB、不還原影片目錄時**（§5.1 的 DB 與檔案備份是兩條流程）：DB 若退回本作業之前的狀態，開關檔還在，舊路徑的影片會整批 404。還原 DB 後再跑一次 `--apply` 即可（舊路徑已被清掉的列，會直接改指向正式目錄裡已有的那支）。反過來只還原影片目錄而開關檔消失，則驗證退回放行模式，再跑一次 `--apply` 即可
 
 ---
 

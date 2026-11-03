@@ -54,7 +54,6 @@ async def _seed_pending(db, *, email: str, minutes: int = 30, plaintext: str | N
             token_hash=hash_token(plaintext),
             email=email,
             user_name="待驗證",
-            pwd_hash=None,  # #212：pending 列不存密碼
             kind="SELF_REGISTER",
             expires_date=now + timedelta(minutes=minutes),
             created_user="SYSTEM",

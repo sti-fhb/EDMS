@@ -71,8 +71,9 @@ def build_audit_conditions(
 class AuditLogRepository:
     """DP_AUDIT_LOG 資料存取（append-only）。
 
-    刻意**不提供** update / delete 方法：append-only 於應用層落地（research §6）；
-    DB 帳號僅 GRANT INSERT / SELECT 屬部署層（見 issue #22）。
+    刻意**不提供** update / delete 方法：append-only 於應用層落地（research §6）。
+    DB 層另有兩道（#22）：app 執行期角色僅 GRANT INSERT / SELECT（`scripts/db-app-role.sql`），
+    以及 trigger `TRG_DP_AUDIT_LOG_DENY_MODIFY` 拒絕 UPDATE / DELETE / TRUNCATE。
     """
 
     async def acquire_chain_lock(self, db: AsyncSession) -> None:

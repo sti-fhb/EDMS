@@ -40,6 +40,16 @@
 #    都在主機磁碟上；若與 TBMS 共用同一顆磁碟，寫滿會波及 TBMS。⛔ 不要直接把 `/tmp` 改成 tmpfs——
 #    tmpfs 算進上面的記憶體上限，4 個並行的 500 MB 影片上傳就會 OOM。另案處理。
 #
+# ── 健康檢查與行程數上限（#833 B5、B6）──────────────────────────────────
+# - 後端 healthcheck 打 `/health`（含 DB 探活）。⚠️ **只標狀態、不會自動重啟**：Docker 非 swarm 模式下
+#   unhealthy 的容器照樣跑著，`restart: unless-stopped` 只管行程結束。它的用處是讓狀態看得見：
+#     sudo docker inspect -f '{{.State.Health.Status}}' edms-backend   → healthy / unhealthy
+#     sudo docker inspect -f '{{json .State.Health.Log}}' edms-backend → 最近幾次檢查的結果
+#   要自動重啟需另加 autoheal 之類的容器，它得掛 Docker socket（等同主機 root），屬另案取捨
+# - `pids_limit`：擋 fork bomb 與子行程失控。用此鍵而非較新的 `deploy.resources.limits.pids`——
+#   VM 上的 compose 版本未知，舊版不認後者會讓部署整個失敗
+# - 尚未處理（需要 VM 上的資訊，另行交辦）：磁碟上限（見上方）、`memswap_limit`（要先知道 VM 有沒有 swap）
+#
 # ── 容器 log 輪替（#810）────────────────────────────────────────────────
 # Docker 把容器的 stdout/stderr（nginx 存取紀錄、後端錯誤 log）存成主機磁碟上的檔案，預設不輪替、
 # 只會一直長大；有人大量發請求時可寫滿磁碟。每個容器最多 5 份 × 50 MB，更早的會被刪除。
@@ -59,6 +69,25 @@ services:
         limits:
           cpus: "1.5"
           memory: 2g
+    # 單一 uvicorn worker；執行緒（anyio 執行緒池 40、asyncio 預設執行器、bcrypt 執行器、APScheduler）
+    # 加上上傳時的 ffprobe 子行程（每個本身也有數個執行緒），正常約一百上下。執行緒也算在內
+    pids_limit: 256
+    # 打容器內的後端（uvicorn 聽 0.0.0.0:8000；⚠️ 用 127.0.0.1 而非 localhost，後者可能先解析成 ::1）。
+    # 映像是 python:3.12-slim、沒有 curl／wget，改用標準函式庫。非 200（含 DB 連不上的 503）、
+    # 連不上、逾時都以非 0 結束。timeout 10 秒：連線池滿時 `/health` 要等滿 `DB_POOL_TIMEOUT`（10 秒）
+    # 才回 503，這種情況也該算不健康。`ProxyHandler({})`：不吃 env_file 裡可能出現的 HTTP_PROXY，
+    # 否則設了 proxy 又沒設 NO_PROXY 時會繞去 proxy、永遠 unhealthy，且原因很難看出來（code review）
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request as u; sys.exit(0 if u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8000/health', timeout=9).status == 200 else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # 啟動時要跑 migration、暖機 bcrypt，這段期間的失敗不計
+      start_period: 60s
     logging: &log-rotation
       driver: json-file
       options:
@@ -93,6 +122,8 @@ services:
         limits:
           cpus: "0.5"
           memory: 256m
+    # master 加 2 個 worker（nginx/tune-main-conf.sh 固定 worker 數）
+    pids_limit: 64
     logging: *log-rotation
     networks:
       - edms-net
@@ -106,6 +137,14 @@ services:
         limits:
           cpus: "1.0"
           memory: 2g
+    # 每條連線一個行程：max_connections 預設 100（後端最多 15 條，其餘是維護通道），加上背景行程、
+    # autovacuum（3）與平行查詢 worker（max_worker_processes 8），約 120
+    pids_limit: 200
+    # ⚠️ pids_limit 與 shm_size 改的是容器設定：**首次部署會重建 edms-db 一次**（發生在備份與 migration 之前）。
+    # ⚠️ 上面的 200 依 max_connections 預設 100 估；`command` 加 `-c max_connections=…` 調大時要一起重估
+    # 平行查詢的動態共享記憶體放在 /dev/shm；Docker 預設只給 64 MB，不夠時查詢直接失敗
+    # （"could not resize shared memory segment"）。算進上面的 2 GB 記憶體上限
+    shm_size: 256m
     logging: *log-rotation
     # 對外維護通道。容器內仍是 5432，主機側錯開用 5433（5432 為 tbms-db）。
     # 白名單由兩層把關：GCP firewall 限來源 IP；pg_hba 對外強制

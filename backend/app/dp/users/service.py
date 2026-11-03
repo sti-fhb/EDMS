@@ -1,7 +1,7 @@
 """使用者管理服務（US4，#67 代建改邀請流程）：查詢 / 邀請建立 / 待啟用邀請維護 / 停用 / 啟用 / 解鎖 / 姓名維護。
 
 建立帳號改為**邀請連結信**：管理者僅填 Email / 姓名，寫 `DP_PENDING_REGISTRATION`
-（`kind=ADMIN_INVITE`、`pwd_hash=NULL`）並寄邀請信；**不建 DP_USER、不授角色**——使用者點連結
+（`kind=ADMIN_INVITE`，不含密碼）並寄邀請信；**不建 DP_USER、不授角色**——使用者點連結
 自設密碼後才由 `activate_pending_account` 落地啟用副作用。重寄 / 取消邀請亦為管理者動作。
 所有 CUD 於同交易內經 SRVDP003（AuditLogService）寫稽核（含 before / after value）。
 授權：router-level 掛 `require_any_module_admin()`（需 ET 或 DM 任一模組管理者，#250 落地）。
@@ -109,7 +109,7 @@ class UsersService:
         return await self._repo.fetch_display_names(db, user_ids)
 
     async def create_user(self, db: AsyncSession, *, data: UserCreate, operator: OperatorInfo) -> None:
-        """管理者建立帳號＝寄邀請信（#67）：檢 Email 未被佔用 → 寫 pending（ADMIN_INVITE、pwd_hash=NULL）
+        """管理者建立帳號＝寄邀請信（#67）：檢 Email 未被佔用 → 寫 pending（ADMIN_INVITE、不含密碼）
         + 寄 ACCOUNT_INVITE 邀請信 + 稽核。**不建 DP_USER、不授角色**（啟用時才落地）。
 
         重複 Email 分五種情況（#111 / #226）：
@@ -168,7 +168,6 @@ class UsersService:
                 token_hash=hash_token(plaintext),
                 email=data.email,
                 user_name=data.user_name,
-                pwd_hash=None,
                 expires_date=expires_date,
                 now=now,
                 kind=KIND_ADMIN_INVITE,
@@ -288,7 +287,6 @@ class UsersService:
                 token_hash=hash_token(plaintext),
                 email=invite.email,
                 user_name=invite.user_name,
-                pwd_hash=None,
                 expires_date=now + timedelta(minutes=ttl_min),
                 now=now,
                 kind=KIND_ADMIN_INVITE,
@@ -534,7 +532,7 @@ class UsersService:
 
         ⚠️ **此參數由四個功能共用**（密碼重設 / 註冊啟用 / 驗證信 / 本方法的邀請與重寄），
         故 #528 為它訂的 2 小時上限**也是邀請連結的上限**——那個上限是依密碼重設的風險
-        （#50：outbox 保存明文連結；#50 只遮罩已寄出的重設 / Email 變更信，邀請信不在範圍）
+        （#50：outbox 保存明文連結；邀請信寄出後同樣遮罩，但 PENDING 列仍存原文）
         訂的，不是依邀請的使用情境。若日後要讓邀請連結
         更長命，正解是把邀請 TTL 拆成獨立參數，而非放寬這個共用值。
         """

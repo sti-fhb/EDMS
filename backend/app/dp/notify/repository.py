@@ -78,6 +78,38 @@ class NotifyRepository:
         db.add_all([DpEmailLog(**values) for values in rows])
         await db.flush()
 
+    async def redact_failed_created_before(
+        self,
+        db: AsyncSession,
+        *,
+        module: str,
+        template_code: str,
+        cutoff: datetime,
+        redacted_body: str,
+        now: datetime,
+    ) -> int:
+        """把建立於 cutoff（含）之前的 FAILED 列 BODY 改寫為遮罩字串，回傳筆數（#50，SCHDP001）。
+
+        排除空 BODY（渲染失敗列，本來就沒有內容；遮罩會讓它看起來像「曾含連結」）與已遮罩列
+        （每日重跑不重複改寫、`UPDATED_DATE` 不被刷新）。條件含 STATUS 與 CREATED_DATE，
+        走 `IX_DP_EMAIL_LOG_STATUS_CREATED`。
+        """
+        stmt = (
+            update(DpEmailLog)
+            .where(
+                DpEmailLog.status == "FAILED",
+                DpEmailLog.module == module,
+                DpEmailLog.template_code == template_code,
+                DpEmailLog.created_date <= cutoff,
+                DpEmailLog.body != "",
+                DpEmailLog.body != redacted_body,
+            )
+            .values(body=redacted_body, updated_user="SYSTEM", updated_date=now)
+            .execution_options(synchronize_session=False)
+        )
+        result = await db.execute(stmt)
+        return result.rowcount or 0
+
     async def list_pending_for_attempt(
         self, db: AsyncSession, *, limit: int, interval_minutes: int, now: datetime
     ) -> list[DpEmailLog]:

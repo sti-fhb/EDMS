@@ -1,0 +1,15 @@
+# 一律以 LF 取出，不受 Windows 的 core.autocrlf 影響（#833 B3）：
+# - 建置腳本在映像內以 busybox sh 執行，CRLF 會讓 `set -eu\r` 等每一行都壞掉；在 Windows 上 checkout 後建映像時
+#   （例如院內交付版的打包）建置會失敗
+# - 官方主設定的副本是腳本的測試輸入，腳本以整行比對（grep -x），行尾多出 \r 就比對不到
+nginx/tune-main-conf.sh text eol=lf
+backend/tests/fixtures/nginx_official_main.conf text eol=lf
+
+# PowerShell 腳本（#635）：PowerShell 本身 LF / CRLF 都吃，釘 LF 是為了
+# `scripts/test-detect-patterns.ps1`——它以 `(?m)^\$pattern = '(.+)'$` 從
+# `detect-test-procs.ps1` 抽出 regex 來測。
+# 2026-11-02 以 CRLF 副本實測：抽取會**直接失敗**（`cannot find $pattern`、exit 1），
+# 不是靜默抽到錯的值——多行模式下 `$` 在 `\n` 前匹配，而 CRLF 的 `\n` 前是 `\r`、
+# 不是收尾的單引號，所以 `'$` 整個匹配不到。失敗是大聲的，這是好的那種結果。
+# 釘 LF 是讓它根本不發生；若日後有人移除本行，症狀會是該測試在 Windows 上無法執行。
+*.ps1 text eol=lf
