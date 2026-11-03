@@ -19,7 +19,7 @@ from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
-from app.core.log_redaction import format_exception_for_log, install_exception_redaction
+from app.core.log_sanitize import install_control_char_escape
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
 from app.core.request_context import set_client_ip
@@ -70,8 +70,9 @@ logger = logging.getLogger(__name__)
 # 遮罩 access log 中的憑證型 query 參數（#255：ET 影片播放票只能放 query string）。
 # 於 module-level 執行，確保在第一個請求進來之前就掛上。
 install_access_log_redaction()
-# `logger.exception()` 帶出的 SQL 綁定參數等一律去識別化（#833 C2）；排程與發信 worker 同行程，一併涵蓋
-install_exception_redaction()
+# `logger.exception()` 帶出的 SQL 綁定參數等一律去識別化（#833 C2），再轉義控制字元（#913）；
+# 排程與發信 worker 同行程，一併涵蓋。轉義的安裝函式會先裝遮罩，順序不靠這裡
+install_control_char_escape()
 
 
 @asynccontextmanager
@@ -337,10 +338,10 @@ async def data_error_handler(request: Request, exc: DataError) -> JSONResponse:
     **兄弟類別**、互不繼承；`tests/unit/test_core_data_error_handler.py` 把這個前提釘住。
     """
     logger.warning(
-        "DataError on %s %s\n%s",
+        "DataError on %s %s",
         request.method,
         request.url.path,
-        format_exception_for_log(exc),
+        exc_info=exc,
     )
     return JSONResponse(
         status_code=422,
@@ -382,11 +383,11 @@ def db_busy_response(request: Request, exc: Exception) -> JSONResponse | None:
     if not _is_db_busy(exc):
         return None
     logger.warning(
-        "DB busy (%s) on %s %s\n%s",
+        "DB busy (%s) on %s %s",
         type(exc).__name__,
         request.method,
         request.url.path,
-        format_exception_for_log(exc),
+        exc_info=exc,
     )
     return JSONResponse(
         status_code=503,
@@ -401,7 +402,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     前端只看到 "Internal Server Error"，不洩漏內部細節。
     後端 log 保留例外型別、遮罩後訊息與堆疊位置供排查；刻意不用 traceback.format_exc()
     ——SQLAlchemy StatementError 的訊息含 SQL 與綁定參數，會把個資寫進 log（#123），
-    改由 app/core/log_redaction.format_exception_for_log 去識別化。
+    改以 `exc_info` 交給全域 LogRecordFactory，由 `format_exception_for_log` 去識別化、再轉義控制字元
+    （#913：原本把堆疊組進訊息本體，訊息本體須逐行轉義，堆疊會被壓成一行）。
     AppError / HTTPException / RequestValidationError 均有專屬 handler，不會走到此處。
     DB 等候上限到期（查詢逾時、等稽核鎖逾時、連線池等候逾時）回 503，見 `db_busy_response`。
     """
@@ -409,10 +411,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     if busy is not None:
         return busy
     logger.error(
-        "Unhandled exception on %s %s\n%s",
+        "Unhandled exception on %s %s",
         request.method,
         request.url.path,
-        format_exception_for_log(exc),
+        exc_info=exc,
     )
     return JSONResponse(
         status_code=500,

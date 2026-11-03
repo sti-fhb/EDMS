@@ -43,6 +43,15 @@ logger.error("查無此人 email=%s", email)          # 要記就用 mask_email(
 ⛔ 兜底涵蓋不到的三種情況，見 `app/core/log_redaction.py` 檔頭的「未涵蓋的既有暴露面」
 （訊息本體、Starlette lifespan、`sqlalchemy.engine` 的 echo）。**不要假設「反正有遮罩」。**
 
+### 控制字元由全域轉義，換行也是
+
+`app/core/log_sanitize.install_control_char_escape`（#913）在紀錄產生時把訊息、參數與 traceback
+中的控制字元轉成字面（`ESC` → `\x1b`、換行 → `\n`），防止偽造 log 行與操控終端機。這只管
+**完整性**，不管機密性——個資照樣要自己遮罩。
+
+⚠️ 因此**訊息本體不能刻意多行**：`logger.error("失敗\n%s", 多行文字)` 會被壓成一行。要附堆疊就用
+`exc_info=exc`，traceback 保留換行（續行自動縮排）。
+
 ## 禁用
 
 - `print()` / `sys.stdout.write()` / `sys.stderr.write()`
