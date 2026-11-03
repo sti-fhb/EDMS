@@ -78,6 +78,21 @@ async def test_連線池等候逾時回_503_系統忙碌(caplog):
     assert [r.levelno for r in caplog.records if r.name == "main"] == [logging.WARNING]
 
 
+async def test_忙碌_log_遮罩綁定參數且保留堆疊(caplog):
+    """#913 起改以 `exc_info` 交給全域 factory 遮罩；守住「factory 沒裝就漏個資」這條路。"""
+    email = "wang.secret@example.com"
+    try:
+        raise DBAPIError("SELECT * FROM x WHERE EMAIL = $1", (email,), _PgError("57014"))
+    except DBAPIError as exc:
+        with caplog.at_level(logging.WARNING, logger="main"):
+            await unhandled_exception_handler(_request(), exc)
+
+    assert email not in caplog.text
+    assert "[敏感內容已遮罩]" in caplog.text
+    assert "DB busy (DBAPIError) on GET /api/dp/audit/logs/export" in caplog.text
+    assert "test_core_query_timeout_handler.py" in caplog.text  # 堆疊位置仍在
+
+
 async def test_Python_內建的_TimeoutError_照舊回_500(caplog):
     """對照：只認 SQLAlchemy 的連線池逾時。內建 `TimeoutError`（例如呼叫外部服務逾時）不是 DB 忙碌。"""
     with caplog.at_level(logging.WARNING, logger="main"):

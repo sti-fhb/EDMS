@@ -17,6 +17,8 @@ PostgreSQL 會拒絕兩類「格式上合法、值域上不合法」的輸入—
 的語意吃掉，而且**不會有任何現有測試變紅**（它們斷言的是 409 / 重試成功，不是例外型別）。
 """
 
+import logging
+
 import pytest
 from sqlalchemy.exc import DataError, IntegrityError
 from starlette.requests import Request
@@ -52,6 +54,21 @@ async def test_回應不含_SQL_與綁定參數():
     assert "COMMON_422" in body
     assert "INSERT INTO" not in body, "不得洩漏 SQL"
     assert "character varying" not in body, "不得洩漏欄位型別"
+
+
+async def test_log_遮罩綁定參數且保留堆疊(caplog):
+    """#913 起改以 `exc_info` 交給全域 factory 遮罩；守住「factory 沒裝就漏個資」這條路。"""
+    email = "wang.secret@example.com"
+    try:
+        raise DataError("INSERT INTO x (EMAIL) VALUES ($1)", (email,), Exception("value too long"))
+    except DataError as exc:
+        with caplog.at_level(logging.WARNING, logger="main"):
+            await data_error_handler(_request(), exc)
+
+    assert email not in caplog.text
+    assert "[敏感內容已遮罩]" in caplog.text
+    assert "DataError on POST /api/dm/documents" in caplog.text
+    assert "test_core_data_error_handler.py" in caplog.text  # 堆疊位置仍在
 
 
 def test_handler_已註冊於_app():
