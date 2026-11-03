@@ -143,7 +143,7 @@ class TestProbeFailureBranches:
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     def test_限制單執行緒_且放在檔案路徑之前(self, monkeypatch) -> None:
-        """不限制的話，ffprobe 的執行緒數隨主機核心數成長，吃後端容器的 `pids_limit`（#905 B17）。
+        """不限制的話，ffprobe 的執行緒數隨主機核心數成長，吃後端容器的行程數上限（#905 B17）。
 
         沒有 `-i` 時檔案是位置參數，`-threads` 要在它之前才會套用到這個輸入。實際能不能解析長度
         由 integration 的 `test_et_video.py::TestProbe` 以真的 ffprobe 驗證。

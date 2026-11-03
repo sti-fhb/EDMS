@@ -89,15 +89,27 @@ def test_健康檢查打的是容器內的後端():
 
 
 def test_每個容器都有行程數上限():
-    """擋 fork bomb 與行程失控（例如 ffprobe 子行程沒收掉）。用 `pids_limit` 而非較新的
-    `deploy.resources.limits.pids`：VM 上的 compose 版本未知，舊版不認後者會讓部署整個失敗。"""
+    """擋 fork bomb 與行程失控（例如 ffprobe 子行程沒收掉）。寫在 `deploy.resources.limits.pids`。"""
     services = _services()
 
-    assert {name: s.get("pids_limit") for name, s in services.items()} == {
+    assert {name: s["deploy"]["resources"]["limits"].get("pids") for name, s in services.items()} == {
         "edms-backend": 256,
         "edms-nginx": 64,
         "edms-db": 200,
     }
+
+
+def test_不得同時使用_pids_limit_與_deploy_resources_limits():
+    """VM 上的 compose 把 `pids_limit` 與 `deploy.resources.limits.pids` 視為同一個設定：服務已有
+    `deploy.resources.limits` 時再寫 `pids_limit`，整份設定檔會以「can't set distinct values」拒絕載入，
+    `vm-deploy.sh` 卡在 pull、部署整個停擺（#896）。CI 不跑 docker，只能在這裡擋。"""
+    conflicts = [
+        name
+        for name, s in _services().items()
+        if "pids_limit" in s and "limits" in s.get("deploy", {}).get("resources", {})
+    ]
+
+    assert conflicts == []
 
 
 def test_DB_的共享記憶體():
@@ -106,7 +118,7 @@ def test_DB_的共享記憶體():
 
 
 def test_DB_未調整_max_connections():
-    """DB 的 `pids_limit` 200 依 `max_connections` 預設 100 估算（每條連線一個行程）。日後調大連線數而
+    """DB 的行程數上限 200 依 `max_connections` 預設 100 估算（每條連線一個行程）。日後調大連線數而
     沒重估，連線數還沒到上限就先 fork 失敗——這條在那時提醒（security review）。"""
     command = " ".join(_services()["edms-db"].get("command", []))
 
