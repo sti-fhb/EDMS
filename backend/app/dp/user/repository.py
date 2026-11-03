@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Select, case, delete, func, select, update
+from sqlalchemy import ColumnElement, Select, case, delete, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
@@ -10,6 +10,36 @@ from app.dp.users.models import DpUser
 
 _SYSTEM_USER = "SYSTEM"
 _TOKEN_TYPE_EMAIL_CHANGE = "EMAIL_CHANGE"  # noqa: S105 — DP_PWD_RESET.TOKEN_TYPE 值，非密碼
+
+
+def _email_change_token_active(now: datetime) -> tuple[ColumnElement[bool], ...]:
+    """EMAIL_CHANGE token「仍有效」的**唯一定義**：未使用（未作廢）且未逾 EXPIRES_DATE。
+
+    驗證連結消費（`consume_email_change_token`）與「變更審核中 / 新信箱占用」判定（#904）共用這一條，
+    確保畫面上的「審核中」與連結本身能否完成變更永遠一致；新增判定點時必須沿用，不可另寫條件。
+    逾期時間以 token 上的 EXPIRES_DATE 為準（申請時依 LOGIN.EMAIL_CHANGE_TTL_MIN 算好），不另行推算。
+    """
+    return (
+        DpPwdReset.token_type == _TOKEN_TYPE_EMAIL_CHANGE,
+        DpPwdReset.used_date.is_(None),
+        DpPwdReset.expires_date > now,
+    )
+
+
+def _pending_email_active(now: datetime) -> ColumnElement[bool]:
+    """DP_USER.PENDING_EMAIL 是否仍「待驗證中」：本人有一筆仍有效、NEW_EMAIL 相同的 EMAIL_CHANGE token。
+
+    PENDING_EMAIL 於連結逾期 / 作廢後**不會被清空**（#904 SA 裁示採讀取時判定、不以 SCHDP001 清欄位），
+    殘值會讓畫面一直顯示「變更審核中」並占住該 Email。目前兩個讀取點（`get_active_pending_email`、
+    `email_taken_for_change`）皆經本判定。
+
+    ⛔ **日後新增 PENDING_EMAIL 讀取點必須經過此判定**，不可直接讀欄位值，也不可另寫逾期條件。
+    """
+    return exists().where(
+        DpPwdReset.user_id == DpUser.user_id,
+        DpPwdReset.new_email == DpUser.pending_email,
+        *_email_change_token_active(now),
+    )
 
 
 class AuthRepository:
@@ -44,18 +74,26 @@ class AuthRepository:
         stmt = select(func.count()).select_from(DpUser).where(DpUser.email == email)
         return (await db.execute(stmt)).scalar_one() > 0
 
-    async def email_taken_for_change(self, db: AsyncSession, email: str, *, requester_id: str) -> bool:
+    async def email_taken_for_change(self, db: AsyncSession, email: str, *, requester_id: str, now: datetime) -> bool:
         """Email 變更之目標唯一性：已被任一帳號使用（EMAIL）或**他人**待驗證中（PENDING_EMAIL）即為已占用。
 
         延遲切換下 `email_exists` 只查 EMAIL 會漏「他人已申請改為同一新信箱、尚未驗證」的窗口
         （US8 code review）；故一併查他人 PENDING_EMAIL（排除自己，允許本人重複申請同一新信箱）。
+        他人的驗證連結已逾期 / 作廢者不算占用（#904），判定見 `_pending_email_active`。
         """
-        stmt = (
-            select(func.count())
-            .select_from(DpUser)
-            .where((DpUser.email == email) | ((DpUser.pending_email == email) & (DpUser.user_id != requester_id)))
-        )
+        others_pending = (DpUser.pending_email == email) & (DpUser.user_id != requester_id) & _pending_email_active(now)
+        stmt = select(func.count()).select_from(DpUser).where((DpUser.email == email) | others_pending)
         return (await db.execute(stmt)).scalar_one() > 0
+
+    async def get_active_pending_email(self, db: AsyncSession, user_id: str, *, now: datetime) -> str | None:
+        """本人仍待驗證中的新信箱；無申請或驗證連結已逾期 / 作廢回 None（#904，供 DP10「變更審核中」）。"""
+        stmt = select(DpUser.pending_email).where(
+            DpUser.user_id == user_id,
+            DpUser.deleted == 0,
+            DpUser.pending_email.is_not(None),
+            _pending_email_active(now),
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
 
     async def create_user(
         self,
@@ -429,12 +467,7 @@ class AuthRepository:
         """
         stmt = (
             update(DpPwdReset)
-            .where(
-                DpPwdReset.token_hash == token_hash,
-                DpPwdReset.token_type == _TOKEN_TYPE_EMAIL_CHANGE,
-                DpPwdReset.used_date.is_(None),
-                DpPwdReset.expires_date > now,
-            )
+            .where(DpPwdReset.token_hash == token_hash, *_email_change_token_active(now))
             .values(used_date=now)
             .returning(DpPwdReset.user_id, DpPwdReset.new_email)
         )

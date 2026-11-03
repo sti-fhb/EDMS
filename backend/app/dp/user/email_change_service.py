@@ -53,7 +53,8 @@ class EmailChangeService:
         if user is None:
             raise AppError(status_code=404, detail="查無此帳號", error_code="DP_USER_008")
         # 新信箱唯一：已被任一帳號使用或他人待驗證中即擋（延遲切換窗口，含軟刪除；亦擋「改為自己現用信箱」）
-        if await self._repo.email_taken_for_change(db, new_email, requester_id=user_id):
+        # 他人驗證連結已逾期 / 作廢者不算待驗證中（#904）
+        if await self._repo.email_taken_for_change(db, new_email, requester_id=user_id, now=now):
             raise AppError(status_code=409, detail="此 Email 已被使用", error_code="DP_USER_007")
 
         ttl_min = await self._params.get_int_param(db, "LOGIN", "EMAIL_CHANGE_TTL_MIN", _DEFAULT_TTL_MIN)
@@ -86,7 +87,7 @@ class EmailChangeService:
         """以 token 完成 Email 變更：原子消費 token → 切 EMAIL + 清 PENDING + 稽核（前後值）。
 
         Raises:
-            AppError: token 失效 / 已用 / 逾時（400 DP_PWD_005）、查無帳號（400 DP_PWD_005）。
+            AppError: token 失效 / 已用 / 逾時、查無帳號、NEW_EMAIL 已非目前 PENDING_EMAIL（皆 400 DP_PWD_005）。
         """
         now = utcnow()
         consumed = await self._repo.consume_email_change_token(db, token_hash=hash_token(token), now=now)
@@ -94,7 +95,9 @@ class EmailChangeService:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         user_id, new_email = consumed
         user = await self._repo.get_by_user_id(db, user_id)
-        if user is None:
+        # NEW_EMAIL 須仍是目前的 PENDING_EMAIL：與「變更審核中」同一判定（#904，repository `_pending_email_active`），
+        # 並發重複申請殘留的另一筆有效 token 不可完成變更，免得畫面顯示審核中 Y、點 X 的連結卻切成 X
+        if user is None or user.pending_email != new_email:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
         before_email = user.email

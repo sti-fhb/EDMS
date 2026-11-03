@@ -571,8 +571,7 @@ async def get_me(
     db: AsyncSession = Depends(get_db),
 ) -> MeResponse:
     """本人個人資料：姓名 / 帳號（Email）/ 待驗證新信箱。"""
-    user = await _profile_service.get_me(db, user_id=payload.sub)
-    return MeResponse.model_validate(user)
+    return await _profile_service.get_me(db, user_id=payload.sub)
 
 
 @router.get("/dp/user/me/password-policy", response_model=ApplicablePasswordPolicyResponse)

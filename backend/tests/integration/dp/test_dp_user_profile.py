@@ -4,7 +4,7 @@ Email 延遲切換（唯一 / token 寄新信箱 / 舊仍有效 / 驗證切換 /
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
@@ -203,6 +203,79 @@ async def test_get_me_endpoint(client, db):
     assert body["email"] == "me@edms.local" and body["user_name"] == "個資測試" and body["pending_email"] is None
 
 
+async def _expire_email_change_tokens(db, user_id):
+    """把該使用者所有 EMAIL_CHANGE token 的 EXPIRES_DATE 推到過去（模擬驗證連結逾期）。"""
+    await db.execute(
+        update(DpPwdReset)
+        .where(DpPwdReset.user_id == user_id, DpPwdReset.token_type == "EMAIL_CHANGE")
+        .values(expires_date=utcnow() - timedelta(minutes=1))
+    )
+    await db.flush()
+
+
+async def test_get_me_pending_email_before_expiry(db):
+    """驗證連結仍在效期內 → pending_email 照常回傳（「變更審核中」行為不變，#904）。"""
+    await _make_user(db, user_id="pe1", email="pe1@edms.local")
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="pe1", new_email="pe1-new@edms.local")
+
+    me = await ProfileService().get_me(db, user_id="pe1")
+    assert me.email == "pe1@edms.local" and me.pending_email == "pe1-new@edms.local"
+
+
+async def test_get_me_pending_email_after_expiry(client, db):
+    """驗證連結逾期 → /me 回 pending_email=null（欄位殘值不再顯示「變更審核中」，#904）。"""
+    await _make_user(db, user_id="pe2", email="pe2@edms.local")
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="pe2", new_email="pe2-new@edms.local")
+    await _expire_email_change_tokens(db, "pe2")
+
+    r = await client.get("/api/dp/user/me", headers=_bearer("pe2"))
+    assert r.status_code == 200 and r.json()["pending_email"] is None
+
+
+async def test_get_me_pending_email_after_token_invalidated(db):
+    """token 已作廢（USED_DATE 有值）但 PENDING_EMAIL 殘值仍在 → 視為無待驗證（#904）。"""
+    await _make_user(db, user_id="pe3", email="pe3@edms.local")
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="pe3", new_email="pe3-new@edms.local")
+    await db.execute(update(DpPwdReset).where(DpPwdReset.user_id == "pe3").values(used_date=utcnow()))
+    await db.flush()
+
+    me = await ProfileService().get_me(db, user_id="pe3")
+    assert me.pending_email is None
+
+
+async def test_get_me_pending_email_mismatched_token_not_active(db):
+    """token 仍有效但 NEW_EMAIL 與 PENDING_EMAIL 不符（資料修補 / 直接寫庫）→ 不算待驗證中（#904）。"""
+    user = await _make_user(db, user_id="pe4", email="pe4@edms.local")
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="pe4", new_email="pe4-new@edms.local")
+    user.pending_email = "other@edms.local"
+    await db.flush()
+
+    me = await ProfileService().get_me(db, user_id="pe4")
+    assert me.pending_email is None
+
+
+async def test_email_change_reapply_after_expiry_old_link_still_invalid(db):
+    """逾期後再次申請：寄出新驗證信；舊（逾期）連結仍不可完成變更，新連結可（#904 AC2 / AC5）。"""
+    await _make_user(db, user_id="ra", email="ra@edms.local")
+    notify = _NotifyStub()
+    await EmailChangeService(notify=notify).request(db, user_id="ra", new_email="ra-old@edms.local")
+    old_token = notify.calls[0]["params"]["verify_link"].split("token=")[1]
+    await _expire_email_change_tokens(db, "ra")
+    assert (await ProfileService().get_me(db, user_id="ra")).pending_email is None
+
+    await EmailChangeService(notify=notify).request(db, user_id="ra", new_email="ra-new@edms.local")
+    assert notify.calls[1]["recipients"] == ["ra-new@edms.local"]
+    assert (await ProfileService().get_me(db, user_id="ra")).pending_email == "ra-new@edms.local"
+    new_token = notify.calls[1]["params"]["verify_link"].split("token=")[1]
+
+    with pytest.raises(AppError) as exc:
+        await EmailChangeService().verify(db, token=old_token)
+    assert exc.value.error_code == "DP_PWD_005"
+    await EmailChangeService().verify(db, token=new_token)
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "ra"))).scalar_one()
+    assert user.email == "ra-new@edms.local" and user.pending_email is None
+
+
 # --- Email 變更延遲切換（AC2 / AC3 / AC4） ---
 
 
@@ -231,14 +304,25 @@ async def test_email_change_duplicate_rejected(db):
 
 
 async def test_email_change_rejects_others_pending(db):
-    """他人已申請改為同一新信箱（尚未驗證）→ 申請即擋 DP_USER_007（延遲切換窗口，code review M2）。"""
+    """他人已申請改為同一新信箱（連結仍在效期內）→ 申請即擋 DP_USER_007（延遲切換窗口，code review M2）。"""
     await _make_user(db, user_id="a1", email="a1@edms.local")
-    other = await _make_user(db, user_id="b1", email="b1@edms.local")
-    other.pending_email = "shared@edms.local"  # b1 已申請改為 shared@，尚未驗證
-    await db.flush()
+    await _make_user(db, user_id="b1", email="b1@edms.local")
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="b1", new_email="shared@edms.local")
     with pytest.raises(AppError) as exc:
         await EmailChangeService().request(db, user_id="a1", new_email="shared@edms.local")
     assert exc.value.status_code == 409 and exc.value.error_code == "DP_USER_007"
+
+
+async def test_email_change_allows_others_expired_pending(db):
+    """他人申請的新信箱連結已逾期（PENDING_EMAIL 殘值仍在）→ 不再占用，可被其他帳號申請（#904）。"""
+    await _make_user(db, user_id="a2", email="a2@edms.local")
+    await _make_user(db, user_id="b2", email="b2@edms.local")
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="b2", new_email="freed@edms.local")
+    await _expire_email_change_tokens(db, "b2")
+
+    await EmailChangeService(notify=_NotifyStub()).request(db, user_id="a2", new_email="freed@edms.local")
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "a2"))).scalar_one()
+    assert user.pending_email == "freed@edms.local"
 
 
 async def test_email_change_verify_conflict_returns_409(db):
@@ -288,6 +372,26 @@ async def test_email_change_verify_expired(db):
     assert exc.value.error_code == "DP_PWD_005"
     user = (await db.execute(select(DpUser).where(DpUser.user_id == "ev"))).scalar_one()
     assert user.email == "keep@edms.local"
+
+
+async def test_email_change_verify_rejects_token_not_matching_pending(db):
+    """token 有效但 NEW_EMAIL 已非目前 PENDING_EMAIL（並發重複申請殘留）→ DP_PWD_005，EMAIL 不變。
+
+    「變更審核中」只認 NEW_EMAIL 與 PENDING_EMAIL 相同之 token（#904），完成變更須採同一判定，
+    否則畫面顯示審核中 Y、點 X 的連結卻切成 X。
+    """
+    user = await _make_user(db, user_id="mm", email="mm@edms.local")
+    notify = _NotifyStub()
+    await EmailChangeService(notify=notify).request(db, user_id="mm", new_email="mm-x@edms.local")
+    token_plain = notify.calls[0]["params"]["verify_link"].split("token=")[1]
+    user.pending_email = "mm-y@edms.local"  # 模擬並發的另一筆申請最後寫入 PENDING_EMAIL
+    await db.flush()
+
+    with pytest.raises(AppError) as exc:
+        await EmailChangeService().verify(db, token=token_plain)
+    assert exc.value.error_code == "DP_PWD_005"
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "mm"))).scalar_one()
+    assert user.email == "mm@edms.local"
 
 
 async def test_email_change_endpoint_normalizes_email(client, db):

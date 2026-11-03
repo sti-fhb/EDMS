@@ -14,7 +14,7 @@
 
 1. **Given** 使用者進入個人資料頁編輯**姓名**，**When** 儲存，**Then** 直接更新 `DP_USER`（ET / DM 兩端同步生效）並寫入稽核
 2. **Given** 使用者變更**帳號（Email）**輸入新 Email，**When** 新 Email 未被他人使用，**Then** 寄驗證信至**新 Email**（連結預設 30 分鐘有效，經 US6 發信、範本 `MODULE=DP`「帳號變更驗證」），提示（DP-MSG-DP10-005）；期間**舊 Email 仍可登入**（延遲生效）
-3. **Given** 使用者點驗證連結且未逾時，**When** 驗證通過，**Then** 新 Email 生效、舊 Email 失效、寫入稽核；**When** 連結逾時未點，**Then** 變更作廢、舊 Email 維持（DP-MSG-DP10-008）
+3. **Given** 使用者點驗證連結且未逾時，**When** 驗證通過，**Then** 新 Email 生效、舊 Email 失效、寫入稽核；**When** 連結逾時未點，**Then** 變更作廢、舊 Email 維持，畫面不再顯示「變更審核中」且可重新申請（DP-MSG-DP10-008）
 4. **Given** 新 Email 已被他人註冊，**When** 送出變更，**Then** 阻擋並提示（DP-MSG-DP10-006）
 5. **Given** 使用者變更**密碼**（輸入舊密碼 + 新密碼 + 確認新密碼），**When** 舊密碼正確、兩次一致、符合複雜度與重複性（不與最近 N 次相同），**Then** 更新密碼雜湊、追加 `DP_PWD_HIST`、寫入稽核、提示（DP-MSG-DP10-007）
 6. **Given** 舊密碼錯誤 / 兩次不一致 / 不符複雜度 / 與近期密碼重複，**When** 送出，**Then** 阻擋並提示對應訊息（DP-MSG-DP10-001～004）
@@ -25,7 +25,7 @@
 
 - **FR-DP-US8-01**: 個人資料頁 MUST 供所有已登入使用者維護**自己的**姓名 / Email / 密碼；MUST NOT 可維護他人資料（他人由 US4 管理者維護）
 - **FR-DP-US8-02**: 姓名變更 MUST 直接儲存並於 ET / DM 兩端同步生效（共用 `DP_USER`）
-- **FR-DP-US8-03**: Email 變更 MUST 採「新信箱驗證後切換」延遲生效——寄一次性時效驗證信（TTL 平台級參數，預設 30 分鐘）至新 Email，點連結後新 Email 生效、舊 Email 失效；驗證前舊 Email MUST 仍可登入；逾時 MUST 作廢變更；新 Email MUST 檢核未被他人使用
+- **FR-DP-US8-03**: Email 變更 MUST 採「新信箱驗證後切換」延遲生效——寄一次性時效驗證信（TTL 平台級參數，預設 30 分鐘）至新 Email，點連結後新 Email 生效、舊 Email 失效；驗證前舊 Email MUST 仍可登入；逾時 MUST 作廢變更（作廢後 MUST NOT 再顯示變更審核中，該新 Email 亦不再視為他人占用）；新 Email MUST 檢核未被他人使用
 - **FR-DP-US8-04**: 密碼變更 MUST 驗證舊密碼正確、新密碼兩次一致、符合複雜度（一般 8 / 特權 12 字元、≥3 種字元組合）與重複性（不與最近 N 次相同，查 `DP_PWD_HIST`）；檢核 MUST 於伺服器端執行
 - **FR-DP-US8-05**: 特權帳號（具 ET / DM 管理者角色者）之 12 字元門檻 MUST 於其變更密碼時適用（被指派管理者角色當下不強制改密碼）
 - **FR-DP-US8-06**: 密碼更新 MUST 以不可逆雜湊儲存並追加 `DP_PWD_HIST`；姓名 / Email / 密碼異動 MUST 寫入 `DP_AUDIT_LOG`
