@@ -8,7 +8,16 @@ import dayjs from "dayjs"
 import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { QueryClient } from "@tanstack/react-query"
+
 import { EtCourseEditorPage } from "./CourseEditorPage"
+import {
+  courseCard,
+  mockSlowListRefetch,
+  newSharedQueryClient,
+  renderListAndCache,
+  returnToList,
+} from "./courseListCache.testUtils"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -36,9 +45,9 @@ vi.mock("react-router-dom", async (orig) => {
 })
 
 /** 編輯模式：帶 courseId 路由參數。 */
-function renderEditor(courseId = "1") {
+function renderEditor(courseId = "1", queryClient?: QueryClient) {
   paramsRef.current = { courseId }
-  return renderWithProviders(<EtCourseEditorPage />)
+  return renderWithProviders(<EtCourseEditorPage />, undefined, undefined, queryClient)
 }
 
 /** 新增模式：無路由參數。**不可寫成 `renderNewEditor()`**——傳 undefined 會
@@ -247,6 +256,56 @@ describe("ET05 刪除草稿", () => {
       expect(screen.queryByRole("button", { name: "確認刪除" })).not.toBeInTheDocument(),
     )
     expect(calls).toBe(0)
+    expect(navigateSpy).not.toHaveBeenCalled()
+  })
+
+  it("刪除後回到列表，重抓回來前不先畫出含已刪課程的舊列表（#901）", async () => {
+    const user = userEvent.setup()
+    const queryClient = newSharedQueryClient()
+    useCourse("DRAFT")
+    server.use(http.delete("/api/et/courses/:courseId", () => new HttpResponse(null, { status: 204 })))
+    // 須排在 `useCourse` 之後（理由見 `mockSlowListRefetch`）
+    const { release, listCalls } = mockSlowListRefetch(
+      [courseCard(1, "要刪除的草稿"), courseCard(2, "留下的課程")],
+      [courseCard(2, "留下的課程")],
+    )
+
+    const list = await renderListAndCache(queryClient, "要刪除的草稿")
+    list.unmount()
+
+    const editor = renderEditor("1", queryClient)
+    await user.click(await screen.findByRole("button", { name: "刪除草稿" }))
+    await user.click(await screen.findByRole("button", { name: "確認刪除" }))
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+    editor.unmount()
+
+    // 🔴 重抓還卡著：此刻畫面上的任何課程都只可能來自快取
+    await returnToList(queryClient, listCalls)
+    expect(screen.queryByText("要刪除的草稿")).not.toBeInTheDocument()
+
+    release()
+    expect(await screen.findByText("留下的課程")).toBeInTheDocument()
+    expect(screen.queryByText("要刪除的草稿")).not.toBeInTheDocument()
+  })
+
+  it("刪除失敗時停在編輯頁、不導回列表（#901）", async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.delete("/api/et/courses/:courseId", () =>
+        HttpResponse.json(
+          { error_code: "ET_COURSE_005", error_message: "僅草稿課程可刪除，已發布課程請改用關閉" },
+          { status: 422 },
+        ),
+      ),
+    )
+    useCourse("DRAFT")
+    renderEditor()
+    await user.click(await screen.findByRole("button", { name: "刪除草稿" }))
+    await user.click(await screen.findByRole("button", { name: "確認刪除" }))
+
+    // 等錯誤處理跑完再斷言「沒導頁」——不等的話，沒導頁可能只是還沒走到那一步。
+    // 這裡拿錯誤提示當同步點，文字本身的正確性屬本機驗收。
+    await screen.findByText("僅草稿課程可刪除，已發布課程請改用關閉")
     expect(navigateSpy).not.toHaveBeenCalled()
   })
 })

@@ -27,6 +27,8 @@ export const QUERY_KEYS = {
   etCourses: {
     capabilities: () => ["et", "courses", "capabilities"] as const,
     list: (params: CourseListParams) => ["et", "courses", "list", params] as const,
+    /** 所有搜尋條件、所有頁碼的課程列表前綴——課程增刪後以此一次清掉（#901）。 */
+    lists: () => ["et", "courses", "list"] as const,
     filterTags: () => ["et", "courses", "filter-tags"] as const,
     filterOwners: (params: OwnerFilterParams) => ["et", "courses", "filter-owners", params] as const,
     detail: (courseId: number) => ["et", "courses", courseId] as const,
