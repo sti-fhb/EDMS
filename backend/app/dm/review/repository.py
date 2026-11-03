@@ -288,7 +288,9 @@ class ReviewCenterRepository:
                 audience.append(f"{unit_name} + {tag_name}" if unit_name else tag_name)
         return {"audience": audience, "retrieval": retrieval}
 
-    async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:
+    async def apply_version_tags_to_doc(
+        self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str
+    ) -> list[tuple[int, int | None]]:
         """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
 
         標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
@@ -307,18 +309,23 @@ class ReviewCenterRepository:
             doc_id: 文件編號。
             version_id: 本次核准發布之版本（其快照即新的生效值），**必須屬於 `doc_id`**。
             user_id: 核准者（寫入稽核欄位）。
+
+        Returns:
+            **未套用**的 (TAG_ID, UNIT_TAG_ID) 配對——快照裡含已停用標籤者（#388 L1）。
+            空清單代表快照全數生效。呼叫端應把它寫進稽核，讓「核准成功但不完整」可見。
         """
         now = utcnow()
-        wanted = list(
-            (
+        snapshot = [
+            (r[0], r[1])
+            for r in (
                 await db.execute(
                     select(DmVersionTag.tag_id, DmVersionTag.unit_tag_id).where(
                         DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0
                     )
                 )
             ).all()
-        )
-        wanted = [(r[0], r[1]) for r in wanted]
+        ]
+        wanted, skipped = await self._drop_disabled_pairs(db, snapshot)
         wanted_set = set(wanted)
         existing = {
             (row.tag_id, row.unit_tag_id): row
@@ -345,6 +352,45 @@ class ReviewCenterRepository:
                 row.deleted = 1
                 row.updated_user, row.updated_date = user_id, now
         await db.flush()
+        return skipped
+
+    async def _drop_disabled_pairs(
+        self, db: AsyncSession, pairs: list[tuple[int, int | None]]
+    ) -> tuple[list[tuple[int, int | None]], list[tuple[int, int | None]]]:
+        """濾掉含已停用標籤的 (TAG_ID, UNIT_TAG_ID) 配對，回傳 (保留, 濾掉)（#388 L1）。
+
+        🔴 **配對的兩半都要檢查。** `UNIT_TAG_ID` 與 `TAG_ID` 同為 FK → `DM_TAG.TAG_ID`
+        （`document/models.py` 的 `FK_DM_VERSION_TAG_UNIT`），只檢查 `TAG_ID` 會漏掉
+        「單位被停用」那半。`tests/integration/dm/test_dm_tag_snapshot_flow.py` 兩條
+        分別守住職位與單位。
+
+        **為什麼要在這裡濾**：存草稿當下 `editor/repository.py:351` 已擋停用標籤，所以
+        這個情境是**時間差**造成的——草稿存檔時還啟用，送審後管理者才 soft-retire，
+        核准當下才生效。而文件層是 `visibility.py` 的判定依據、且 visibility **不濾
+        `is_enabled`**，一旦寫進去持有該停用標籤的閱覽者就看得到。
+        「保留既有引用」是政策（soft-retire 不收回既有可見性），「停用後還能產生**新**
+        引用」不是。
+
+        ⚠️ 與 `get_doc_tags` / `get_version_tags` 的「刻意不濾 `is_enabled`」（#602 / #624）
+        不牴觸：那兩支是**讀取預帶**，濾掉會讓使用者不知情地把既有標籤送掉；本支是**寫入
+        生效值**。既有設計本來就是「預帶不濾、寫入濾」。
+
+        ⛔ 不在此處拋錯擋下核准（2026-11-03 裁示 C）：停用一個標籤會讓所有在途草稿卡住，
+        而審核者不一定知道該找誰。改為濾掉並回報，由呼叫端寫進稽核，使不完整**可見**。
+        """
+        if not pairs:
+            return [], []
+        tag_ids = {t for pair in pairs for t in pair if t is not None}
+        enabled = set(
+            (
+                await db.scalars(
+                    select(DmTag.tag_id).where(DmTag.tag_id.in_(tag_ids), DmTag.is_enabled.is_(True))
+                )
+            ).all()
+        )
+        kept = [p for p in pairs if all(t is None or t in enabled for t in p)]
+        dropped = [p for p in pairs if p not in kept]
+        return kept, dropped
 
     async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
         return (
