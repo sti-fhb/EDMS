@@ -6,7 +6,7 @@
 > 建立於 #391（來自 #385 的 Security Review）。**本文件是決策輸入，不是規範**——
 > 它存在的目的是讓日後評估日誌保存政策的人不必重新盤點一次。
 
-as-of **2026-09-23**。端點清單以 `grep -rn "Query(" backend/app --include=*.py` 掃出後逐支判讀。
+as-of **2026-11-03**（初版 2026-09-23；依 #391 SA 裁示更新）。端點清單以 `grep -rn "Query(" backend/app --include=*.py` 掃出後逐支判讀。
 
 ## 一、完整清單
 
@@ -15,16 +15,17 @@ as-of **2026-09-23**。端點清單以 `grep -rn "Query(" backend/app --include=
 | 端點 | 參數 | 值的性質 | 狀態 |
 |---|---|---|---|
 | `POST /api/et/approvals/search` | `user_name` | ✅ **必定是姓名**——這個參數沒有別的用法 | ✅ **已改走 body**（#391 / PR #422）|
-| `GET /api/dp/users` | `q` | ⚠️ **姓名或 Email**——`dp/users/repository.py` 以 `ilike` 同時打 `USER_NAME` 與 `EMAIL` 兩欄 | ❌ 未處理 |
-| `GET /api/dp/users/invites` | `q` | ⚠️ 同上。邀請名單的查詢實務上多半打 Email | ❌ 未處理 |
-| `GET /api/dp/audit` | `operator` | ⚠️ 操作者識別碼（`USER_ID`）| ❌ 未處理 |
-| `GET /api/dm/library/documents` | `author` | ⚠️ 文件作者 | ❌ 未處理 |
+| `GET /api/dp/users` | `q` | ⚠️ **姓名或 Email**——`dp/users/repository.py` 以 `ilike` 同時打 `USER_NAME` 與 `EMAIL` 兩欄 | 維持現況（#391 裁示）|
+| `GET /api/dp/users/invites` | `q` | ⚠️ 同上。邀請名單的查詢實務上多半打 Email | 維持現況（#391 裁示）|
+| `GET /api/dp/audit/logs` | `operator` | ⚠️ 操作者 `USER_ID`／姓名／Email 模糊比對，實務上多半輸入姓名（見 `dp/audit/repository.py`）| 維持現況（#391 裁示）|
+| `GET /api/dp/audit/logs/export` | `operator` | ⚠️ 同上（稽核 CSV 匯出；2026-11-03 補列）| 維持現況（#391 裁示）|
+| `GET /api/dm/library/documents` | `author` | ⚠️ 文件作者 | 維持現況（#391 裁示）|
 | `GET /api/dm/**` 的 `keyword` / `query` | — | ❌ 文件名稱／內容關鍵字，非個資 | ➖ 不適用 |
 | `GET /api/dp/roles` 的 `keyword` | — | ❌ 角色名稱 | ➖ 不適用 |
 | `GET /api/et/courses` 的 `q` | — | ❌ 課程名稱 | ➖ 不適用 |
-| `GET /api/dp/audit` 的 `func_name` / `module` / `action_type` | — | ❌ 列舉值或功能代碼 | ➖ 不適用 |
+| `GET /api/dp/audit/logs` 的 `func_name` / `module` / `action_type` | — | ❌ 列舉值或功能代碼 | ➖ 不適用 |
 
-⚠️ **「必定」與「可能」的差別是本清單的重點**。`et/approvals` 那一支的參數語意**就是**一個人的姓名，沒有其他用法；其餘四支是「使用者輸入的關鍵字**可能**是個資」。#391 先處理前者。
+⚠️ **「必定」與「可能」的差別是本清單的重點**。`et/approvals` 那一支的參數語意**就是**一個人的姓名，沒有其他用法；其餘五支是「使用者輸入的關鍵字**可能**是個資」。#391 處理了前者；後者經 SA 裁示維持現況，理由見第三節。
 
 ⚠️ 新增查詢端點時請回到本表判讀一次。判準不是「參數叫什麼」，是「值可不可能識別到人」。
 
@@ -35,7 +36,7 @@ as-of **2026-09-23**。端點清單以 `grep -rn "Query(" backend/app --include=
 | EDMS nginx **access log** | ✅ **已處理** | `nginx/log-format.conf` 以 `$request_uri` 去除 `?` 之後的部分。⚠️ 刻意不用 `$uri`——後者是解碼後的值，`%0A` 會還原成真實換行而構成 log injection |
 | uvicorn **access log** | ✅ **已處理** | `--no-access-log` |
 | EDMS nginx **`error_log`** | 🔴 **擋不住** | 記錄完整 request（含 query string），而 **nginx 的 error log 格式不可自訂**。壓抑之需把層級提到 `crit`，代價是失去後端中斷的可觀測性，故不採 |
-| **Cloudflare 請求日誌** | 🔴 **擋不住，且不在 EDMS 手上** | 本系統經 Cloudflare Tunnel 對外，Cloudflare 端記錄含 query string 的完整 URI。front-proxy／Tunnel 由 TBMS 管理（`deployment.md` §0.1：EDMS 不得定義或重啟它）|
+| **Cloudflare 請求日誌** | 🔴 **擋不住，且不在 EDMS 手上** | 經 Cloudflare Tunnel 對外的環境，Cloudflare 端記錄含 query string 的完整 URI。front-proxy／Tunnel 由 TBMS 管理（`deployment.md` §0.1：EDMS 不得定義或重啟它）。**僅 GCP 測試環境經過；院內正式機不經 Cloudflare**（#391 裁示）|
 | **瀏覽器歷史 / `Referer`** | 🔴 **擋不住** | 使用者端的紀錄，伺服器無從干預 |
 
 > 上述前三條在 `nginx/log-format.conf` 的檔頭註記已寫明。本文件不重複它的內容，只把
@@ -43,21 +44,15 @@ as-of **2026-09-23**。端點清單以 `grep -rn "Query(" backend/app --include=
 
 ⛔ **不要憑 access log 已處理就宣稱「PII 不進 log」。** 那句話在本系統是錯的。
 
-## 三、還缺哪個事實才能決定
+## 三、裁示：維持現況（#391，2026-11-03）
 
-🔴 **Cloudflare 端的日誌保存期與存取權限。**
+第一節標「維持現況」的五支**不改走 POST body**。原本待釐清的「Cloudflare 端日誌保存期與存取權限」已不影響決定，視為已釐清：
 
-這個事實決定其餘四支要不要改：
+- 院內正式機自行終結 HTTPS，**不經 Cloudflare**；只有 GCP 經 Cloudflare，而 GCP 是測試環境，沒有真實個資
+- 正式環境剩下的記錄點是院內主機的 nginx `error_log`（只在後端錯誤時記錄，由院方管理）與操作者自己的瀏覽器歷史
+- 五支端點皆限管理者或編輯者使用，風險可接受
 
-| 若… | 則… |
-|---|---|
-| Cloudflare 未開 Logpush、分析資料保存期短且無人可查 | 全面改 POST 可能是**過度反應** |
-| 日誌保存數十天且多人可讀 | 維持現況可能是**不足** |
-
-**取得方式**：問 TBMS 側，或查 `<CLOUDFLARED_HOST>` 的 cloudflared／Cloudflare 帳號設定。
-⚠️ 這**不在 EDMS 的掌控範圍**，本專案無法自行查證。
-
-> 📌 取得答案後即可直接決定，**不需要重新盤點端點**——本文件第一節就是那份盤點。
+🔴 **須重新評估的條件**：院內正式機日後改經 Cloudflare，或改經其他會留存完整網址的代理時，本裁示的前提即不成立，須回到本文件重新判斷。屆時**不需要重新盤點端點**——第一節就是那份盤點；改法見第四節。
 
 ## 四、決定要改時怎麼改（ET 的前例）
 
