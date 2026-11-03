@@ -4,6 +4,7 @@
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import Row, Select, and_, exists, select
@@ -26,6 +27,7 @@ _PUBLISHED = "PUBLISHED"
 _SUPERSEDED = "SUPERSEDED"
 _AUDIENCE = "AUDIENCE"
 _OBSOLETE = "OBSOLETE"
+_NEW_VERSION = "NEW_VERSION"
 _ALL_AUDIENCE_TAG = "全體"
 #: 「已完成」清單的狀態母體。
 #:
@@ -35,6 +37,38 @@ _ALL_AUDIENCE_TAG = "全體"
 #: 「審核者」身分出現在別人的已完成清單，而且 #657 之後還會連帶顯示「送審者」欄。
 #: （2026-10-15 安全審查指出此陷阱；目前靠本常數排除，是正確的。）
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedDocTags:
+    """`apply_version_tags_to_doc` 的結果（#388 L1 / L3）。
+
+    兩欄同型別，**刻意不回傳 `tuple[list, list]`**——位置解構寫反了型別檢查看不出來，
+    而寫進稽核後的症狀是「被濾掉的配對記成已生效」，恰好與本功能要提供的保證相反。
+    """
+
+    #: 本次核准後實際生效的 (TAG_ID, UNIT_TAG_ID) 配對。
+    applied: list[tuple[int, int | None]]
+    #: 快照裡含已停用標籤、因而未套用的配對；空清單代表快照全數生效。
+    skipped: list[tuple[int, int | None]]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTagNames:
+    """簽核明細呈現用之標籤名稱（#377 / #388 L4）。"""
+
+    #: 本次送審提議之可見對象（OBSOLETE 為文件層現值）。
+    audience: list[str]
+    #: 本次送審提議之檢索標籤。
+    retrieval: list[str]
+    #: 目前生效之可見對象，供並列比對。⚠️ `None` ＝不必比對（與提議值相同 / 首版 / 廢止類），
+    #: 與 `[]`（目前生效為空＝本次是擴大）**不同義**，呈現層不可用 falsy 判斷混為一談。
+    current_audience: list[str] | None = None
+
+
+def _sorted_pairs(pairs: list[tuple[int, int | None]]) -> list[tuple[int, int | None]]:
+    """穩定排序供稽核輸出用——快照查詢無 `ORDER BY`，不排則同一組配對每次順序可能不同。"""
+    return sorted(pairs, key=lambda p: (p[0], -1 if p[1] is None else p[1]))
 
 
 class ReviewCenterRepository:
@@ -238,12 +272,17 @@ class ReviewCenterRepository:
 
     async def get_review_tag_names(
         self, db: AsyncSession, *, review_type: str, doc_id: str, version_id: int | None
-    ) -> dict[str, list[str]]:
+    ) -> ReviewTagNames:
         """取簽核明細呈現用之標籤名稱，依送審類型決定來源（#377）。
 
         NEW / NEW_VERSION → 該送審版本之**版本層快照**：審核者看到的即本次送審提議、且核准後會生效
         的值。OBSOLETE → **文件層現值**：廢止之 VERSION_ID 指向目前發布版、無草稿階段快照，且廢止
         決策關注的是「此文件目前的可見範圍」。
+
+        `NEW_VERSION` 另取文件層現值作 `current_audience`（#388 L4）：長壽草稿會把可見範圍靜默
+        改回較寬的舊值（「後核准者勝」，#377 規劃第 10 節），審核者光看提議值無從判斷這是擴大
+        還是縮小。⛔ **不是**該節裁示不做的快照基準比對——此處不記基準時點、不比對、不擋核准，
+        只把判斷所需的另一半資訊一併回傳。
 
         Args:
             review_type: 送審類型（NEW / NEW_VERSION / OBSOLETE）。
@@ -255,28 +294,43 @@ class ReviewCenterRepository:
         多筆配對無從對應（見 issue #437「為何不採單位集 ∧ 職位集」）。
 
         Returns:
-            {"audience": [...], "retrieval": [...]}，值為中文字串。
+            `ReviewTagNames`；`current_audience` 僅 `NEW_VERSION` 且與提議值相異時有值。
         """
+        from_doc = review_type == _OBSOLETE or version_id is None
+        audience, retrieval = await self._tag_names(db, doc_id=doc_id, version_id=None if from_doc else version_id)
+        if from_doc or review_type != _NEW_VERSION:
+            return ReviewTagNames(audience=audience, retrieval=retrieval)
+        current, _ = await self._tag_names(db, doc_id=doc_id, version_id=None)
+        # 相同時回 None 而非空清單：若每次都併列，「有這兩排」就不再是訊號，真正改動可見範圍
+        # 的那一次會淹沒在例行畫面裡。⚠️ `[]` 另有其義——現值為空而提議非空即**擴大**，必須顯示。
+        #
+        # ⚠️ 比對**不依賴排序**：兩邊查的是不同的表（`DM_DOC_TAG` / `DM_VERSION_TAG`），
+        # 「相同內容必得相同順序」會變成對 SQL 排序的隱性依賴。誤判的方向是多顯示一排
+        # （不是漏顯示），但那正好打掉「常態不出現」的設計。
+        same = sorted(current) == sorted(audience)
+        return ReviewTagNames(audience=audience, retrieval=retrieval, current_audience=None if same else current)
+
+    async def _tag_names(self, db: AsyncSession, *, doc_id: str, version_id: int | None) -> tuple[list[str], list[str]]:
+        """查單一來源之 (可見對象, 檢索標籤) 名稱；`version_id` 為 None 時取文件層現值。"""
         unit_tag = aliased(DmTag, name="dm_unit_tag")
-        if review_type == _OBSOLETE or version_id is None:
+        base = select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
+        if version_id is None:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
-                .select_from(DmDocTag)
+                base.select_from(DmDocTag)
                 .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                 .outerjoin(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
-                .order_by(DmTag.tag_id)
+                .order_by(DmTag.tag_id, unit_tag.tag_id)
             )
         else:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
-                .select_from(DmVersionTag)
+                base.select_from(DmVersionTag)
                 .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                 .outerjoin(unit_tag, DmVersionTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
-                .order_by(DmTag.tag_id)
+                .order_by(DmTag.tag_id, unit_tag.tag_id)
             )
         audience: list[str] = []
         retrieval: list[str] = []
@@ -286,9 +340,11 @@ class ReviewCenterRepository:
             else:
                 # 單位缺漏者（導入配對前之殘留）仍列出職位，讓審核者看得到它、而非默默消失
                 audience.append(f"{unit_name} + {tag_name}" if unit_name else tag_name)
-        return {"audience": audience, "retrieval": retrieval}
+        return audience, retrieval
 
-    async def apply_version_tags_to_doc(self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str) -> None:
+    async def apply_version_tags_to_doc(
+        self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str
+    ) -> AppliedDocTags:
         """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
 
         標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
@@ -307,23 +363,36 @@ class ReviewCenterRepository:
             doc_id: 文件編號。
             version_id: 本次核准發布之版本（其快照即新的生效值），**必須屬於 `doc_id`**。
             user_id: 核准者（寫入稽核欄位）。
+
+        Returns:
+            `AppliedDocTags`：本次**實際生效**與**因停用而未套用**的配對（#388 L1 / L3）。
+            呼叫端應把兩者都寫進稽核——`applied` 回答「這份文件從何時起對誰可見、誰核准的」
+            （否則得另撈 `DM_DOC_TAG` 的 `CREATED_USER` / `UPDATED_DATE` 反推），
+            `skipped` 讓「核准成功但不完整」可見。
         """
         now = utcnow()
-        wanted = list(
-            (
+        snapshot = [
+            (r[0], r[1])
+            for r in (
                 await db.execute(
                     select(DmVersionTag.tag_id, DmVersionTag.unit_tag_id).where(
                         DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0
                     )
                 )
             ).all()
-        )
-        wanted = [(r[0], r[1]) for r in wanted]
-        wanted_set = set(wanted)
+        ]
+        wanted, disabled = await self._drop_disabled_pairs(db, snapshot)
         existing = {
             (row.tag_id, row.unit_tag_id): row
             for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
         }
+        # 🔴 停用配對若**已有有效列**，保留它——soft-retire 的政策是「不收回既有可見性」，
+        # 要擋的只有**新**引用。少了這段，任何一次改版核准都會把停用標籤的既有引用撤銷，
+        # 使閱覽者突然看不到文件；那比本功能原本要修的問題（多看到）更嚴重，且方向相反。
+        # 既有列為 `deleted=1` 者不在此列：讓它復活等同產生新的生效引用，仍須擋。
+        retained = {p for p in disabled if (row := existing.get(p)) is not None and row.deleted == 0}
+        skipped = [p for p in disabled if p not in retained]
+        keep_set = set(wanted) | retained
         for key in wanted:
             row = existing.get(key)
             if row is None:
@@ -341,10 +410,50 @@ class ReviewCenterRepository:
                 row.deleted = 0
                 row.updated_user, row.updated_date = user_id, now
         for key, row in existing.items():
-            if key not in wanted_set and row.deleted == 0:
+            if key not in keep_set and row.deleted == 0:
                 row.deleted = 1
                 row.updated_user, row.updated_date = user_id, now
         await db.flush()
+        return AppliedDocTags(applied=_sorted_pairs(list(keep_set)), skipped=_sorted_pairs(skipped))
+
+    async def _drop_disabled_pairs(
+        self, db: AsyncSession, pairs: list[tuple[int, int | None]]
+    ) -> tuple[list[tuple[int, int | None]], list[tuple[int, int | None]]]:
+        """依 `DM_TAG.IS_ENABLED` 把配對分成 (未停用, 含停用標籤) 兩組（#388 L1）。
+
+        ⚠️ **第二組不等於「要撤銷的」**：呼叫端還要把其中「文件層已有有效列」的挑回來保留
+        （soft-retire 不收回既有可見性），只有**既有沒有**的才真的擋下。本支不做這個判斷，
+        因為它看不到文件層。
+
+
+        🔴 **配對的兩半都要檢查。** `UNIT_TAG_ID` 與 `TAG_ID` 同為 FK → `DM_TAG.TAG_ID`
+        （`document/models.py` 的 `FK_DM_VERSION_TAG_UNIT`），只檢查 `TAG_ID` 會漏掉
+        「單位被停用」那半。`tests/integration/dm/test_dm_tag_snapshot_flow.py` 兩條
+        分別守住職位與單位。
+
+        **為什麼要在這裡濾**：存草稿當下 `editor/repository.py:351` 已擋停用標籤，所以
+        這個情境是**時間差**造成的——草稿存檔時還啟用，送審後管理者才 soft-retire，
+        核准當下才生效。而文件層是 `visibility.py` 的判定依據、且 visibility **不濾
+        `is_enabled`**，一旦寫進去持有該停用標籤的閱覽者就看得到。
+        「保留既有引用」是政策（soft-retire 不收回既有可見性），「停用後還能產生**新**
+        引用」不是。
+
+        ⚠️ 與 `get_doc_tags` / `get_version_tags` 的「刻意不濾 `is_enabled`」（#602 / #624）
+        不牴觸：那兩支是**讀取預帶**，濾掉會讓使用者不知情地把既有標籤送掉；本支是**寫入
+        生效值**。既有設計本來就是「預帶不濾、寫入濾」。
+
+        ⛔ 不在此處拋錯擋下核准（2026-11-03 裁示 C）：停用一個標籤會讓所有在途草稿卡住，
+        而審核者不一定知道該找誰。改為濾掉並回報，由呼叫端寫進稽核，使不完整**可見**。
+        """
+        if not pairs:
+            return [], []
+        tag_ids = {t for pair in pairs for t in pair if t is not None}
+        enabled = set(
+            (await db.scalars(select(DmTag.tag_id).where(DmTag.tag_id.in_(tag_ids), DmTag.is_enabled.is_(True)))).all()
+        )
+        kept = [p for p in pairs if all(t is None or t in enabled for t in p)]
+        dropped = [p for p in pairs if p not in kept]
+        return kept, dropped
 
     async def get_user_name_email(self, db: AsyncSession, user_id: str) -> Row | None:
         return (

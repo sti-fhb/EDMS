@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 
 import { DmReviewPage } from "./DmReviewPage"
 import { renderWithProviders } from "../../test/renderWithProviders"
-import { server } from "../../test/server"
+import { DM_REVIEW_DETAIL, server } from "../../test/server"
 
 /** 覆寫待簽核清單 + 明細為一筆廢止類送審（US8）。 */
 function useObsoleteReview() {
@@ -110,6 +110,59 @@ describe("DmReviewPage 簽核中心（DM02）", () => {
     // 分類只在清單各列出現（mock 兩列皆 SOP），明細不再重複顯示 → 恰為 2 個、且為中文名
     expect(screen.getAllByText("標準作業程序")).toHaveLength(2)
     expect(screen.queryByText("SOP")).not.toBeInTheDocument()
+  })
+
+  /**
+   * 覆寫明細的「目前生效可見對象」欄（#388 L4），其餘沿用預設 fixture。
+   *
+   * ⛔ 路徑**必須寫死 501**，不可用 `:reviewId`：`server.use()` 把 handler 排到最前面，
+   * 而 `/api/dm/reviews/pending` 也符合該 pattern（`pending` 被當成 reviewId）→ 連清單都載不出來。
+   */
+  function useCurrentAudience(current: string[] | null) {
+    server.use(
+      http.get("/api/dm/reviews/501", () =>
+        HttpResponse.json({ ...DM_REVIEW_DETAIL, current_audience_tags: current }),
+      ),
+    )
+  }
+
+  it("可見範圍有變動時併列目前生效值，標題改為本次提議（#388 L4）", async () => {
+    useCurrentAudience(["國防部軍醫局 + 護理師"])
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await screen.findByText(/簽核明細 —/)
+
+    // 兩排並列，審核者才判斷得出這次是擴大還是縮小（長壽草稿會把範圍改回較寬的舊值）
+    expect(screen.getByText("本次提議")).toBeInTheDocument()
+    expect(screen.getByText("目前生效")).toBeInTheDocument()
+    expect(screen.queryByText("可見對象")).not.toBeInTheDocument()
+    expect(screen.getByText("全單位 + 全體")).toBeInTheDocument()
+  })
+
+  it("目前生效為空時仍要併列——那正是擴大（#388 L4）", async () => {
+    // 🔴 `[]` 與 `null` 不同義。以 falsy 判斷會把「本來沒人看得到、這次開放出去」
+    // 這個最該被看見的情況，和「沒有變動」一起藏起來。
+    useCurrentAudience([])
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await screen.findByText(/簽核明細 —/)
+
+    expect(screen.getByText("目前生效")).toBeInTheDocument()
+    expect(screen.getByText("—（目前無人可見）")).toBeInTheDocument()
+  })
+
+  it("可見範圍未變動時維持單排、標題不變（#388 L4）", async () => {
+    const user = userEvent.setup({ delay: null })
+    renderWithProviders(<DmReviewPage />)
+    await user.click(await screen.findByText("領血確認標準作業程序"))
+    await screen.findByText(/簽核明細 —/)
+
+    // 常態下畫面完全不變：多數改版不動可見對象，每次都併列會讓真正改動的那次失去訊號價值
+    expect(screen.getByText("可見對象")).toBeInTheDocument()
+    expect(screen.queryByText("目前生效")).not.toBeInTheDocument()
+    expect(screen.queryByText("本次提議")).not.toBeInTheDocument()
   })
 
   it("深連結 ?reviewId= 自動展開該筆簽核明細（個人專區前往簽核中心）", async () => {

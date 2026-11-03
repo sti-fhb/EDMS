@@ -99,6 +99,10 @@ function DetailPanel({
 }) {
   const isNewVersion = detail.review_type === "NEW_VERSION"
   const isObsolete = detail.review_type === "OBSOLETE"
+  // ⛔ 用 `Array.isArray` 而非 falsy 判斷：`[]`（目前無人可見＝本次是擴大）必須顯示，
+  // 只有 `null`（未改動 / 首版 / 廢止類）才省略。falsy 會把最該被看見的那種藏起來。
+  const currentAudience = detail.current_audience_tags
+  const hasCurrentAudience = Array.isArray(currentAudience)
   return (
     <Paper
       variant="outlined"
@@ -126,7 +130,7 @@ function DetailPanel({
         <Stack spacing={1}>
           <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
-              可見對象
+              {hasCurrentAudience ? "本次提議" : "可見對象"}
             </Typography>
             {detail.audience_tags.length > 0 ? (
               <Stack direction="row" gap={0.5} flexWrap="wrap">
@@ -140,6 +144,27 @@ function DetailPanel({
               </Typography>
             )}
           </Box>
+          {/* 目前生效值（#388 L4）：僅在與本次提議相異時由後端回傳。長壽草稿會把可見範圍靜默改回
+              較寬的舊值（「後核准者勝」，#377 規劃第 10 節），併列才看得出這次是擴大還是縮小。
+              未改動時整列不出現——若每次都併列，「有這兩排」就不再是訊號。 */}
+          {hasCurrentAudience && (
+            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
+                目前生效
+              </Typography>
+              {currentAudience.length > 0 ? (
+                <Stack direction="row" gap={0.5} flexWrap="wrap">
+                  {currentAudience.map((t) => (
+                    <Chip key={t} size="small" variant="outlined" label={t} />
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  —（目前無人可見）
+                </Typography>
+              )}
+            </Box>
+          )}
           <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, mt: 0.25 }}>
               檢索標籤

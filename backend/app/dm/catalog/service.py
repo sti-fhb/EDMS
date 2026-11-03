@@ -17,12 +17,23 @@ from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmCategory, DmTag
-from app.dm.document.models import DmDocTag
+from app.dm.document.models import DmDocTag, DmDocVersion, DmVersionTag
 
 # 分類碼字元集：僅英數（作為 PK、且下游 next_doc_id 以此碼組 LIKE pattern，須排除萬用字元）
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
 # 對應 DM_CATEGORY.CATEGORY_CODE 之 VARCHAR(10)
 _MAX_CODE_LEN = 10
+#: 標籤快照尚未套用至文件層的版本狀態（#388 L1）。
+#:
+#: ⛔ **不含 `PUBLISHED` / `SUPERSEDED`**：其快照已於核准時套用成 `DM_DOC_TAG` 列，一併計入
+#: 等於同一筆設定數兩次。
+#:
+#: ⛔ **也不含 `REJECTED`，而且那不是低估**：送簽要求版本為 `DRAFT`（`dm/editor/service.py`
+#: 的 `submit`，否則 `DM_REVIEW_002`），而全庫**沒有任何地方**把版本自 `REJECTED` 設回
+#: `DRAFT`——寫 `ver.status` 的只有 `dm/personal/service.py` 的撤回與 `dm/review/center_service.py`
+#: 的退回，兩者都是自 `PENDING_REVIEW` 轉出。⇒ `REJECTED` 是版本終態，其快照**永遠不會**
+#: 套用至文件層，計入反而高估。
+_IN_FLIGHT_VERSION_STATUSES = ("DRAFT", "PENDING_REVIEW")
 
 
 @dataclass(frozen=True)
@@ -87,8 +98,17 @@ class CatalogService:
         以避開唯一約束），不濾會把已移除的文件關聯與已撤銷的閱覽者授權算進去。本數字自 #182
         起會呈現給管理者作為「要不要停用」的依據，高估會誤導該判斷。
 
-        ⚠️ **已知限制**：在途草稿的 `DM_VERSION_TAG` 快照未計入，故本數字為**下限**
-        （DP 端據此標示「至少 N 份」）。該低估待 #388 處理。
+        `affected_docs` 併計**已生效**（`DM_DOC_TAG`）與**在途草稿**（`DM_VERSION_TAG`）兩種
+        設定列（#388 L1）。只數前者會漏掉所有尚未核准的設定，而管理者要決定的正是「停用後
+        會發生什麼」——標籤自 #377 起於草稿階段只寫版本層，核准時才套用至文件層。
+
+        🔴 **數的是配對列數，不是不重複的文件數**（#742，DP 端提示用語已對齊為「組…設定」）。
+        故兩來源**直接相加、不做 UNION 去重**：同一份文件的同一組配對若已生效且又出現在
+        在途草稿，那是兩筆各自存在的設定，分開計。
+
+        ⚠️ **本數字不是任何一邊的界線，⛔ 勿標示為「至少」**：已廢止文件的 `DM_DOC_TAG` 列
+        仍留著且計入（高估）。低估那一半已由本次補上，高估那一半仍在——理由見
+        `frontend/src/dp/params/useControlled.ts` 的 `affectedText`。
 
         Args:
             tag_id: 要停用之標籤。
@@ -99,11 +119,27 @@ class CatalogService:
         if tag is None:
             raise AppError(status_code=404, detail="查無此可見對象", error_code="DM_CATALOG_002")
         doc_col = DmDocTag.unit_tag_id if is_unit else DmDocTag.tag_id
+        ver_col = DmVersionTag.unit_tag_id if is_unit else DmVersionTag.tag_id
         user_col = DmUserTag.unit_tag_id if is_unit else DmUserTag.tag_id
-        affected_docs = (
+        effective_docs = (
             await db.scalar(select(func.count()).select_from(DmDocTag).where(doc_col == tag_id, DmDocTag.deleted == 0))
             or 0
         )
+        in_flight_docs = (
+            await db.scalar(
+                select(func.count())
+                .select_from(DmVersionTag)
+                .join(DmDocVersion, DmDocVersion.version_id == DmVersionTag.version_id)
+                .where(
+                    ver_col == tag_id,
+                    DmVersionTag.deleted == 0,
+                    DmDocVersion.deleted == 0,
+                    DmDocVersion.status.in_(_IN_FLIGHT_VERSION_STATUSES),
+                )
+            )
+            or 0
+        )
+        affected_docs = effective_docs + in_flight_docs
         affected_viewers = (
             await db.scalar(
                 select(func.count()).select_from(DmUserTag).where(user_col == tag_id, DmUserTag.deleted == 0)
