@@ -26,8 +26,13 @@ _MAX_CODE_LEN = 10
 #: 標籤快照尚未套用至文件層的版本狀態（#388 L1）。
 #:
 #: ⛔ **不含 `PUBLISHED` / `SUPERSEDED`**：其快照已於核准時套用成 `DM_DOC_TAG` 列，一併計入
-#: 等於同一筆設定數兩次。亦不含 `REJECTED`——已退回且當事人另有草稿，須先轉回 `DRAFT`
-#: 才能再送簽（`dm/personal/service.py`），轉回時即落入本集合。
+#: 等於同一筆設定數兩次。
+#:
+#: ⛔ **也不含 `REJECTED`，而且那不是低估**：送簽要求版本為 `DRAFT`（`dm/editor/service.py`
+#: 的 `submit`，否則 `DM_REVIEW_002`），而全庫**沒有任何地方**把版本自 `REJECTED` 設回
+#: `DRAFT`——寫 `ver.status` 的只有 `dm/personal/service.py` 的撤回與 `dm/review/center_service.py`
+#: 的退回，兩者都是自 `PENDING_REVIEW` 轉出。⇒ `REJECTED` 是版本終態，其快照**永遠不會**
+#: 套用至文件層，計入反而高估。
 _IN_FLIGHT_VERSION_STATUSES = ("DRAFT", "PENDING_REVIEW")
 
 

@@ -303,9 +303,12 @@ class ReviewCenterRepository:
         current, _ = await self._tag_names(db, doc_id=doc_id, version_id=None)
         # 相同時回 None 而非空清單：若每次都併列，「有這兩排」就不再是訊號，真正改動可見範圍
         # 的那一次會淹沒在例行畫面裡。⚠️ `[]` 另有其義——現值為空而提議非空即**擴大**，必須顯示。
-        return ReviewTagNames(
-            audience=audience, retrieval=retrieval, current_audience=None if current == audience else current
-        )
+        #
+        # ⚠️ 比對**不依賴排序**：兩邊查的是不同的表（`DM_DOC_TAG` / `DM_VERSION_TAG`），
+        # 「相同內容必得相同順序」會變成對 SQL 排序的隱性依賴。誤判的方向是多顯示一排
+        # （不是漏顯示），但那正好打掉「常態不出現」的設計。
+        same = sorted(current) == sorted(audience)
+        return ReviewTagNames(audience=audience, retrieval=retrieval, current_audience=None if same else current)
 
     async def _tag_names(self, db: AsyncSession, *, doc_id: str, version_id: int | None) -> tuple[list[str], list[str]]:
         """查單一來源之 (可見對象, 檢索標籤) 名稱；`version_id` 為 None 時取文件層現值。"""
@@ -318,7 +321,7 @@ class ReviewCenterRepository:
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                 .outerjoin(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmDocTag.doc_id == doc_id, DmDocTag.deleted == 0)
-                .order_by(DmTag.tag_id)
+                .order_by(DmTag.tag_id, unit_tag.tag_id)
             )
         else:
             stmt = (
@@ -327,7 +330,7 @@ class ReviewCenterRepository:
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                 .outerjoin(unit_tag, DmVersionTag.unit_tag_id == unit_tag.tag_id)
                 .where(DmVersionTag.version_id == version_id, DmVersionTag.deleted == 0)
-                .order_by(DmTag.tag_id)
+                .order_by(DmTag.tag_id, unit_tag.tag_id)
             )
         audience: list[str] = []
         retrieval: list[str] = []
@@ -378,12 +381,18 @@ class ReviewCenterRepository:
                 )
             ).all()
         ]
-        wanted, skipped = await self._drop_disabled_pairs(db, snapshot)
-        wanted_set = set(wanted)
+        wanted, disabled = await self._drop_disabled_pairs(db, snapshot)
         existing = {
             (row.tag_id, row.unit_tag_id): row
             for row in (await db.scalars(select(DmDocTag).where(DmDocTag.doc_id == doc_id))).all()
         }
+        # 🔴 停用配對若**已有有效列**，保留它——soft-retire 的政策是「不收回既有可見性」，
+        # 要擋的只有**新**引用。少了這段，任何一次改版核准都會把停用標籤的既有引用撤銷，
+        # 使閱覽者突然看不到文件；那比本功能原本要修的問題（多看到）更嚴重，且方向相反。
+        # 既有列為 `deleted=1` 者不在此列：讓它復活等同產生新的生效引用，仍須擋。
+        retained = {p for p in disabled if (row := existing.get(p)) is not None and row.deleted == 0}
+        skipped = [p for p in disabled if p not in retained]
+        keep_set = set(wanted) | retained
         for key in wanted:
             row = existing.get(key)
             if row is None:
@@ -401,16 +410,21 @@ class ReviewCenterRepository:
                 row.deleted = 0
                 row.updated_user, row.updated_date = user_id, now
         for key, row in existing.items():
-            if key not in wanted_set and row.deleted == 0:
+            if key not in keep_set and row.deleted == 0:
                 row.deleted = 1
                 row.updated_user, row.updated_date = user_id, now
         await db.flush()
-        return AppliedDocTags(applied=_sorted_pairs(wanted), skipped=_sorted_pairs(skipped))
+        return AppliedDocTags(applied=_sorted_pairs(list(keep_set)), skipped=_sorted_pairs(skipped))
 
     async def _drop_disabled_pairs(
         self, db: AsyncSession, pairs: list[tuple[int, int | None]]
     ) -> tuple[list[tuple[int, int | None]], list[tuple[int, int | None]]]:
-        """濾掉含已停用標籤的 (TAG_ID, UNIT_TAG_ID) 配對，回傳 (保留, 濾掉)（#388 L1）。
+        """依 `DM_TAG.IS_ENABLED` 把配對分成 (未停用, 含停用標籤) 兩組（#388 L1）。
+
+        ⚠️ **第二組不等於「要撤銷的」**：呼叫端還要把其中「文件層已有有效列」的挑回來保留
+        （soft-retire 不收回既有可見性），只有**既有沒有**的才真的擋下。本支不做這個判斷，
+        因為它看不到文件層。
+
 
         🔴 **配對的兩半都要檢查。** `UNIT_TAG_ID` 與 `TAG_ID` 同為 FK → `DM_TAG.TAG_ID`
         （`document/models.py` 的 `FK_DM_VERSION_TAG_UNIT`），只檢查 `TAG_ID` 會漏掉

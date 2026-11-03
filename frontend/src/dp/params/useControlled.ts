@@ -29,8 +29,9 @@ const _SAVED_MSG = "已儲存並即時生效"
  *   - 已廢止文件的 `DM_DOC_TAG` 列**留著、計入** → 高估（仍在）
  *
  * 🔴 低估那半補上後 ⛔ **依然成立**，別因為「查不到低估了」就推翻它——高估那半還在，
- * 數字仍不是下限。（殘餘低估僅剩 `REJECTED` 版本之快照，見後端 `_IN_FLIGHT_VERSION_STATUSES`；
- * 量級小且須先轉回 `DRAFT` 才能再送簽。）拿掉「至少」後文字與實際計算完全相符。
+ * 數字仍不是下限。（`REJECTED` 版本之快照同樣不計，但那**不是**殘餘低估：該狀態是版本終態、
+ * 其快照永遠不會套用至文件層，理由見後端 `_IN_FLIGHT_VERSION_STATUSES`。）
+ * 拿掉「至少」後文字與實際計算完全相符。
  */
 function affectedText(docs: number | null, viewers: number | null): string | null {
   const parts = [

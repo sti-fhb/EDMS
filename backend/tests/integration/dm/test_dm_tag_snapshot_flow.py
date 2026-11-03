@@ -735,3 +735,205 @@ async def test_首版送審沒有目前生效值可併列(db):
 
     assert detail.review_type == "NEW"
     assert detail.current_audience_tags is None, "首版無目前生效值，不應併列"
+
+
+async def test_停用標籤的既有生效引用不得因核准而被收回(db):
+    """🔴 驗證 code review 指出的 HIGH：L1-a 的濾除會不會順手撤銷**既有**引用？
+
+    政策是「停用採 soft-retire，既有 `DM_DOC_TAG` 列保留、不收回可見性」
+    （`catalog/service.py` docstring、data-model.md DM_TAG 節）。L1-a 要擋的是**新**引用。
+
+    情境：v1 已生效 (A, 全單位)；v2 草稿由現值預帶、快照仍含 A（`get_doc_tags` 不濾
+    `is_enabled`，#602/#624「預帶不濾、寫入濾」）；送審後管理者才停用 A。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, aud_b = await _two_audience_ids(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+    all_units = await _all_units_id(db)
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units, all_units],
+        audience_role_ids=[aud_a, aud_b],  # 預帶的 A + 本次新增的 B（兩清單平行配對）
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="改版",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    await _disable_tag(db, aud_a)  # 送審之後才停用——寫入時的檢核已經過了
+    await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    pairs = await _doc_tag_pairs(db, doc_id)
+    assert (aud_a, all_units) in pairs, "既有生效引用不得被收回——soft-retire 政策是『不收回既有可見性』"
+    assert (aud_b, all_units) in pairs, "未停用的配對應正常生效（正向錨點）"
+
+
+async def _third_audience_id(db) -> int:
+    """取第三個可見對象標籤；seed 不足時自建一個 ZT 前綴的。"""
+    ids = list((await db.scalars(
+        select(DmTag.tag_id).where(DmTag.tag_group_code == "AUDIENCE").order_by(DmTag.tag_id).limit(3)
+    )).all())
+    if len(ids) >= 3:
+        return ids[2]
+    tag = DmTag(tag_group_code="AUDIENCE", tag_name="ZT第三個職位", created_user="e", created_date=utcnow())
+    db.add(tag)
+    await db.flush()
+    return tag.tag_id
+
+
+async def test_同一次核准中既有停用配對保留而新增停用配對被擋(db):
+    """混合情境：一次核准同時出現三種配對，三種結果必須各自正確。
+
+    只測單一種類的話，「整批不寫入」或「整批照寫」都可能矇混過關——
+    前者會讓正常配對消失，後者讓停用配對生效，而兩種都有一半的斷言會過。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, aud_b = await _two_audience_ids(db)
+    aud_c = await _third_audience_id(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+    all_units = await _all_units_id(db)
+
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units, all_units, all_units],
+        audience_role_ids=[aud_a, aud_b, aud_c],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="改版",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    await _disable_tag(db, aud_a)  # 既有且已生效 → 保留
+    await _disable_tag(db, aud_c)  # 本次才新增 → 擋下
+    await _review.approve(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    pairs = await _doc_tag_pairs(db, doc_id)
+    assert (aud_a, all_units) in pairs, "既有生效引用：保留"
+    assert (aud_b, all_units) in pairs, "未停用之新配對：生效"
+    assert (aud_c, all_units) not in pairs, "停用且既有沒有的配對：擋下"
+
+    after = await _approve_audit_after(db, doc_id)
+    assert after["audience_skipped"] == [[aud_c, all_units]], f"只有真正被擋的才算跳過：{after}"
+    assert sorted(after["audience"]) == sorted([[aud_a, all_units], [aud_b, all_units]]), (
+        f"稽核的生效範圍應含被保留的既有配對：{after}"
+    )
+
+
+async def test_同職位多單位且內容未變時不併列(db):
+    """L4 的相同判定**不可依賴排序**：兩邊查的是不同的表（`DM_DOC_TAG` / `DM_VERSION_TAG`）。
+
+    「同職位多單位」是合法資料（見 `test_同職位多單位_並存為兩列`），此時只靠 `TAG_ID`
+    排序無法決定兩列的先後。若以 list 直接比對，內容相同但順序不同就會誤判為「相異」而
+    多出一排——正好打掉「常態不出現」的設計。
+    """
+    await _seed_editor_and_reviewer(db)
+    role_id, _ = await _two_audience_ids(db)
+    all_units = await _all_units_id(db)
+    unit_id = await _specific_unit_id(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=role_id)
+
+    # v2：兩個單位共用同一職位，核准後文件層有兩列
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units, unit_id],
+        audience_role_ids=[role_id, role_id],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="兩個單位",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    s2 = await _editor.submit(db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    await _review.approve(db, review_id=s2.review_id, op=_op("rev1"))
+
+    # v3：可見對象原封不動送審
+    ver3 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units, unit_id],
+        audience_role_ids=[role_id, role_id],
+        retrieval_ids=[],
+        version_no="3.0",
+        change_summary="只改內文",
+        file_name="v3.pdf",
+        file_bytes=b"%PDF-1.4 v3",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    s3 = await _editor.submit(db, doc_id=doc_id, version_id=ver3.version_id, assigned_reviewer="rev1", op=_op("ed"))
+
+    detail = await _review.get_detail(db, review_id=s3.review_id, op=_op("rev1"))
+
+    assert len(detail.audience_tags) == 2, "正向錨點：確實是同職位兩單位的情境"
+    assert detail.current_audience_tags is None, "可見對象未變，不應因排序差異而誤判為相異"
+
+
+async def test_停用標籤的既有引用已被移除者不得復活(db):
+    """「保留既有有效列」的邊界：既有列是 `deleted=1`（曾經掛過、後來被移除）時**不得**復活。
+
+    讓它復活等同產生一筆新的生效引用——正是 L1-a 要擋的那件事。這條與
+    `test_停用標籤的既有生效引用不得因核准而被收回` 是同一個判斷的兩側，
+    差別只在既有列的 `DELETED`；少了這條，把 `row.deleted == 0` 條件拿掉不會有人發現。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, aud_b = await _two_audience_ids(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+    all_units = await _all_units_id(db)
+
+    # v2 把可見對象換成 B → A 的文件層列轉為 deleted=1
+    ver2 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units],
+        audience_role_ids=[aud_b],
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="換對象",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    s2 = await _editor.submit(db, doc_id=doc_id, version_id=ver2.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    await _review.approve(db, review_id=s2.review_id, op=_op("rev1"))
+    assert (aud_a, all_units) not in await _doc_tag_pairs(db, doc_id), "前置：A 的列已被軟刪除"
+
+    # v3 又把 A 加回來（此時 A 仍啟用，寫入檢核過得了），送審後才停用 A
+    ver3 = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=[all_units, all_units],
+        audience_role_ids=[aud_a, aud_b],
+        retrieval_ids=[],
+        version_no="3.0",
+        change_summary="加回 A",
+        file_name="v3.pdf",
+        file_bytes=b"%PDF-1.4 v3",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    s3 = await _editor.submit(db, doc_id=doc_id, version_id=ver3.version_id, assigned_reviewer="rev1", op=_op("ed"))
+    await _disable_tag(db, aud_a)
+    await _review.approve(db, review_id=s3.review_id, op=_op("rev1"))
+
+    pairs = await _doc_tag_pairs(db, doc_id)
+    assert (aud_a, all_units) not in pairs, "已移除的停用配對不得復活——復活即是新的生效引用"
+    assert (aud_b, all_units) in pairs, "正向錨點：未停用者照常生效"
+    after = await _approve_audit_after(db, doc_id)
+    assert after["audience_skipped"] == [[aud_a, all_units]], f"被擋下的要留痕：{after}"
