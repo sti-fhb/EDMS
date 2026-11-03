@@ -638,3 +638,100 @@ async def test_全數生效時不留空的跳過欄位(db):
 
     after = await _approve_audit_after(db, doc_id)
     assert "audience_skipped" not in after, f"全數生效時不應有此欄位：{after}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L4：新版本送審時併列「目前生效」與「本次提議」（#388）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _submit_new_version(db, doc_id: str, *, unit_ids: list[int], role_ids: list[int]) -> int:
+    ver = await _editor.add_version(
+        db,
+        doc_id=doc_id,
+        audience_unit_ids=unit_ids,
+        audience_role_ids=role_ids,
+        retrieval_ids=[],
+        version_no="2.0",
+        change_summary="改版",
+        file_name="v2.pdf",
+        file_bytes=b"%PDF-1.4 v2",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=doc_id, version_id=ver.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+    return submitted.review_id
+
+
+async def test_新版本送審之明細併列目前生效的可見對象(db):
+    """長壽草稿會靜默把可見範圍改回較寬的舊值（「後核准者勝」，#377 規劃第 10 節）。
+
+    審核者光看「本次提議」無從判斷這是擴大還是縮小——他需要同時看到目前生效值。
+    ⛔ 此處**不**做快照基準比對、也不擋核准（該機制已於 #377 第 10 節裁示不做），
+    只是把判斷所需的另一半資訊攤在同一個畫面上。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, aud_b = await _two_audience_ids(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+    all_units = await _all_units_id(db)
+
+    review_id = await _submit_new_version(db, doc_id, unit_ids=[all_units], role_ids=[aud_b])
+
+    detail = await _review.get_detail(db, review_id=review_id, op=_op("rev1"))
+
+    assert detail.audience_tags == [f"全單位 + {await _tag_name(db, aud_b)}"], "本次提議值不得被擠掉"
+    assert detail.current_audience_tags == [f"全單位 + {await _tag_name(db, aud_a)}"], "應併列目前生效值"
+
+
+async def test_可見對象未變動時不併列目前生效(db):
+    """正向錨點的反面：相同時不顯示。
+
+    若每次都併列，「有這兩排」就不再是訊號，真正改動了可見範圍的那一次會淹沒在例行畫面裡。
+    撰寫者多數改版不動可見對象，故這才是常態。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, _ = await _two_audience_ids(db)
+    doc_id, _ = await _publish_first_version(db, audience_id=aud_a)
+    all_units = await _all_units_id(db)
+
+    review_id = await _submit_new_version(db, doc_id, unit_ids=[all_units], role_ids=[aud_a])
+
+    detail = await _review.get_detail(db, review_id=review_id, op=_op("rev1"))
+
+    assert detail.audience_tags == [f"全單位 + {await _tag_name(db, aud_a)}"]
+    assert detail.current_audience_tags is None, "與提議值相同時不應併列"
+
+
+async def test_首版送審沒有目前生效值可併列(db):
+    """`NEW`（首版）之文件層本來就是空的，併列一排「目前生效：—」只是雜訊。
+
+    ⚠️ `None` 與 `[]` 不同義：`None` ＝不必比對（相同 / 首版 / 廢止類），
+    `[]` ＝目前生效為空但本次提議非空——那是**擴大**，必須顯示。
+    """
+    await _seed_editor_and_reviewer(db)
+    aud_a, _ = await _two_audience_ids(db)
+    created = await _editor.create_document(
+        db,
+        doc_name="ZT首版併列",
+        category_code="SOP",
+        func_code=None,
+        audience_unit_ids=[await _all_units_id(db)],
+        audience_role_ids=[aud_a],
+        retrieval_ids=[],
+        version_no="1.0",
+        change_summary="首版",
+        file_name="v1.pdf",
+        file_bytes=b"%PDF-1.4 v1",
+        file_mime=_PDF,
+        op=_op("ed"),
+    )
+    submitted = await _editor.submit(
+        db, doc_id=created.doc_id, version_id=created.version_id, assigned_reviewer="rev1", op=_op("ed")
+    )
+
+    detail = await _review.get_detail(db, review_id=submitted.review_id, op=_op("rev1"))
+
+    assert detail.review_type == "NEW"
+    assert detail.current_audience_tags is None, "首版無目前生效值，不應併列"

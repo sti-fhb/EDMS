@@ -48,6 +48,9 @@ export interface ReviewDetail {
   // 本次送審之標籤（#377）：新增／新版本為該版本快照、廢止為文件層現值。供審核者核對可見對象。
   audience_tags: string[]
   retrieval_tags: string[]
+  // 目前生效之可見對象（#388 L4）：僅新版本申請且與本次提議相異時有值，供判斷這次是擴大還是縮小。
+  // ⚠️ `null` ＝不必比對，`[]` ＝目前無人可見（本次為擴大）——⛔ 不可用 falsy 混為一談。
+  current_audience_tags: string[] | null
   review_type: string
   change_summary: string | null
   submit_date: string

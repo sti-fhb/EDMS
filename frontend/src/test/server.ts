@@ -88,6 +88,44 @@ const ATTEMPT_RESULT = {
   ],
 }
 
+/**
+ * 簽核明細預設回應。抽成常數供測試以 `server.use()` 局部覆寫
+ * （`{ ...DM_REVIEW_DETAIL, current_audience_tags: [...] }`），不必整份重打。
+ */
+export const DM_REVIEW_DETAIL = {
+  review_id: 501,
+  doc_id: "DM-SOP-000001",
+  doc_name: "領血確認標準作業程序",
+  category_code: "SOP",
+  category_name: "標準作業程序",
+  // 後端以「單位 + 職位」成對回傳（#437）；前端直接呈現，不在畫面端組字串
+  audience_tags: ["全單位 + 全體", "國防部軍醫局 + 護理師"],
+  retrieval_tags: ["採血"],
+  // null ＝本次未改動可見範圍（常態），畫面不併列目前生效值（#388 L4）
+  current_audience_tags: null as string[] | null,
+  review_type: "NEW_VERSION",
+  change_summary: "補充第 5 點異常通報流程",
+  submit_date: "2026-08-18T16:42:00Z",
+  submitter_id: "u1",
+  submitter_name: "陳大華",
+  new_version: {
+    version_id: 22,
+    version_no: "2.2",
+    file_name: "SOP-2.2.pdf",
+    file_size: 2300000,
+    file_mime: "application/pdf",
+    previewable: true,
+  },
+  current_version: {
+    version_id: 21,
+    version_no: "2.1",
+    file_name: "SOP-2.1.pdf",
+    file_size: 2200000,
+    file_mime: "application/pdf",
+    previewable: true,
+  },
+}
+
 export const handlers = [
   http.post("/api/login", () =>
     HttpResponse.json({ access_token: "test-access-token", must_change_pwd: false, expires_in: 900 }),
@@ -426,37 +464,7 @@ export const handlers = [
     }),
   ),
   http.get("/api/dm/reviews/:reviewId", ({ params }) =>
-    HttpResponse.json({
-      review_id: Number(params.reviewId),
-      doc_id: "DM-SOP-000001",
-      doc_name: "領血確認標準作業程序",
-      category_code: "SOP",
-      category_name: "標準作業程序",
-      // 後端以「單位 + 職位」成對回傳（#437）；前端直接呈現，不在畫面端組字串
-      audience_tags: ["全單位 + 全體", "國防部軍醫局 + 護理師"],
-      retrieval_tags: ["採血"],
-      review_type: "NEW_VERSION",
-      change_summary: "補充第 5 點異常通報流程",
-      submit_date: "2026-08-18T16:42:00Z",
-      submitter_id: "u1",
-      submitter_name: "陳大華",
-      new_version: {
-        version_id: 22,
-        version_no: "2.2",
-        file_name: "SOP-2.2.pdf",
-        file_size: 2300000,
-        file_mime: "application/pdf",
-        previewable: true,
-      },
-      current_version: {
-        version_id: 21,
-        version_no: "2.1",
-        file_name: "SOP-2.1.pdf",
-        file_size: 2200000,
-        file_mime: "application/pdf",
-        previewable: true,
-      },
-    }),
+    HttpResponse.json({ ...DM_REVIEW_DETAIL, review_id: Number(params.reviewId) }),
   ),
   http.post("/api/dm/reviews/:reviewId/approve", () =>
     HttpResponse.json({ published_version_id: 22, notified: 3 }),

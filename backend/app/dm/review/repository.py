@@ -27,6 +27,7 @@ _PUBLISHED = "PUBLISHED"
 _SUPERSEDED = "SUPERSEDED"
 _AUDIENCE = "AUDIENCE"
 _OBSOLETE = "OBSOLETE"
+_NEW_VERSION = "NEW_VERSION"
 _ALL_AUDIENCE_TAG = "全體"
 #: 「已完成」清單的狀態母體。
 #:
@@ -50,6 +51,19 @@ class AppliedDocTags:
     applied: list[tuple[int, int | None]]
     #: 快照裡含已停用標籤、因而未套用的配對；空清單代表快照全數生效。
     skipped: list[tuple[int, int | None]]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTagNames:
+    """簽核明細呈現用之標籤名稱（#377 / #388 L4）。"""
+
+    #: 本次送審提議之可見對象（OBSOLETE 為文件層現值）。
+    audience: list[str]
+    #: 本次送審提議之檢索標籤。
+    retrieval: list[str]
+    #: 目前生效之可見對象，供並列比對。⚠️ `None` ＝不必比對（與提議值相同 / 首版 / 廢止類），
+    #: 與 `[]`（目前生效為空＝本次是擴大）**不同義**，呈現層不可用 falsy 判斷混為一談。
+    current_audience: list[str] | None = None
 
 
 def _sorted_pairs(pairs: list[tuple[int, int | None]]) -> list[tuple[int, int | None]]:
@@ -258,12 +272,17 @@ class ReviewCenterRepository:
 
     async def get_review_tag_names(
         self, db: AsyncSession, *, review_type: str, doc_id: str, version_id: int | None
-    ) -> dict[str, list[str]]:
+    ) -> ReviewTagNames:
         """取簽核明細呈現用之標籤名稱，依送審類型決定來源（#377）。
 
         NEW / NEW_VERSION → 該送審版本之**版本層快照**：審核者看到的即本次送審提議、且核准後會生效
         的值。OBSOLETE → **文件層現值**：廢止之 VERSION_ID 指向目前發布版、無草稿階段快照，且廢止
         決策關注的是「此文件目前的可見範圍」。
+
+        `NEW_VERSION` 另取文件層現值作 `current_audience`（#388 L4）：長壽草稿會把可見範圍靜默
+        改回較寬的舊值（「後核准者勝」，#377 規劃第 10 節），審核者光看提議值無從判斷這是擴大
+        還是縮小。⛔ **不是**該節裁示不做的快照基準比對——此處不記基準時點、不比對、不擋核准，
+        只把判斷所需的另一半資訊一併回傳。
 
         Args:
             review_type: 送審類型（NEW / NEW_VERSION / OBSOLETE）。
@@ -275,13 +294,28 @@ class ReviewCenterRepository:
         多筆配對無從對應（見 issue #437「為何不採單位集 ∧ 職位集」）。
 
         Returns:
-            {"audience": [...], "retrieval": [...]}，值為中文字串。
+            `ReviewTagNames`；`current_audience` 僅 `NEW_VERSION` 且與提議值相異時有值。
         """
+        from_doc = review_type == _OBSOLETE or version_id is None
+        audience, retrieval = await self._tag_names(db, doc_id=doc_id, version_id=None if from_doc else version_id)
+        if from_doc or review_type != _NEW_VERSION:
+            return ReviewTagNames(audience=audience, retrieval=retrieval)
+        current, _ = await self._tag_names(db, doc_id=doc_id, version_id=None)
+        # 相同時回 None 而非空清單：若每次都併列，「有這兩排」就不再是訊號，真正改動可見範圍
+        # 的那一次會淹沒在例行畫面裡。⚠️ `[]` 另有其義——現值為空而提議非空即**擴大**，必須顯示。
+        return ReviewTagNames(
+            audience=audience, retrieval=retrieval, current_audience=None if current == audience else current
+        )
+
+    async def _tag_names(
+        self, db: AsyncSession, *, doc_id: str, version_id: int | None
+    ) -> tuple[list[str], list[str]]:
+        """查單一來源之 (可見對象, 檢索標籤) 名稱；`version_id` 為 None 時取文件層現值。"""
         unit_tag = aliased(DmTag, name="dm_unit_tag")
-        if review_type == _OBSOLETE or version_id is None:
+        base = select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
+        if version_id is None:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
-                .select_from(DmDocTag)
+                base.select_from(DmDocTag)
                 .join(DmTag, DmDocTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                 .outerjoin(unit_tag, DmDocTag.unit_tag_id == unit_tag.tag_id)
@@ -290,8 +324,7 @@ class ReviewCenterRepository:
             )
         else:
             stmt = (
-                select(DmTag.tag_name, DmTagGroup.group_type, unit_tag.tag_name)
-                .select_from(DmVersionTag)
+                base.select_from(DmVersionTag)
                 .join(DmTag, DmVersionTag.tag_id == DmTag.tag_id)
                 .join(DmTagGroup, DmTag.tag_group_code == DmTagGroup.tag_group_code)
                 .outerjoin(unit_tag, DmVersionTag.unit_tag_id == unit_tag.tag_id)
@@ -306,7 +339,7 @@ class ReviewCenterRepository:
             else:
                 # 單位缺漏者（導入配對前之殘留）仍列出職位，讓審核者看得到它、而非默默消失
                 audience.append(f"{unit_name} + {tag_name}" if unit_name else tag_name)
-        return {"audience": audience, "retrieval": retrieval}
+        return audience, retrieval
 
     async def apply_version_tags_to_doc(
         self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str

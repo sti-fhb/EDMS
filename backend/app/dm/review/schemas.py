@@ -53,6 +53,9 @@ class ReviewDetail(BaseModel):
     # 供審核者核對可見對象是否選錯——核准後即為該文件生效之可見範圍。
     audience_tags: list[str] = []
     retrieval_tags: list[str] = []
+    # 目前生效之可見對象（#388 L4）：僅 NEW_VERSION 且與本次提議相異時有值，供審核者判斷
+    # 這次是擴大還是縮小。⚠️ `None` ＝不必比對，`[]` ＝目前生效為空（本次為擴大），兩者不同義。
+    current_audience_tags: list[str] | None = None
     review_type: str
     change_summary: str | None
     submit_date: datetime
