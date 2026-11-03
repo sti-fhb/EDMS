@@ -29,6 +29,9 @@ os.environ.setdefault("DEBUG", "true")
 # 時就擋下，整批測試在 collection 階段全紅。環境變數優先於 .env，空字串視同未設定（退回 DATABASE_URL）。
 # integration 的 alembic 子程序另在 tests/integration/conftest.py 顯式帶入測試庫。
 os.environ["MIGRATION_DATABASE_URL"] = ""
+# 上傳前的磁碟剩餘空間檢查（#905 A1）預設 10 GB；CI runner 不保證有這麼多，上傳的 integration 測試會被
+# 擋成 507。設 0 關閉，檢查本身由 tests/unit/test_core_upload_disk_guard.py 以替身與真實磁碟驗證。
+os.environ.setdefault("UPLOAD_MIN_FREE_DISK_MB", "0")
 
 # pytest-xdist 並行：每個 worker 改用自己的資料庫，避免多行程互相 DROP SCHEMA。
 # 必須在 app.core.config.settings 第一次 import 之前改寫（否則 settings 會 cache 舊庫名）。

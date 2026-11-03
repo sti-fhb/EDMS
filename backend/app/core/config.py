@@ -160,6 +160,15 @@ class Settings(BaseSettings):
     # 不可比照 dm/editor/storage.py 之 save_upload(data: bytes) 一次讀進記憶體。
     ET_VIDEO_STORAGE_ROOT: str = "./var/et_videos"
 
+    # 上傳前磁碟至少要剩多少空間（MB；0 = 不檢查），低於即拒收、回 507（#905 A1，`core/upload_disk_guard`）。
+    # 正式環境的上傳暫存、上面兩個存放區與 TBMS 的資料庫在同一顆磁碟上，寫滿會讓 TBMS 也寫不進去。
+    # 放行條件是「剩餘 − 進行中上傳的預留 − 這一支的預留 ≥ 本值」，每支預留它最多會用掉的空間
+    # （ET 影片約 1 GB、DM 文件約 100 MB），所以本值是**上傳全部寫完之後**仍留給 TBMS 與系統的空間。
+    # 10 GB 為 2026-11-03 使用者裁示。
+    # ⚠️ 只管經過後端的上傳：TBMS 自身資料成長、log、前端反向代理的暫存都不在計算內。
+    # 測試環境由 `tests/conftest.py` 設為 0：CI runner 的剩餘空間不保證有 10 GB。
+    UPLOAD_MIN_FREE_DISK_MB: int = Field(default=10 * 1024, ge=0)
+
     # ET 首位管理者 bootstrap（#185 SA Q1 裁示）——ET 角色 seed 依此 Email 查 DP_USER 取
     # USER_ID 後授予 ET 管理者，解開「要當管理者才能指派管理者」之死結（dp-roles 之
     # _require_manageable 需 is_module_admin 為真，而該閘 fail-closed）。

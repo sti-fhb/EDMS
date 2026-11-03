@@ -47,6 +47,12 @@ uvicorn 送完回應就關連線，而 nginx 還在轉送 body，於是判定上
 - **名額持有到回應結束**，不是 body 傳完：ET 影片在 body 收完後還要寫檔、跑 `ffprobe`。客戶端中途
   斷線時，要等路由讀到 `http.disconnect` 結束才歸還；例外與取消都由 `finally` 歸還
 
+## 磁碟剩餘空間（#905 A1）
+
+上傳端點通過上面兩道檢查後，再看磁碟剩餘空間（`upload_disk_guard.has_room`），不足就丟棄 body、回 507。
+放行時預留這支最多會用掉的空間，回應結束扣回（理由見 `upload_disk_guard` 模組說明）。
+放在身分驗證**之後**：未登入者不該能探測主機磁碟是否將滿。放在佔用名額**之前**：被拒絕的請求不佔名額。
+
 ## 一般寫入也先驗（#833 C1）
 
 JSON body 同樣是 FastAPI 先解析、身分依賴後跑：未登入者可讓後端解析最多 2MB（nginx 的一般 API 上限）
@@ -89,6 +95,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.auth import decode_access_token
 from app.core.exceptions import AppError
+from app.core.upload_disk_guard import has_room, max_upload_bytes
 
 #: 收檔案的 5 支端點（multipart）。新增上傳端點時，這裡與 nginx 的上傳 location 都要加。
 UPLOAD_PATH_PATTERN: Final = re.compile(
@@ -129,6 +136,10 @@ _BODY_TOO_LARGE: Final = AppError(status_code=413, detail="上傳內容超過系
 _TOO_MANY_UPLOADS: Final = AppError(
     status_code=429, detail="同時上傳的檔案過多，請待目前的上傳完成後再試", error_code="COMMON_429"
 )
+
+
+def _no_disk_space() -> AppError:
+    return AppError(status_code=507, detail="系統儲存空間不足，暫時無法上傳，請聯絡系統管理者", error_code="COMMON_507")
 
 
 def _bearer_token(scope: Scope) -> str | None:
@@ -244,12 +255,15 @@ async def _send_error(send: Send, error: AppError) -> None:
 
 
 class UploadAuthPrecheckMiddleware:
-    """寫入請求未帶有效 token 回 401；上傳端點另有同一人同時上傳過多回 429。兩者都丟棄 body、不交給路由解析。"""
+    """寫入請求未帶有效 token 回 401；上傳端點另有同一人同時上傳過多回 429、磁碟剩餘空間不足回 507。
+    都丟棄 body、不交給路由解析。"""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
         #: 進行中的上傳數，以 `sub` 為鍵；歸零即移除，不會隨使用者數累積
         self._in_flight: Counter[str] = Counter()
+        #: 進行中的上傳預留的磁碟空間（`upload_disk_guard` 的預留額度），回應結束即扣回
+        self._reserved_bytes = 0
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if not _is_api_write(scope):
@@ -270,10 +284,18 @@ class UploadAuthPrecheckMiddleware:
             await _discard_body(receive)
             await _send_error(send, _TOO_MANY_UPLOADS)
             return
+        needed = max_upload_bytes(_route_path(scope))
+        # 檢查與預留之間沒有 await：單一事件迴圈上不會有別的上傳插進來（後端單一 worker）
+        if not has_room(self._reserved_bytes, needed):
+            await _discard_body(receive)
+            await _send_error(send, _no_disk_space())
+            return
         self._in_flight[sub] += 1
+        self._reserved_bytes += needed
         try:
             await self.app(scope, receive, send)
         finally:
+            self._reserved_bytes -= needed
             self._in_flight[sub] -= 1
             if self._in_flight[sub] <= 0:
                 del self._in_flight[sub]
