@@ -9,6 +9,13 @@ import { HttpResponse, http } from "msw"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { EtCourseEditorPage } from "./CourseEditorPage"
+import {
+  courseCard,
+  mockSlowListRefetch,
+  newSharedQueryClient,
+  renderListAndCache,
+  returnToList,
+} from "./courseListCache.testUtils"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
 
@@ -43,9 +50,9 @@ function renderEditor(courseId = "1") {
 
 /** 新增模式：無路由參數。**不可寫成 `renderNewEditor()`**——傳 undefined 會
  *  觸發預設參數而變成編輯模式，是難以察覺的假通過。 */
-function renderNewEditor() {
+function renderNewEditor(queryClient?: QueryClient) {
   paramsRef.current = {}
-  return renderWithProviders(<EtCourseEditorPage />)
+  return renderWithProviders(<EtCourseEditorPage />, undefined, undefined, queryClient)
 }
 
 /**
@@ -222,6 +229,31 @@ describe("ET05 課程編輯頁", () => {
     expect(captured.body?.open_start_at).toBeNull()
     expect(captured.body?.open_end_at).toBeNull()
     expect(navigateSpy).toHaveBeenCalledWith("/et/courses")
+  })
+
+  it("新增模式儲存後回到列表，重抓回來前不先畫出不含新課程的舊列表（#901）", async () => {
+    const user = userEvent.setup()
+    const queryClient = newSharedQueryClient()
+    const { release, listCalls } = mockSlowListRefetch(
+      [courseCard(2, "原有的課程")],
+      [courseCard(99, "新課程"), courseCard(2, "原有的課程")],
+    )
+
+    const list = await renderListAndCache(queryClient, "原有的課程")
+    list.unmount()
+
+    const editor = renderNewEditor(queryClient)
+    await user.type(await screen.findByRole("textbox", { name: "課程名稱" }), "新課程")
+    await user.click(screen.getByRole("button", { name: "儲存草稿" }))
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith("/et/courses"))
+    editor.unmount()
+
+    // 🔴 重抓還卡著：此刻畫面上的任何課程都只可能來自快取——而快取裡沒有剛建的課
+    await returnToList(queryClient, listCalls)
+    expect(screen.queryByText("原有的課程")).not.toBeInTheDocument()
+
+    release()
+    expect(await screen.findByText("新課程")).toBeInTheDocument()
   })
 
   it("課程名稱留空時擋下送出並顯示錯誤", async () => {

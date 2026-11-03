@@ -598,6 +598,11 @@ export function EtCourseEditorPage() {
       message.success("草稿已儲存")
       // 對齊 wireframe「儲存後：回到課程列表卡片網格」；新增 / 編輯皆同。
       // 章節是各自即時儲存的，不會因離開編輯頁而遺失。
+      //
+      // #901：新增模式要先丟掉列表快取——否則回到列表時先畫出「還沒有這門課」的舊列表，
+      // 網路慢時新課程晚出現、重抓失敗時一直不出現，教師會以為沒存成而重建一次。理由同
+      // `requestDeleteDraft`。編輯模式只改卡片名稱，刻意不清（清了也無害，只多一下載入中）。
+      if (isNew) qc.removeQueries({ queryKey: QUERY_KEYS.etCourses.lists() })
       navigate("/et/courses")
     },
     onError: handleError,
@@ -1258,6 +1263,10 @@ export function EtCourseEditorPage() {
         try {
           await coursesApi.remove(courseId as number)
           message.success("草稿已刪除")
+          // #901：回到列表時，重抓回來之前會先畫出快取裡的舊列表——網路慢或重抓失敗時，
+          // 剛刪掉的課程就留在畫面上。⚠️ 只讓快取「失效」沒用：staleTime 為 0，快取本來就
+          // 是過期的，照樣先被畫出來。必須整份丟掉，回到列表時改顯示載入中。
+          qc.removeQueries({ queryKey: QUERY_KEYS.etCourses.lists() })
           navigate("/et/courses")
         } catch (err) {
           handleError(err)
@@ -1839,6 +1848,9 @@ export function EtCourseEditorPage() {
       //「草稿已儲存」**幾乎同字**，但這一條是**系統代勞**（新增模式下要加項目／問卷，
       // 得先有課程 id，所以這裡先替他建了一門草稿）。改成不同句型以免兩者混淆。
       message.success("已先將課程存成草稿")
+      // #901：課程在這一刻就建好了，之後教師從編輯頁回列表時才會看到它——所以快取要在
+      // 建立當下丟掉，否則回到列表時先畫出「還沒有這門課」的舊列表。理由同 `requestDeleteDraft`。
+      qc.removeQueries({ queryKey: QUERY_KEYS.etCourses.lists() })
       navigate(`/et/courses/${created.course_id}`, { replace: true, state })
     } catch (err) {
       handleError(err)
