@@ -5,6 +5,7 @@ JOB_ID 唯讀、HANDLER_REF / MODULE 永不可改（改 HANDLER_REF＝RCE，見 
 編輯即時套到運行中的引擎（apply_job_change），並寫稽核。
 """
 
+import logging
 from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,15 @@ from app.dp.schedules.scheduler import apply_job_change, next_run, validate_cron
 from app.dp.schedules.schemas import ScheduleResponse, ScheduleUpdate
 from app.services import AuditLogService
 
+logger = logging.getLogger(__name__)
+
 _FUNC_NAME = "DP-SCHEDULE"
+
+#: 週幾自週一起算是 APScheduler 的語意（見 tests/unit/dp/test_dp_schedule_cron_weekday.py），
+#: 與一般 crontab（週日為 0）差一天，故訊息特別寫出。
+_INVALID_CRON_MESSAGE: Final[str] = (
+    "cron 表達式不合法：請填 5 個欄位（分 時 日 月 週幾），以空白分隔；週幾為 0～6，0 為週一"
+)
 
 #: 無對應模組管理者角色、由後台共用維護的排程所屬模組。
 #:
@@ -99,7 +108,9 @@ class ScheduleService:
         try:
             validate_cron(data.cron_expr)
         except ValueError as exc:
-            raise AppError(status_code=422, detail=f"cron 表達式不合法：{exc}", error_code="DP_SCHED_002") from exc
+            # 套件原文是英文且含輸入值（#902），只進 log；畫面一律給固定的修正說明
+            logger.warning("cron 表達式不合法 job=%s：%s", job_id, exc)
+            raise AppError(status_code=422, detail=_INVALID_CRON_MESSAGE, error_code="DP_SCHED_002") from exc
 
         # 未帶 description 維持原值；帶空字串（strip 後）或 null 一律存 NULL，不存空字串
         description = (data.description or None) if "description" in data.model_fields_set else job.description
