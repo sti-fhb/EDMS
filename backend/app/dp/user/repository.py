@@ -29,8 +29,11 @@ def _email_change_token_active(now: datetime) -> tuple[ColumnElement[bool], ...]
 def _pending_email_active(now: datetime) -> ColumnElement[bool]:
     """DP_USER.PENDING_EMAIL 是否仍「待驗證中」：本人有一筆仍有效、NEW_EMAIL 相同的 EMAIL_CHANGE token。
 
-    PENDING_EMAIL 於連結逾期 / 作廢後**不會被清空**（#904 採讀取時判定），故讀取此欄位的路徑一律須套用本條件，
-    否則殘值會讓畫面一直顯示「變更審核中」並占住該 Email。
+    PENDING_EMAIL 於連結逾期 / 作廢後**不會被清空**（#904 SA 裁示採讀取時判定、不以 SCHDP001 清欄位），
+    殘值會讓畫面一直顯示「變更審核中」並占住該 Email。目前兩個讀取點（`get_active_pending_email`、
+    `email_taken_for_change`）皆經本判定。
+
+    ⛔ **日後新增 PENDING_EMAIL 讀取點必須經過此判定**，不可直接讀欄位值，也不可另寫逾期條件。
     """
     return exists().where(
         DpPwdReset.user_id == DpUser.user_id,

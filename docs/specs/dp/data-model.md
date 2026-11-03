@@ -159,7 +159,7 @@ erDiagram
 | LOGIN_FAIL_COUNT | INT | Y | 0 | 連續登入失敗計數；成功登入 / 解鎖歸零 |
 | LOCKED_UNTIL | TIMESTAMP | N | — | 鎖定截止時間；null=未鎖定；now < 值＝鎖定中（逾時自動解鎖）；手動解鎖清空 |
 | LAST_LOGIN_DATE | TIMESTAMP | N | — | 最後成功登入時間（閒置 90 日判定基準；**null＝從未登入，改以 `CREATED_DATE` 為基準**）|
-| PENDING_EMAIL | VARCHAR(255) | N | — | Email 變更待驗證之新信箱（驗證後寫入 EMAIL 並清空）。驗證連結逾時 / 作廢後欄位值保留，但一律視為無待驗證——讀取時須同時有該使用者仍有效（未使用、未逾 EXPIRES_DATE）、NEW_EMAIL 相同之 EMAIL_CHANGE token 才算待驗證中（#904）|
+| PENDING_EMAIL | VARCHAR(255) | N | — | Email 變更待驗證之新信箱（驗證後寫入 EMAIL 並清空；逾時作廢清空）|
 | PWD_CHANGED_DATE | TIMESTAMP | Y | — | 最後一次密碼設定時間（效期 90 日起算）|
 | MUST_CHANGE_PWD | BOOLEAN | Y | false | 首次登入強制變更旗標（管理者代建初始密碼時為 true，變更後歸 false）|
 
