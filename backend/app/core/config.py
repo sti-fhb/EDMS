@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     #    （⛔ 不要引用「上傳影片期間課程被鎖住」當例子：上傳是檔案落地後才取鎖，見 `material/service.upload_video`。）
     #
     # 不受此限的連線：migration（`alembic/env.py`）、稽核鏈驗證 CLI（`dp/audit/verify._cli_session`，#833 C3）顯式設 0。
+    #
+    # ⛔ **刻意不設** `idle_in_transaction_session_timeout`／`transaction_timeout`
+    #    （#833 B2 評估，2026-11-03 使用者裁示）。
+    #    擋路的是發信 worker（`dp/notify/worker.process_pending_once`）：它以 `FOR UPDATE SKIP LOCKED` 鎖住一批信
+    #    （最多 `MAIL.RATE_PER_MIN` 封），在**同一個交易裡**逐封連 SMTP 寄出，整批寄完才寫回狀態並 commit。
+    #    寄送期間沒有任何查詢，DB 端看到的就是閒置中的交易；SMTP 一慢，任何合理的值都會砍掉它 → rollback →
+    #    已寄出的信回到 PENDING、下一輪**重寄一次**。要設，先把 worker 改成每封各自 commit，另案處理。
+    #    原本要防的「上傳期間交易開著」已由 #833 A1 修掉（`et/material/service.upload_video`）。
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
     # 等稽核鏈 advisory lock 的上限（毫秒；#833 B2），等滿回 503「系統忙碌」。
     #

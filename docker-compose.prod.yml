@@ -33,6 +33,14 @@
 #      sudo docker inspect -f '{{.Name}} OOM={{.State.OOMKilled}} 重啟={{.RestartCount}}' edms-backend edms-db edms-nginx
 #        → OOM=true 或重啟次數持續增加，代表撞到上限
 #      sudo docker stats --no-stream   → 實際用量與上限的比例
+#    疑難排解：教師上傳影片看到 `ET_MATERIAL_004`「無法解析影片長度」，但檔案本身正常（#833 C4）
+#      → 可能是 ffprobe 被記憶體上限砍掉，不是檔案的問題。先查這兩處再請使用者換檔案：
+#      sudo docker logs edms-backend --since 1h 2>&1 | grep "ffprobe 被訊號"
+#        → 有「訊號 9」就是被砍掉的（後端 `et/material/video_probe.py` 記的 WARNING）
+#      sudo dmesg -T | grep -iE "out of memory|killed process"
+#        → 核心的 OOM 紀錄，會寫出被砍的行程名稱（ffprobe 或 uvicorn）
+#      ⚠️ 被砍的是 ffprobe 這種子行程、後端本身沒倒時，上面 `OOM=` 那行不一定是 true，不能用它排除。
+#      確認是記憶體不夠時，處理方式見上面「上限只防失控、不創造容量」，不是請使用者換檔案。
 # ⚠️ Compose v2 非 swarm 模式下 `deploy.resources.limits` 同樣生效（§6.3 有註明）。
 # ⚠️ 首次部署這份設定時，三個容器都會因設定變更被重建一次，DB 重建期間網站短暫中斷。
 # ⚠️ 院內交付版的 compose 在 TBMS repo（scripts/onprem-packaging/），不吃這份設定。
