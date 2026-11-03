@@ -108,7 +108,8 @@ async def _cli_session() -> AsyncIterator[AsyncSession]:
     """CLI 專用的 session：**不受 `DB_STATEMENT_TIMEOUT_MS` 限制**（#833 C3）。
 
     驗鏈是一句走訪全表的查詢；稽核表只增不減，大到單句超過 60 秒時，用應用程式的連線會被中止成
-    退出碼 2「執行錯誤」，例行稽核從此跑不完。比照 migration（`alembic/env.py`）顯式設 0。
+    退出碼 2「執行錯誤」，例行稽核從此跑不完。比照 migration（`alembic/env.py`）顯式設 0；
+    閒置交易逾時（#905 A2）同樣設 0。
     一次性工具不需要連線池，用 `NullPool`，結束即釋放。
 
     ⚠️ 整段走訪在同一個交易內：表很大時會長時間持有快照（VACUUM 推進不了）與 `DP_AUDIT_LOG` 的讀鎖。
@@ -118,7 +119,13 @@ async def _cli_session() -> AsyncIterator[AsyncSession]:
     engine = create_app_engine(
         settings.DATABASE_URL,
         poolclass=NullPool,
-        connect_args={"server_settings": {"statement_timeout": "0", "application_name": "edms-audit-verify"}},
+        connect_args={
+            "server_settings": {
+                "statement_timeout": "0",
+                "idle_in_transaction_session_timeout": "0",
+                "application_name": "edms-audit-verify",
+            }
+        },
     )
     try:
         async with AsyncSession(engine) as session:

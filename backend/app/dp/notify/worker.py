@@ -12,8 +12,10 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.utils import utcnow
+from app.dp.notify.models import DpEmailLog
 from app.dp.notify.redaction import REDACTED_BODY, redact_after_sent
 from app.dp.notify.repository import NotifyRepository
 from app.services import ParamService
@@ -52,9 +54,17 @@ class EmailWorker:
         now: datetime | None = None,
         limit: int = 100,
     ) -> int:
-        """處理一批 PENDING 信件；回傳本輪成功寄出的封數。
+        """處理一輪 PENDING 信件；回傳本輪成功寄出的封數。
 
-        單筆失敗不影響同批其他收件人（各自 try）；失敗累計 RETRY_COUNT，達 max_retry 標 FAILED，
+        **每封各自一個交易**（#905 A2）：撿一封並鎖住 → 寄出 → 更新狀態 → commit，再撿下一封。
+        整批放在同一交易時，寄送期間 DB 端是一個閒置中的交易；任何一封中斷都會讓已寄出的信
+        rollback 回 PENDING、下一輪重寄。現在中斷最多影響正在寄的那一封，交易時間以
+        `MAIL_SEND_TIMEOUT_SEC` 為上限。⚠️ 會 commit 呼叫端傳入的 session。
+
+        ⚠️ 語意是「**至少寄一次**」，不是「恰好一次」：寄出後、commit 前中斷（或 SMTP 已收下但回應逾時），
+        這一封會留在 PENDING、下一輪再寄一次。含一次性連結的信重寄的是同一個連結，不會產生新的 token。
+
+        單筆失敗不影響同輪其他收件人；失敗累計 RETRY_COUNT，達 max_retry 標 FAILED，
         未達則留 PENDING 待下輪（依 interval_minutes 間隔）。
 
         Args:
@@ -63,37 +73,62 @@ class EmailWorker:
             max_retry: 總嘗試次數上限（DP_PARAM MAIL.RETRY_MAX，**含首次嘗試**）；
                 首次失敗即 retry_count=1，達 max_retry 標 FAILED（如 max_retry=1＝首次失敗即 FAILED）。
             interval_minutes: 重試間隔分鐘（DP_PARAM MAIL.RETRY_INTERVAL_MIN）。
-            now: 目前時間（預設 utcnow()，測試可注入）。
-            limit: 單輪批量上限（近似 RATE_PER_MIN 限速；正式迴圈間隔搭配控制速率）。
+            now: 固定的目前時間（測試注入用）。未給時**每封各自取當下時間**：一輪可跨數十分鐘，
+                共用一個時間點會讓失敗信件的 UPDATED_DATE 比實際早，重試間隔形同失效（security review L1）。
+            limit: 單輪封數上限（近似 RATE_PER_MIN 限速；正式迴圈間隔搭配控制速率）。
         """
-        current = now if now is not None else utcnow()
-        rows = await self._repo.list_pending_for_attempt(
-            db, limit=limit, interval_minutes=interval_minutes, now=current
-        )
+
+        def clock() -> datetime:
+            return now if now is not None else utcnow()
+
+        attempted: set[int] = set()
         sent = 0
-        for row in rows:
-            try:
-                await mailer.send(recipient=row.recipient, subject=row.subject, body=row.body)
-            except Exception as exc:  # mailer 為外部 SMTP，任何失敗皆轉重試 / FAILED，不得中斷同批
-                row.retry_count += 1
-                row.error_msg = str(exc)[:500]
-                row.updated_user = _SYSTEM_USER
-                row.updated_date = current
-                if row.retry_count >= max_retry:
-                    row.status = "FAILED"
-            else:
-                row.status = "SENT"
-                # 含一次性連結的系統信（#50）：與 SENT 同交易遮罩 BODY。
-                # ⛔ 只能在寄出成功後遮：PENDING 需原文供重試，提前遮會寄出遮罩信；
-                # FAILED 列由 SCHDP001 於超過連結時效後遮（redaction.redact_expired_failed）。
-                if redact_after_sent(row.module, row.template_code):
-                    row.body = REDACTED_BODY
-                row.sent_date = current
-                row.updated_user = _SYSTEM_USER
-                row.updated_date = current
-                sent += 1
-        await db.flush()
+        while len(attempted) < limit:
+            row = await self._repo.claim_next_pending(
+                db, interval_minutes=interval_minutes, now=clock(), exclude=attempted
+            )
+            if row is None:
+                break
+            attempted.add(row.message_id)
+            error = await _send_one(mailer, row)
+            _record_result(row, error, max_retry=max_retry, now=clock())
+            await db.commit()
+            sent += error is None
         return sent
+
+
+async def _send_one(mailer: Mailer, row: DpEmailLog) -> str | None:
+    """寄出一封；成功回 `None`，失敗回要記進 ERROR_MSG 的訊息。整封信以 `MAIL_SEND_TIMEOUT_SEC` 封頂。"""
+    deadline = asyncio.timeout(settings.MAIL_SEND_TIMEOUT_SEC)
+    try:
+        async with deadline:
+            await mailer.send(recipient=row.recipient, subject=row.subject, body=row.body)
+    except Exception as exc:  # mailer 為外部 SMTP，任何失敗皆轉重試 / FAILED，不得中斷同輪
+        # 只有本層的時限到了才標「逾時」；aiosmtplib 自己的指令逾時也是 TimeoutError，照原訊息記
+        if deadline.expired():
+            return f"寄送逾時（超過 {settings.MAIL_SEND_TIMEOUT_SEC:g} 秒）"
+        # PostgreSQL 的 text 不收 NUL；訊息內容由 SMTP 伺服器決定，照寫會讓 commit 失敗、這封每輪卡在第一個
+        return str(exc).replace("\x00", "")[:500]
+    return None
+
+
+def _record_result(row: DpEmailLog, error: str | None, *, max_retry: int, now: datetime) -> None:
+    """依寄送結果更新信件狀態（成功 SENT；失敗累計重試、達上限 FAILED）。"""
+    row.updated_user = _SYSTEM_USER
+    row.updated_date = now
+    if error is not None:
+        row.retry_count += 1
+        row.error_msg = error
+        if row.retry_count >= max_retry:
+            row.status = "FAILED"
+        return
+    row.status = "SENT"
+    # 含一次性連結的系統信（#50）：與 SENT 同交易遮罩 BODY。
+    # ⛔ 只能在寄出成功後遮：PENDING 需原文供重試，提前遮會寄出遮罩信；
+    # FAILED 列由 SCHDP001 於超過連結時效後遮（redaction.redact_expired_failed）。
+    if redact_after_sent(row.module, row.template_code):
+        row.body = REDACTED_BODY
+    row.sent_date = now
 
 
 async def _read_mail_params(db: AsyncSession) -> tuple[int, int, int]:

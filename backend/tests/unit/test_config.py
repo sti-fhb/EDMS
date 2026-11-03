@@ -649,3 +649,29 @@ def test_engine_的_echo_取自_db_echo_而非_debug() -> None:
     source = (Path(__file__).resolve().parents[2] / "app" / "core" / "db.py").read_text(encoding="utf-8")
     assert "echo=settings.DB_ECHO" in source, "engine 的 echo 應取自 DB_ECHO"
     assert "echo=settings.DEBUG" not in source, "⛔ 不得改回與 DEBUG 綁在一起（#197 AC 5）"
+
+
+# --- DB_IDLE_IN_TRANSACTION_TIMEOUT_MS 與 MAIL_SEND_TIMEOUT_SEC 的大小關係（#905 A2）---
+
+
+def test_mail_send_timeout_defaults_to_120() -> None:
+    """aiosmtplib 自己的逾時是每個 SMTP 指令 60 秒；整封與它同值會把「慢但能通」的伺服器誤判失敗（code review）。"""
+    assert Settings.model_fields["MAIL_SEND_TIMEOUT_SEC"].default == 120
+
+
+def test_idle_timeout_shorter_than_twice_mail_send_timeout_fails_startup() -> None:
+    """發信 worker 寄一封信期間握著交易；閒置逾時比它短的話，寄出成功卻寫不回 SENT，每一輪都重寄同一封
+    （security review M1）。只改其中一個 env 就會悄悄抵銷 #905 A2，所以在啟動時擋下。"""
+    with pytest.raises(ValueError, match="DB_IDLE_IN_TRANSACTION_TIMEOUT_MS"):
+        _settings_with_scan_ttl(MAIL_SEND_TIMEOUT_SEC=200, DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=300_000)
+
+
+def test_idle_timeout_zero_disables_the_check() -> None:
+    """0 = 不限，與寄信時限無關。"""
+    assert _settings_with_scan_ttl(MAIL_SEND_TIMEOUT_SEC=600, DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=0)
+
+
+def test_idle_timeout_defaults_pass_the_check() -> None:
+    """正向錨點：預設值本身要能啟動，且邊界（剛好 2 倍）放行。"""
+    assert _settings_with_scan_ttl()
+    assert _settings_with_scan_ttl(MAIL_SEND_TIMEOUT_SEC=150, DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=300_000)

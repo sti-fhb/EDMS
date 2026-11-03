@@ -9,6 +9,7 @@
 本專案的設定，不會像時區那樣被 server 預設值蓋過去（見 `tests/unit/test_core_db.py` 開頭）。
 """
 
+import asyncio
 import time
 
 import pytest
@@ -53,3 +54,37 @@ async def test_超過逾時的查詢被中止(apply_migrations):
 
     assert getattr(exc.value.orig, "sqlstate", None) == "57014", "應為 query_canceled（statement timeout）"
     assert elapsed < 1.5, f"應在逾時附近中止，實際 {elapsed:.2f}s"
+
+
+async def test_連線帶上設定的閒置交易逾時(apply_migrations):
+    """#905 A2：設定值真的到了 PostgreSQL（server 預設為 0，非零值只可能來自本專案設定）。"""
+    engine = create_app_engine(settings.DATABASE_URL, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            row = await conn.execute(
+                text("SELECT setting FROM pg_settings WHERE name = 'idle_in_transaction_session_timeout'")
+            )
+            assert row.scalar() == str(settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS)
+    finally:
+        await engine.dispose()
+
+
+async def test_閒置超過逾時的交易被中止(apply_migrations):
+    """以 200ms 的閒置逾時：交易中停 1 秒不送查詢，下一句應失敗（連線已被 PostgreSQL 結束）。"""
+    engine = create_app_engine(
+        settings.DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"idle_in_transaction_session_timeout": "200"}},
+    )
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))  # 開始交易
+            # 正向錨點：逾時以內的閒置照常
+            await asyncio.sleep(0.05)
+            await conn.execute(text("SELECT 1"))
+
+            await asyncio.sleep(1)
+            with pytest.raises(DBAPIError):
+                await conn.execute(text("SELECT 1"))
+    finally:
+        await engine.dispose()

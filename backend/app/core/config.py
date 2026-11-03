@@ -87,14 +87,25 @@ class Settings(BaseSettings):
     #
     # 不受此限的連線：migration（`alembic/env.py`）、稽核鏈驗證 CLI（`dp/audit/verify._cli_session`，#833 C3）顯式設 0。
     #
-    # ⛔ **刻意不設** `idle_in_transaction_session_timeout`／`transaction_timeout`
-    #    （#833 B2 評估，2026-11-03 使用者裁示）。
-    #    擋路的是發信 worker（`dp/notify/worker.process_pending_once`）：它以 `FOR UPDATE SKIP LOCKED` 鎖住一批信
-    #    （最多 `MAIL.RATE_PER_MIN` 封），在**同一個交易裡**逐封連 SMTP 寄出，整批寄完才寫回狀態並 commit。
-    #    寄送期間沒有任何查詢，DB 端看到的就是閒置中的交易；SMTP 一慢，任何合理的值都會砍掉它 → rollback →
-    #    已寄出的信回到 PENDING、下一輪**重寄一次**。要設，先把 worker 改成每封各自 commit，另案處理。
-    #    原本要防的「上傳期間交易開著」已由 #833 A1 修掉（`et/material/service.upload_video`）。
+    # ⛔ **刻意不設** `transaction_timeout`（整個交易的總時間；#833 B2、#905 A2 評估，2026-11-03 使用者裁示）：
+    #    課程「發布／更新」要對大量學員寫入，是正當的長交易，設了會被誤砍。閒置的交易另見下方
+    #    `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`。
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=60_000, ge=0)
+    # 交易開著卻沒有任何查詢的上限（毫秒；0 = 不限），超過由 PostgreSQL 結束該連線（#905 A2、#833 B2）。
+    # 程式出錯忘了結束交易、或交易中卡在等外部 I/O 時，連線與它持有的鎖不會一直被佔住。
+    #
+    # 5 分鐘（2026-11-03 使用者裁示）要比「交易中正當的閒置」寬裕得多。2026-11-03 盤點的來源：
+    #    - 發信 worker 寄一封信：以 `MAIL_SEND_TIMEOUT_SEC`（120 秒）封頂，啟動時檢查本值至少是它的 2 倍。
+    #      #905 A2 之前是整批 60 封同一交易，SMTP 一慢就會被砍、已寄出的信 rollback 後重寄，所以那時不能設
+    #    - DM 上傳寫檔（`dm/editor/service._store_file`，最大 51 MB）：數秒
+    #    - 課程發布把新影片 hard link 進教材目錄（`et/course/stage_apply`）：正常數毫秒；檔案系統不支援
+    #      hard link 時退回複製，每支數十秒
+    #    - 密碼雜湊（bcrypt）：1 秒內
+    #    - 影片遷移 CLI（`et/material/relocate_videos`）：每支影片 hard link（退回複製時數十秒）之間都有 DB 寫入
+    #    原本最長的「上傳 500 MB 影片期間交易開著」已由 #833 A1 修掉（`et/material/service.upload_video`）。
+    # ⚠️ 新增「交易中等外部 I/O」的程式時（呼叫外部 API、寫大檔），要確認它遠低於本值。
+    # 不受此限的連線：migration、稽核鏈驗證 CLI，比照查詢逾時顯式設 0。
+    DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: int = Field(default=300_000, ge=0)
     # 等稽核鏈 advisory lock 的上限（毫秒；#833 B2），等滿回 503「系統忙碌」。
     #
     # 這把鎖全平台共用一個 key，持有到交易結束；寫稽核的動作（**含登入**）都排在它後面，每個排隊者各佔
@@ -140,6 +151,12 @@ class Settings(BaseSettings):
     # ⚠️ worker 每輪最多寄 DP_PARAM MAIL.RATE_PER_MIN 封——那個「每分鐘」是靠本值 = 60 撐起來的，
     # 調短等於把發信速率上限放大，故 production 不得低於 60（見 _validate_mail_worker_poll_interval）。
     MAIL_WORKER_POLL_INTERVAL_SECONDS: int = Field(default=60, ge=1, le=3600)
+    # 寄一封信的總時限（秒；#905 A2），超過即當成一次失敗、照重試規則處理。
+    # 發信 worker 寄送期間握著那一封的交易與列鎖，本值就是這段時間的上限。aiosmtplib 自己的 `timeout`
+    # 是**每個 SMTP 指令**各算一次（連線、EHLO、STARTTLS、AUTH、MAIL、RCPT、DATA…），封不住總時間。
+    # 120 秒：aiosmtplib 的單一指令逾時是 60 秒，整封與它同值會把「慢但能通」的伺服器誤判失敗（code review）。
+    # ⚠️ 必須遠小於 `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`，啟動時檢查（`_validate_idle_timeout_covers_mail_send`）。
+    MAIL_SEND_TIMEOUT_SEC: float = Field(default=120, gt=0)
 
     # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（invite_id）重寄的最小間隔秒數，
     # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
@@ -221,6 +238,22 @@ class Settings(BaseSettings):
             raise ValueError(
                 "MAIL_WORKER_POLL_INTERVAL_SECONDS 在 production（DEBUG=false）不得低於 60："
                 "worker 每輪最多寄 MAIL.RATE_PER_MIN 封，縮短輪距會放大發信速率上限"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_idle_timeout_covers_mail_send(self) -> "Settings":
+        """閒置交易逾時至少是寄一封信時限的 2 倍（#905 A2，security review M1）。
+
+        發信 worker 寄一封信期間握著那一封的交易。閒置逾時比寄信時限短的話，SMTP 一慢，連線就在寄出之後、
+        寫回 SENT 之前被 PostgreSQL 結束：這封留在 PENDING，**每一輪都成功寄出一次、又寫不回去**；
+        寄送失敗也寫不回重試次數，永遠到不了 FAILED。只改其中一個 env 就會悄悄抵銷 #905 A2，所以啟動時擋下。
+        """
+        idle_ms = self.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS
+        if idle_ms and idle_ms < self.MAIL_SEND_TIMEOUT_SEC * 1000 * 2:
+            raise ValueError(
+                "DB_IDLE_IN_TRANSACTION_TIMEOUT_MS 至少要是 MAIL_SEND_TIMEOUT_SEC 的 2 倍（或設 0 不限）："
+                "發信 worker 寄信期間握著交易，被閒置逾時中斷會讓已寄出的信每一輪重寄"
             )
         return self
 

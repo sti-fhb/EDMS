@@ -18,15 +18,17 @@ _LINK_BODY = "請點擊 https://edms.example/reset?token=PLAINTEXT 重設密碼"
 
 
 class _FakeRepo:
+    """一次給一封 PENDING、跳過本輪已試過的（對應 `claim_next_pending`，#905 A2）。"""
+
     def __init__(self, rows):
         self._rows = rows
 
-    async def list_pending_for_attempt(self, db, *, limit, interval_minutes, now):
-        return [r for r in self._rows if r.status == "PENDING"]
+    async def claim_next_pending(self, db, *, interval_minutes, now, exclude):
+        return next((r for r in self._rows if r.status == "PENDING" and r.message_id not in exclude), None)
 
 
 class _FakeDb:
-    async def flush(self):
+    async def commit(self):
         pass
 
 
@@ -53,6 +55,7 @@ def _row(module="DP", template_code="PWD_RESET"):
         body=_LINK_BODY,
         status="PENDING",
         retry_count=0,
+        message_id=1,  # 沒進 DB 不會配號；worker 以它排除本輪已試過的信
     )
 
 

@@ -29,6 +29,8 @@ def _build_connect_args(connect_args: Mapping[str, Any] | None) -> dict[str, Any
         "timezone": _SESSION_TIMEZONE,
         # 單一查詢的逾時（#810，理由見 `config.DB_STATEMENT_TIMEOUT_MS`）；migration 由呼叫端覆寫為 "0"
         "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
+        # 交易閒置的上限（#905 A2，理由見 `config.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`）；migration 同樣覆寫為 "0"
+        "idle_in_transaction_session_timeout": str(settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS),
         **merged.get("server_settings", {}),
     }
     return merged
