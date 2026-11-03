@@ -110,13 +110,25 @@ class NotifyRepository:
         result = await db.execute(stmt)
         return result.rowcount or 0
 
-    async def list_pending_for_attempt(
-        self, db: AsyncSession, *, limit: int, interval_minutes: int, now: datetime
-    ) -> list[DpEmailLog]:
-        """取可嘗試寄送的 PENDING 信件（用 (STATUS, CREATED_DATE) 索引，依建立序）。
+    async def claim_next_pending(
+        self, db: AsyncSession, *, interval_minutes: int, now: datetime, exclude: set[int]
+    ) -> DpEmailLog | None:
+        """取下一封可嘗試寄送的 PENDING 信件並鎖住（用 (STATUS, CREATED_DATE) 索引，依建立序）。
+
+        一次只撿一封（#905 A2）：worker 每封寄完各自 commit，鎖與交易都只涵蓋這一封。
 
         重試間隔：從未嘗試（UPDATED_DATE 為 NULL）或距上次嘗試已逾 interval_minutes 者才撿起，
         避免對剛失敗的信件過於頻繁重試。
+
+        Args:
+            db: AsyncSession。
+            interval_minutes: 重試間隔分鐘。
+            now: 目前時間。
+            exclude: 本輪已試過的 MESSAGE_ID。⚠️ 不可省略：間隔為 0 時，剛失敗並 commit 的那封
+                仍符合條件，會在同一輪被重撿、一路重試到 FAILED。
+
+        Returns:
+            鎖住的信件；沒有可寄的回 `None`。
         """
         cutoff = now - timedelta(minutes=interval_minutes)
         stmt = (
@@ -126,10 +138,11 @@ class NotifyRepository:
                 or_(DpEmailLog.updated_date.is_(None), DpEmailLog.updated_date <= cutoff),
             )
             .order_by(DpEmailLog.created_date, DpEmailLog.message_id)
-            .limit(limit)
-            # FOR UPDATE SKIP LOCKED：鎖住撿起的列直到本輪 commit，多實例 worker 併發時
+            .limit(1)
+            # FOR UPDATE SKIP LOCKED：鎖住撿起的列直到這一封 commit，多實例 worker 併發時
             # 各自跳過對方鎖定的列，避免同一封信被重複寄送（canonical outbox 消費模式）。
             .with_for_update(skip_locked=True)
         )
-        result = await db.execute(stmt)
-        return list(result.scalars().all())
+        if exclude:
+            stmt = stmt.where(DpEmailLog.message_id.not_in(exclude))
+        return (await db.execute(stmt)).scalar_one_or_none()

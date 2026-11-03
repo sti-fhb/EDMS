@@ -1,10 +1,12 @@
 """發信 worker（T019）整合測試：輪詢 PENDING、SMTP 收送 / 重試 / 隔離（fake mailer，真實 DB）。"""
 
+import asyncio
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.utils import utcnow
 from app.dp.notify.models import DpEmailLog, DpNotifyTemplate
 from app.dp.notify.redaction import REDACTED_BODY
@@ -177,3 +179,99 @@ async def test_sensitive_body_redacted_only_after_sent_persisted(db):
     assert row.status == "SENT"
     assert row.body == REDACTED_BODY
     assert mailer.bodies == [link_body]  # 寄出的是原文，遮罩發生在寄出之後
+
+
+class _InterruptedAfterFirst:
+    """第一封寄出成功，寄第二封時被中斷（模擬後端被砍、部署重啟）。"""
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, *, recipient, subject, body):
+        if self.sent:
+            raise asyncio.CancelledError
+        self.sent.append(recipient)
+
+
+class _HangingMailer:
+    """SMTP 一直不回應。"""
+
+    async def send(self, *, recipient, subject, body):
+        await asyncio.sleep(3600)
+
+
+async def test_中途被中斷時已寄出的信維持_SENT_不會重寄(db):
+    """每封寄完各自 commit（#905 A2）：整批在同一交易時，中斷會讓已寄出的信 rollback 回 PENDING、下一輪重寄。"""
+    await _seed_pending(db, ["a@x.com", "b@x.com"])
+    await db.commit()  # 待寄信件先落地，下面的 rollback 只會撤銷 worker 的變更
+    mailer = _InterruptedAfterFirst()
+
+    with pytest.raises(asyncio.CancelledError):
+        await EmailWorker().process_pending_once(db, mailer=mailer, max_retry=3, interval_minutes=0)
+    await db.rollback()
+
+    logs = {log.recipient: log for log in await _logs(db)}
+    assert mailer.sent == ["a@x.com"], "前置：第一封寄出、第二封中斷"
+    assert logs["a@x.com"].status == "SENT", "已寄出的信不可被 rollback 回 PENDING"
+    assert logs["b@x.com"].status == "PENDING" and logs["b@x.com"].retry_count == 0, "中斷的那封照常留待下輪"
+
+
+async def test_單封寄送超過時限視為失敗_交易不會一直開著(db, monkeypatch):
+    """`MAIL_SEND_TIMEOUT_SEC` 為整封信的上限（aiosmtplib 自己的逾時是每個 SMTP 指令各算一次）。"""
+    monkeypatch.setattr(settings, "MAIL_SEND_TIMEOUT_SEC", 0.05)
+    await _seed_pending(db, ["a@x.com"])
+
+    sent = await asyncio.wait_for(
+        EmailWorker().process_pending_once(db, mailer=_HangingMailer(), max_retry=3, interval_minutes=0), timeout=10
+    )
+
+    row = (await _logs(db))[0]
+    assert sent == 0
+    assert row.status == "PENDING" and row.retry_count == 1, "逾時當成一次失敗，照重試規則處理"
+    assert "逾時" in row.error_msg
+
+
+class _CommandTimeoutMailer:
+    """aiosmtplib 自己的指令逾時（`SMTPTimeoutError` 是 `TimeoutError` 的子類）。"""
+
+    async def send(self, *, recipient, subject, body):
+        raise TimeoutError("Timed out waiting for server response")
+
+
+async def test_SMTP_指令自己逾時時照原訊息記_不標成整封逾時(db):
+    """只有 worker 的整封時限到了才寫「寄送逾時（超過 N 秒）」；否則維運會以為是調 `MAIL_SEND_TIMEOUT_SEC` 的問題。"""
+    await _seed_pending(db, ["a@x.com"])
+
+    await EmailWorker().process_pending_once(db, mailer=_CommandTimeoutMailer(), max_retry=3, interval_minutes=0)
+
+    row = (await _logs(db))[0]
+    assert row.retry_count == 1
+    assert row.error_msg == "Timed out waiting for server response"
+
+
+async def test_單輪最多寄_limit_封_其餘留待下輪(db):
+    """`limit` 即 DP_PARAM MAIL.RATE_PER_MIN；拿掉上限會超出郵件主機的寄信額度而被擋信。"""
+    await _seed_pending(db, ["a@x.com", "b@x.com", "c@x.com"])
+    mailer = _SucceedMailer()
+
+    sent = await EmailWorker().process_pending_once(db, mailer=mailer, max_retry=3, interval_minutes=0, limit=2)
+
+    assert sent == 2 and len(mailer.sent) == 2
+    assert sorted(log.status for log in await _logs(db)) == ["PENDING", "SENT", "SENT"]
+
+
+class _NulMessageMailer:
+    async def send(self, *, recipient, subject, body):
+        raise RuntimeError("550 rejected\x00garbage")
+
+
+async def test_SMTP_錯誤訊息含_NUL_字元時清掉後照常寫回(db):
+    """PostgreSQL 的 text 不收 NUL：照原樣寫入會讓 commit 失敗，這一封每輪都排第一個、卡住後面所有信
+    （security review M2）。錯誤訊息的內容由 SMTP 伺服器決定。"""
+    await _seed_pending(db, ["a@x.com"])
+
+    await EmailWorker().process_pending_once(db, mailer=_NulMessageMailer(), max_retry=3, interval_minutes=0)
+
+    row = (await _logs(db))[0]
+    assert row.retry_count == 1
+    assert row.error_msg == "550 rejectedgarbage"

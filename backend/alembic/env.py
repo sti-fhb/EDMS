@@ -90,9 +90,11 @@ async def run_async_migrations() -> None:
     # 日界才會與應用層一致（#483）。
     # 關閉查詢逾時（#810）：工廠預設對每條連線套 `DB_STATEMENT_TIMEOUT_MS`（60 秒），而回填大量資料的
     # migration 單句可能超過；被中斷的話部署卡在半途。`tests/unit/test_core_db.py` 守門。
+    # 閒置交易逾時（#905 A2）同理關閉：migration 之間可能夾著 Python 端的資料處理。
     # 連線取 migration_database_url（#22）：app 執行期角色沒有 DDL 權限，migration 須以資料表 owner 執行。
     engine = create_app_engine(
-        settings.migration_database_url, connect_args={"server_settings": {"statement_timeout": "0"}}
+        settings.migration_database_url,
+        connect_args={"server_settings": {"statement_timeout": "0", "idle_in_transaction_session_timeout": "0"}},
     )
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)

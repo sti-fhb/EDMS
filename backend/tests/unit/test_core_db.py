@@ -33,6 +33,7 @@ def test_呼叫端既有的_server_settings_不被蓋掉():
     assert merged["server_settings"] == {
         "timezone": "Asia/Taipei",
         "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
+        "idle_in_transaction_session_timeout": str(settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS),
         "application_name": "edms-worker",
     }
 
@@ -110,3 +111,39 @@ def test_migration_的_engine_關閉查詢逾時():
         return ast.literal_eval(kw.value).get("server_settings", {}).get("statement_timeout")
 
     assert [statement_timeout(c) for c in calls] == ["0"] * len(calls)
+
+
+def test_未指定時帶入閒置交易逾時():
+    """交易開著卻沒有查詢超過 `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` 就由 PostgreSQL 斷線（#905 A2 / #833 B2）。
+    程式出錯忘了結束交易時，連線與鎖不會一直被佔住。"""
+    merged = _build_connect_args(None)["server_settings"]
+
+    assert merged["idle_in_transaction_session_timeout"] == str(settings.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS)
+
+
+def test_閒置交易逾時預設為_5_分鐘():
+    """2026-11-03 使用者裁示。要比「交易中正當的閒置」最長者（發信 worker 寄一封信的 `MAIL_SEND_TIMEOUT_SEC`）
+    寬裕得多；改短前先重查 `config.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` 註解列的來源。"""
+    assert Settings.model_fields["DB_IDLE_IN_TRANSACTION_TIMEOUT_MS"].default == 300_000
+    assert Settings.model_fields["DB_IDLE_IN_TRANSACTION_TIMEOUT_MS"].default > (
+        Settings.model_fields["MAIL_SEND_TIMEOUT_SEC"].default * 1000 * 2
+    ), "發信 worker 寄一封信期間握著交易，閒置逾時必須比它長"
+
+
+def test_migration_的_engine_關閉閒置交易逾時():
+    """migration 之間可能夾著 Python 端的資料處理；比照查詢逾時顯式設 0。"""
+    env = Path(__file__).resolve().parents[2] / "alembic" / "env.py"
+    calls = [
+        n
+        for n in ast.walk(ast.parse(env.read_text(encoding="utf-8")))
+        if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "create_app_engine"
+    ]
+    assert calls, "正向錨點：alembic/env.py 應以 create_app_engine 建 engine"
+
+    def idle_timeout(call: ast.Call):
+        kw = next((k for k in call.keywords if k.arg == "connect_args"), None)
+        if kw is None:
+            return None
+        return ast.literal_eval(kw.value).get("server_settings", {}).get("idle_in_transaction_session_timeout")
+
+    assert [idle_timeout(c) for c in calls] == ["0"] * len(calls)
