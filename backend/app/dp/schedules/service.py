@@ -109,7 +109,7 @@ class ScheduleService:
             validate_cron(data.cron_expr)
         except ValueError as exc:
             # 套件原文是英文且含輸入值（#902），只進 log；畫面一律給固定的修正說明
-            logger.warning("cron 表達式不合法 job=%s：%s", job_id, exc)
+            logger.warning("cron 表達式不合法 job=%s", job_id, exc_info=True)
             raise AppError(status_code=422, detail=_INVALID_CRON_MESSAGE, error_code="DP_SCHED_002") from exc
 
         # 未帶 description 維持原值；帶空字串（strip 後）或 null 一律存 NULL，不存空字串

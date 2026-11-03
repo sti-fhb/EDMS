@@ -170,6 +170,16 @@ async def test_cli_的連線不受查詢逾時限制(apply_migrations):
     assert setting == "0"
 
 
+async def test_cli_的連線不受閒置交易逾時限制(apply_migrations):
+    """#905 A2：全平台設了閒置交易逾時；CLI 比照查詢逾時關掉，與 migration 一致。"""
+    async with _cli_session() as db:
+        setting = (
+            await db.execute(text("SELECT setting FROM pg_settings WHERE name = 'idle_in_transaction_session_timeout'"))
+        ).scalar()
+
+    assert setting == "0"
+
+
 async def test_cli_的連線帶_application_name(apply_migrations):
     """維運要能從 `pg_stat_activity` 認出、必要時中止這條長時間連線。"""
     async with _cli_session() as db:

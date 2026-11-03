@@ -1285,11 +1285,21 @@
             <span class="doc-category-pill cat-sop" id="review-detail-category">標準作業程序</span>
           </div>
           <div class="mb-1">
-            <span class="text-muted me-2" style="display:inline-block; min-width:72px;">可見對象</span>
+            <span class="text-muted me-2" style="display:inline-block; min-width:72px;">本次提議</span>
             <span id="review-detail-audience">
               <!-- 以「單位 + 職位」成對呈現（#437）：拆成兩排標籤時，多組配對將無從對應 -->
               <span class="badge rounded-pill text-bg-light border">國防部軍醫局 + 護理師</span>
               <span class="badge rounded-pill text-bg-light border">國防醫學院三軍總醫院 + 行政人員</span>
+            </span>
+          </div>
+          <!-- 目前生效（#388）：僅「新版本申請」且與文件層現值**相異**時出現。相同 / 首版 / 廢止類
+               不顯示本列，且上一列的標題退回「可見對象」——多數改版不動可見對象，每次都併列會讓
+               「有這兩排」失去訊號價值。目前生效為空時本列仍要出現、內容顯示「—（目前無人可見）」，
+               那正是本次把範圍擴大出去的情形。 -->
+          <div class="mb-1" id="review-detail-current-audience-row">
+            <span class="text-muted me-2" style="display:inline-block; min-width:72px;">目前生效</span>
+            <span id="review-detail-current-audience">
+              <span class="badge rounded-pill text-bg-light border">國防部軍醫局 + 護理師</span>
             </span>
           </div>
           <div>
@@ -1299,7 +1309,7 @@
             </span>
           </div>
         </div>
-        <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>可見對象於<strong>核准發布時才生效</strong>，請於核准前確認是否正確。新增 / 新版本顯示本次送審之提議值；廢止顯示文件目前之可見範圍；訓練教材不設定可見對象。</div>
+        <div class="field-helper mb-3"><i class="bi bi-info-circle"></i>可見對象於<strong>核准發布時才生效</strong>，請於核准前確認是否正確。新增 / 新版本顯示本次送審之提議值；廢止顯示文件目前之可見範圍；訓練教材不設定可見對象。<strong>本次提議與目前生效不同時會並列兩排</strong>，請確認這次是擴大還是縮小可見範圍。</div>
 
         <!-- 摘要（新版本顯示「變更摘要」、廢止顯示「廢止原因」） -->
         <h6 class="small fw-bold mb-2"><i class="bi bi-pencil-square me-1"></i><span id="review-detail-summary-label">變更摘要</span> <small class="text-muted fw-normal">（撰寫者填寫）</small></h6>
