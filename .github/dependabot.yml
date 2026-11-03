@@ -31,7 +31,7 @@ updates:
     # 供應鏈冷卻：新發布的版本先等 7 天再提 PR，避開剛被投毒 / 不穩定的新版。
     # 代價：github-actions 生態的安全修補多半以普通版本號發布、不開 GHSA，這類會被
     # 延後 7 天（本檔只管 version updates；有 GHSA 的走 repo 層級的 security updates，
-    # 不受此 cooldown 約束）。以本 repo 僅 5 個 action 的規模，此取捨合理。
+    # 不受此 cooldown 約束）。以本 repo 僅 10 個 action 的規模，此取捨合理。
     cooldown:
       default-days: 7
     # 把多個 action 的升級合併成單一 PR，降低 PR 數量。
