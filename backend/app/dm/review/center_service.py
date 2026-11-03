@@ -336,7 +336,7 @@ class ReviewCenterService:
         #     SAVEPOINT 保護、無法映射為 DM_DOC_007；
         # (2) 須在下方 `_notify_publish` **之前**：DOC_PUBLISH 依可見對象組決定收件人（FR-008），
         #     須以本次核准後新生效之可見對象為準。
-        await self._repo.apply_version_tags_to_doc(
+        doc_tags = await self._repo.apply_version_tags_to_doc(
             db, doc_id=doc.doc_id, version_id=new_ver.version_id, user_id=op.user_id
         )
         await self._repo.write_change_log(
@@ -347,12 +347,23 @@ class ReviewCenterService:
             applicant=review.created_user,
             approver=op.user_id,
         )
+        # 可見範圍的變更時點就是核准這一刻，故併入同一筆稽核（#388 L3）。標籤 ID 非個資。
+        # `audience_skipped` **僅在非空時出現**：每筆都帶一個空清單的話，「有這個欄位」就不再
+        # 代表「有東西被濾掉」，真正該被注意的那一筆會淹在雜訊裡。
+        after: dict = {
+            "review_id": review_id,
+            "published_version_id": new_ver.version_id,
+            "operation": "PUBLISH",
+            "audience": doc_tags.applied,
+        }
+        if doc_tags.skipped:
+            after["audience_skipped"] = doc_tags.skipped
         await self._log(
             db,
             action_type="UPDATE",
             operator_id=op.user_id,
             target=doc.doc_id,
-            after={"review_id": review_id, "published_version_id": new_ver.version_id, "operation": "PUBLISH"},
+            after=after,
         )
         notified = await self._notify_publish(db, doc=doc, new_ver=new_ver)
         return ApproveResult(published_version_id=new_ver.version_id, notified=notified)

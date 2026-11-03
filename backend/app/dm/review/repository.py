@@ -4,6 +4,7 @@
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import Row, Select, and_, exists, select
@@ -35,6 +36,25 @@ _ALL_AUDIENCE_TAG = "全體"
 #: 「審核者」身分出現在別人的已完成清單，而且 #657 之後還會連帶顯示「送審者」欄。
 #: （2026-10-15 安全審查指出此陷阱；目前靠本常數排除，是正確的。）
 _COMPLETED_STATUSES = ("APPROVED", "REJECTED")
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedDocTags:
+    """`apply_version_tags_to_doc` 的結果（#388 L1 / L3）。
+
+    兩欄同型別，**刻意不回傳 `tuple[list, list]`**——位置解構寫反了型別檢查看不出來，
+    而寫進稽核後的症狀是「被濾掉的配對記成已生效」，恰好與本功能要提供的保證相反。
+    """
+
+    #: 本次核准後實際生效的 (TAG_ID, UNIT_TAG_ID) 配對。
+    applied: list[tuple[int, int | None]]
+    #: 快照裡含已停用標籤、因而未套用的配對；空清單代表快照全數生效。
+    skipped: list[tuple[int, int | None]]
+
+
+def _sorted_pairs(pairs: list[tuple[int, int | None]]) -> list[tuple[int, int | None]]:
+    """穩定排序供稽核輸出用——快照查詢無 `ORDER BY`，不排則同一組配對每次順序可能不同。"""
+    return sorted(pairs, key=lambda p: (p[0], -1 if p[1] is None else p[1]))
 
 
 class ReviewCenterRepository:
@@ -290,7 +310,7 @@ class ReviewCenterRepository:
 
     async def apply_version_tags_to_doc(
         self, db: AsyncSession, *, doc_id: str, version_id: int, user_id: str
-    ) -> list[tuple[int, int | None]]:
+    ) -> AppliedDocTags:
         """核准發布時把該版本之標籤快照（DM_VERSION_TAG）套用至文件層（DM_DOC_TAG，生效值）。
 
         標籤於草稿階段只寫版本層，核准當下才生效（#377）；退回 / 撤回不呼叫本方法，故文件層維持原值。
@@ -311,8 +331,10 @@ class ReviewCenterRepository:
             user_id: 核准者（寫入稽核欄位）。
 
         Returns:
-            **未套用**的 (TAG_ID, UNIT_TAG_ID) 配對——快照裡含已停用標籤者（#388 L1）。
-            空清單代表快照全數生效。呼叫端應把它寫進稽核，讓「核准成功但不完整」可見。
+            `AppliedDocTags`：本次**實際生效**與**因停用而未套用**的配對（#388 L1 / L3）。
+            呼叫端應把兩者都寫進稽核——`applied` 回答「這份文件從何時起對誰可見、誰核准的」
+            （否則得另撈 `DM_DOC_TAG` 的 `CREATED_USER` / `UPDATED_DATE` 反推），
+            `skipped` 讓「核准成功但不完整」可見。
         """
         now = utcnow()
         snapshot = [
@@ -352,7 +374,7 @@ class ReviewCenterRepository:
                 row.deleted = 1
                 row.updated_user, row.updated_date = user_id, now
         await db.flush()
-        return skipped
+        return AppliedDocTags(applied=_sorted_pairs(wanted), skipped=_sorted_pairs(skipped))
 
     async def _drop_disabled_pairs(
         self, db: AsyncSession, pairs: list[tuple[int, int | None]]
