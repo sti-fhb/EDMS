@@ -60,6 +60,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import AsyncSessionLocal
+from app.core.log_redaction import redact_exception_message
 from app.core.utils import utcnow
 from app.et.audit_target import course_audit_payload
 from app.et.course.models import EtChapter, EtItem
@@ -449,7 +450,8 @@ async def _amain(argv: Sequence[str] | None = None) -> int:
                 log_path=args.log,
             )
     except Exception as exc:
-        print(f"❌ 執行錯誤：{type(exc).__name__}: {exc}")
+        # DB 例外的訊息帶 `[parameters: …]` 與主訊息裡的值，CLI 輸出常留在終端機或排程 log（#905 B10）
+        print(f"❌ 執行錯誤：{type(exc).__name__}: {redact_exception_message(exc)}")
         return 2
 
 

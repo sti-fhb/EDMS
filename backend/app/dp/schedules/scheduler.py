@@ -18,7 +18,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import AsyncSessionLocal
-from app.core.log_redaction import redact_sensitive
+from app.core.log_redaction import redact_exception_message
 from app.core.utils import utcnow
 from app.dp.schedules import scheduler_leader
 from app.dp.schedules.repository import ScheduleRepository
@@ -129,8 +129,9 @@ async def run_and_log(db: AsyncSession, job_id: str, handler_ref: str) -> str:
         await handler()
     except Exception as exc:  # 逐 job 隔離：任何例外皆記 FAILED、不外拋阻斷排程器
         status = _STATUS_FAILED
-        # 寫進 DP_SCHEDULE_LOG、顯示在 DP 排程畫面：與 log 同樣去識別化（#833 C2，security review M2）
-        error_msg = redact_sensitive(str(exc))[:1000]
+        # 寫進 DP_SCHEDULE_LOG、顯示在 DP 排程畫面：與 log 同樣去識別化（#833 C2，security review M2；
+        # DB 錯誤主訊息裡的值 #905 B10）
+        error_msg = redact_exception_message(exc)[:1000]
         logger.exception("排程 job 執行失敗 job_id=%s", job_id)
     end = utcnow()
     await _repo.insert_log(db, job_id=job_id, start_date=start, end_date=end, status=status, error_msg=error_msg)

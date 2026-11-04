@@ -40,8 +40,11 @@ logger.error("查無此人 email=%s", email)          # 要記就用 mask_email(
 **判準**：值要出現在**訊息裡**時，呼叫端自己負責（`mask_email`、只記 `user_id`）；
 值只出現在**例外的 traceback 裡**時，交給兜底，不要為此改寫 `except` 的寫法。
 
-⛔ 兜底涵蓋不到的三種情況，見 `app/core/log_redaction.py` 檔頭的「未涵蓋的既有暴露面」
-（訊息本體、Starlette lifespan、`sqlalchemy.engine` 的 echo）。**不要假設「反正有遮罩」。**
+⛔ 兜底涵蓋不到的情況，見 `app/core/log_redaction.py` 檔頭的「未涵蓋的既有暴露面」
+（訊息本體、`sqlalchemy.engine` 的 echo、非 DB 例外訊息裡的值等）。**不要假設「反正有遮罩」。**
+
+把例外訊息**寫進 DB 或印到 CLI**（不經 log）時，用 `redact_exception_message(exc)`，不要用
+`redact_sensitive(str(exc))`——後者只看文字，分不出例外鏈上有沒有 DB 錯誤，DB 主訊息裡的值會漏掉。
 
 ### 控制字元由全域轉義，換行也是
 

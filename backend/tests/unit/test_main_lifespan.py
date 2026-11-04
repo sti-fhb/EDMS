@@ -69,3 +69,28 @@ async def test_lifespan_passes_configured_poll_interval_to_worker(monkeypatch):
         await asyncio.wait_for(started.wait(), timeout=2)
 
     assert received == {"poll_interval_seconds": 7}
+
+
+async def test_app_lifespan_startup_failure_hides_original_message(monkeypatch):
+    """app 實際掛上的 lifespan 有包遮罩：啟動失敗時交給 uvicorn 的文字不含原例外訊息（#905 B11）。"""
+    secret = "A123456789"
+
+    async def _failing_warm_up() -> None:
+        raise RuntimeError(f"暖機失敗 id={secret}")
+
+    monkeypatch.setattr("main.warm_up_password_backend", _failing_warm_up)
+
+    incoming = iter([{"type": "lifespan.startup"}])
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return next(incoming)
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    with pytest.raises(RuntimeError):
+        await app.router.lifespan({"type": "lifespan", "app": app, "state": {}}, receive, send)
+
+    assert sent[-1]["type"] == "lifespan.startup.failed"
+    assert secret not in sent[-1]["message"]

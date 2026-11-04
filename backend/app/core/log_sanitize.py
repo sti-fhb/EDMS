@@ -54,7 +54,8 @@ Cf 的碼位範圍寫成常數而非 import 時計算（掃全碼位約 0.7 秒�
 - **訊息本體刻意多行者會被壓成一行**：uvicorn 記錄 Starlette lifespan 啟動 / 關閉失敗時，把
   `traceback.format_exc()` 當訊息本體、不帶 `exc_info`（`uvicorn/lifespan/on.py`），轉義後變成一行
   帶字面 `\\n` 的長字串。內容完整、只是難讀；訊息本體無從分辨「刻意多行」與「被注入的換行」，
-  故不為它開例外。自家程式要附堆疊一律用 `exc_info`（見 `sti-backend-logging.md`）
+  故不為它開例外。自家程式要附堆疊一律用 `exc_info`（見 `sti-backend-logging.md`）。
+  #905 B11 起這段只剩固定文字與位置，原例外改由 `log_redaction.redact_lifespan_errors` 以 `exc_info` 另記一筆
 - `%r` 與容器參數會雙重轉義：`repr()` 本就會轉義控制字元，先轉義過的字串再經 `repr` 會顯示成
   `'x\\\\ny'`。方向安全，只是多一層反斜線
 - 數值參數不檢查：`logger.info("%c", 27)` 會輸出原始 ESC。全庫沒有以 `%c` 記使用者輸入的寫法
