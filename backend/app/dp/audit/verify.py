@@ -23,7 +23,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.db import create_app_engine
-from app.core.log_redaction import redact_sensitive
+from app.core.log_redaction import redact_exception_message
 from app.dp.audit.models import DpAuditLog
 from app.dp.audit.service import _compute_row_hash
 
@@ -145,7 +145,7 @@ async def _amain() -> int:
             result = await verify_chain(db)
     except Exception as exc:
         # 去識別化：SQLAlchemy 例外的訊息帶 `[parameters: …]`，CLI 輸出常進排程 log（#833 C2）
-        message = " ".join(redact_sensitive(str(exc)).split())
+        message = " ".join(redact_exception_message(exc).split())
         detail = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
         print(f"⚠️ 驗鏈執行錯誤（非斷鏈）：{detail}")
         return 2

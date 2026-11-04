@@ -19,6 +19,7 @@ from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
+from app.core.log_redaction import redact_lifespan_errors
 from app.core.log_sanitize import install_control_char_escape
 from app.core.password_hashing import shutdown as shutdown_password_executor
 from app.core.password_hashing import warm_up as warm_up_password_backend
@@ -128,7 +129,8 @@ _APP_VERSION = _read_version()
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
-    lifespan=lifespan,
+    # 啟動／關閉失敗時 Starlette 把整段 traceback 當訊息本體交給 uvicorn，不經 log 遮罩（#905 B11）
+    lifespan=redact_lifespan_errors(lifespan),
 )
 
 # 上傳端點讀 body 之前先驗憑證（#810）。⚠️ 須在 CORS **之前** add：後加的 middleware 在外層，
