@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.core.exceptions import AppError
 from app.core.module_provisioning import module_provisioning_gate
+from app.core.ops_account import OPS_USER_ID
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
@@ -69,7 +70,8 @@ async def test_register_writes_pending_not_user(client, db, et_stub):
 
     # 未授角色 / 未寫稽核 / 未寫歷程（皆移至驗證步）
     assert et_stub == []
-    assert (await db.execute(select(DpPwdHistory))).first() is None
+    # 排除 migration 種入的維運帳號（#927）首筆歷程
+    assert (await db.execute(select(DpPwdHistory).where(DpPwdHistory.user_id != OPS_USER_ID))).first() is None
     assert (await db.execute(select(DpAuditLog).where(DpAuditLog.func_name == "DP-REGISTER"))).first() is None
 
 

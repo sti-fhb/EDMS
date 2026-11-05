@@ -7,6 +7,7 @@ DM 4 角色（DM_ADMIN / DM_EDITOR / DM_REVIEWER / DM_VIEWER）複選、互不�
 from collections.abc import Iterable
 
 from app.core.exceptions import AppError
+from app.core.ops_account import is_ops_account
 
 DM_ADMIN = "DM_ADMIN"
 DM_EDITOR = "DM_EDITOR"
@@ -87,3 +88,22 @@ def ensure_not_self_admin_removal(operator_id: str, target_id: str, roles_after:
     """
     if operator_id == target_id and DM_ADMIN not in set(roles_after):
         raise AppError(status_code=403, detail="無法停用自己之管理者角色", error_code="DM_ROLE_001")
+
+
+#: 廠商維運帳號（#927）之 DM 預設角色，與 migration `36af0d3943bf` 種入者相同。
+#: 刻意不含 DM_VIEWER：閱覽者不開放任何功能，只決定 KPI「應看」母體與發布通知收件人——
+#: 給了會讓院方每份全體文件的未看人數永遠多 1、發布通知寄給廠商（SA 裁示 2026-11-05）
+OPS_DM_ROLES = frozenset({DM_ADMIN, DM_EDITOR, DM_REVIEWER})
+
+
+def ensure_ops_default_roles_kept(target_id: str, roles_after: Iterable[str]) -> None:
+    """廠商維運帳號（#927）須保留 DM 預設角色（`OPS_DM_ROLES`），不論操作者是誰（含本帳號自己）。
+
+    含 DM_REVIEWER 是為了簽核中心。只擋「拿掉」：另加 / 移除 DM_VIEWER、同一請求內的
+    可見對象異動照常。
+
+    Raises:
+        AppError: 維運帳號儲存後之角色集缺任一預設角色（403 DM_ROLE_004）。
+    """
+    if is_ops_account(target_id) and not OPS_DM_ROLES <= set(roles_after):
+        raise AppError(status_code=403, detail="此帳號為系統維運帳號，不可移除其預設角色", error_code="DM_ROLE_004")

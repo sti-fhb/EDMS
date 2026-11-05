@@ -33,7 +33,8 @@ from app.et.roles.models import EtUserRole
 from app.et.schedules.weekly_service import EtWeeklyReportService
 from tests.integration.et._tag_pairs import all_units_id
 
-pytestmark = pytest.mark.integration
+# 撤下維運帳號（#927）的角色：本檔以「全部管理者 / 審核者」為母體斷言收件人，只看本測試建的資料
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("ops_account_without_roles")]
 
 _COURSES = "/api/et/courses"
 

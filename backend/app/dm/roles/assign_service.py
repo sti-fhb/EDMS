@@ -21,7 +21,7 @@ from app.core.module_assign import AssignmentView
 from app.core.utils import utcnow
 from app.dm.audience.models import DmUserTag
 from app.dm.catalog.models import DmTag, DmTagGroup
-from app.dm.roles.authz import DM_ROLES, ensure_not_self_admin_removal
+from app.dm.roles.authz import DM_ROLES, ensure_not_self_admin_removal, ensure_ops_default_roles_kept
 from app.dm.roles.models import DmUserRole, DmUserRoleLog
 from app.services import AuditLogService
 
@@ -89,12 +89,15 @@ class AssignService:
         """設定使用者之 DM 角色與可見對象為目標集合（差異套用、即時生效）。
 
         Raises:
-            AppError: operator 取消自己之管理者角色（403 DM_ROLE_001）、可見對象無效 / 未啟用（422 DM_ROLE_002）。
+            AppError: operator 取消自己之管理者角色（403 DM_ROLE_001）、可見對象無效 / 未啟用（422 DM_ROLE_002）、
+                拿掉維運帳號之預設角色（403 DM_ROLE_004）。
         """
         # 輸入防呆（本轉接層為 DM_USER_ROLE / DM_USER_TAG 之權威寫入口，不信任呼叫端）
         _ensure_valid_roles(roles)
         _ensure_valid_pairs(audiences)
-        # 自我保護先於任何寫入：若 operator 對自己儲存之角色集不含 DM_ADMIN 即拒絕
+        # 保護檢核先於任何寫入。維運帳號規則排在自我保護之前：維運帳號拿掉自己的 DM_ADMIN 時，
+        # 回「維運帳號不可移除預設角色」比「不可取消自己的管理者」更貼切
+        ensure_ops_default_roles_kept(user_id, roles)
         ensure_not_self_admin_removal(operator_id, user_id, roles)
 
         current = (await self.get_users_roles_audiences(db, [user_id]))[user_id]

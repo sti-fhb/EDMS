@@ -5,6 +5,7 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
+from app.core.ops_account import OPS_USER_ID
 from app.dp.users.account_status import account_usable_clause
 from app.dp.users.models import DpUser
 
@@ -88,11 +89,13 @@ class UsersRepository:
         """閒置逾期之啟用帳號：`ACTIVE` 且 `COALESCE(LAST_LOGIN_DATE, CREATED_DATE) < idle_before`。
 
         從未登入（LAST_LOGIN_DATE 為 null）者以 CREATED_DATE 為閒置起算基準（spec_us11 FR-05）。
+        廠商維運帳號（#927）無條件排除——它平時本來就不登入，久未登入正是常態。
         """
         stmt = select(DpUser).where(
             DpUser.deleted == 0,
             DpUser.status == "ACTIVE",
             func.coalesce(DpUser.last_login_date, DpUser.created_date) < idle_before,
+            DpUser.user_id != OPS_USER_ID,
         )
         return list((await db.execute(stmt)).scalars().all())
 

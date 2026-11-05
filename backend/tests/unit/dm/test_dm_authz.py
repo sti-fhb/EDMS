@@ -3,12 +3,16 @@
 import pytest
 
 from app.core.exceptions import AppError
+from app.core.ops_account import OPS_USER_ID
 from app.dm.roles.authz import (
     DM_ADMIN,
     DM_EDITOR,
+    DM_REVIEWER,
+    DM_ROLES,
     DM_VIEWER,
     can_download_obsolete_file,
     ensure_not_self_admin_removal,
+    ensure_ops_default_roles_kept,
     ensure_reviewer_not_author,
     has_any_dm_role,
     has_role,
@@ -53,6 +57,32 @@ def test_self_admin_keep_allowed():
 def test_admin_removing_others_allowed():
     """管理者移除他人之 DM_ADMIN → 允許（僅擋自我移除）。"""
     ensure_not_self_admin_removal("admin1", "admin2", {DM_EDITOR})
+
+
+# ── 廠商維運帳號預設角色（#927）────────────────────────────────────
+
+
+# 寫死角色而非引用 OPS_DM_ROLES：常數被改（例如誤加回 DM_VIEWER）時這裡要紅
+_OPS_DEFAULT = {DM_ADMIN, DM_EDITOR, DM_REVIEWER}
+
+
+@pytest.mark.parametrize("missing", sorted(_OPS_DEFAULT))
+def test_ops_account_missing_any_default_role_blocked(missing):
+    """維運帳號送出的角色集缺任一 DM 預設角色 → 403 DM_ROLE_004。"""
+    with pytest.raises(AppError) as e:
+        ensure_ops_default_roles_kept(OPS_USER_ID, DM_ROLES - {missing})
+    assert e.value.error_code == "DM_ROLE_004" and e.value.status_code == 403
+
+
+@pytest.mark.parametrize("roles", [_OPS_DEFAULT, DM_ROLES])
+def test_ops_account_keeping_default_roles_allowed(roles):
+    """保留預設角色即放行；DM_VIEWER 不在預設內，可加可不加（群組異動走同一個請求，不受影響）。"""
+    ensure_ops_default_roles_kept(OPS_USER_ID, roles)
+
+
+def test_other_account_losing_roles_allowed():
+    """對照：一般帳號拿掉角色不受此規則限制。"""
+    ensure_ops_default_roles_kept("U0000001", {DM_VIEWER})
 
 
 # ── 廢止附件下載權（#615）────────────────────────────────────────

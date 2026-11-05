@@ -245,6 +245,27 @@ async def db(test_engine):
 
 
 @pytest.fixture
+async def ops_account_without_roles(db):
+    """撤下廠商維運帳號（`edmsops`，#927）的 DM / ET 角色，僅限本測試。
+
+    該帳號由 migration 無條件種入，測試 DB 也有；它是 DM / ET 管理者，會混進「全部管理者」
+    「可指定審核者」這類以角色撈母體的斷言（週報收件人、審核者下拉等）。這些測試驗的是
+    **自己建的資料**，故以本 fixture 讓維運帳號暫時不具任何角色；外層交易 rollback 後即復原。
+
+    ⚠️ 維運帳號「確實在母體內」的正向行為由 `dp/test_dp_ops_account.py` 釘住，套用本 fixture
+    的檔案驗不到那一面。
+    """
+    from sqlalchemy import text
+
+    from app.core.ops_account import OPS_USER_ID
+
+    params = {"uid": OPS_USER_ID}
+    await db.execute(text('UPDATE "DM_USER_ROLE" SET "DELETED" = 1 WHERE "USER_ID" = :uid'), params)
+    await db.execute(text('UPDATE "ET_USER_ROLE" SET "IS_ACTIVE" = false WHERE "USER_ID" = :uid'), params)
+    await db.flush()
+
+
+@pytest.fixture
 async def client(db):
     """綁測試 session 的 ASGI client；get_db override 複刻 production 的 commit/rollback 語意。
 
