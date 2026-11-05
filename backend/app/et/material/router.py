@@ -1,7 +1,7 @@
 """ET 教材內容 API（US3 / #203）。
 
 router-level 掛 `get_et_context`（需任一 ET 角色），各端點另掛
-`require_et_roles(ET_TEACHER, ET_ADMIN)`——本 router 服務的是 ET05 教師編輯畫面。
+`require_et_roles(*EDITOR_ROLES)`（ET_TEACHER、ET_ADMIN）——本 router 服務的是 ET05 教師編輯畫面。
 若只掛 `get_et_context`，等同任何登入者（人人皆有學員角色）都能讀到他人**草稿**
 課程的教材內容，違反 spec_us3 AC 8。學員端的教材閱讀屬 #5（ET06 章節學習），
 有自己的可見性規則（課程已發布、已加入、章節已解鎖）。
@@ -27,13 +27,12 @@ from app.et.material.schemas import (
     VideoRow,
     VideoUploadLimits,
 )
-from app.et.material.service import EtMaterialService
-from app.et.roles.authz import ET_ADMIN, ET_TEACHER
+from app.et.material.service import EDITOR_ROLES, EtMaterialService
 
 router = APIRouter(
     prefix="/api/et",
     tags=["et-material"],
-    dependencies=[Depends(get_et_context), Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    dependencies=[Depends(get_et_context), Depends(require_et_roles(*EDITOR_ROLES))],
     route_class=LimitedFormRoute,  # 影片上傳的表單解析上限（#833 A2）
 )
 _service = EtMaterialService()
