@@ -140,8 +140,20 @@ async def get_jwt_payload(
         raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
 
     payload = decode_access_token(credentials.credentials)
+    await ensure_user_active(db, payload.sub)
+    return payload
 
-    result = await db.execute(select(DpUser).where(DpUser.user_id == payload.sub, DpUser.deleted == 0))
+
+async def ensure_user_active(db: AsyncSession, user_id: str) -> None:
+    """帳號存在、未停用、未鎖定；`get_jwt_payload` 每請求都查，耗時長的請求可在寫入前再查一次。
+
+    ⚠️ 查的是整個 `DpUser` 實體：同一個 session 先前已載入、且仍有人持有該實體時，重查只會拿回
+    記憶體裡的舊值（`expire_on_commit=False`）。請求中途再查前，呼叫端要先 `db.expire_all()`。
+
+    Raises:
+        AppError: 查無 / 已刪（401 `DP_AUTH_002`）、停用（403 `DP_AUTH_004`）、鎖定中（403 `DP_AUTH_005`）。
+    """
+    result = await db.execute(select(DpUser).where(DpUser.user_id == user_id, DpUser.deleted == 0))
     user = result.scalar_one_or_none()
     if user is None:
         raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
@@ -149,5 +161,3 @@ async def get_jwt_payload(
         raise AppError(status_code=403, detail="帳號已停用", error_code="DP_AUTH_004")
     if user.locked_until is not None and user.locked_until > utcnow():
         raise AppError(status_code=403, detail="帳號已鎖定", error_code="DP_AUTH_005")
-
-    return payload

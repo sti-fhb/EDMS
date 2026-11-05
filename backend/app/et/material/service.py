@@ -14,6 +14,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import ensure_user_active
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
 from app.core.request_context import get_client_ip
@@ -26,17 +27,21 @@ from app.et.course.repository import EtCourseRepository, EtItemRepository
 from app.et.course.rules import ensure_owner, is_browsable_by_non_owner
 from app.et.course.stage_rules import ENTITY_MATERIAL, ENTITY_MATERIAL_DOC, ENTITY_MATERIAL_VIDEO
 from app.et.course.stage_writer import EtCourseStageWriter, exposed_id, is_staged
+from app.et.deps import load_et_roles
 from app.et.material import storage
 from app.et.material.repository import EtMaterialRepository
 from app.et.material.rules import ensure_material_has_media, ensure_video_name_unused
 from app.et.material.schemas import DmDocOption, DocRow, MaterialDetail, MaterialUpdateReq, VideoRow
 from app.et.material.video_probe import probe_duration_sec
+from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 from app.services import AuditLogService, ParamService
 
 _MODULE = "ET"
 _FUNC_NAME = "ET-COURSE"
 
 _NOT_FOUND = AppError(status_code=404, detail="查無此教材", error_code="ET_MATERIAL_001")
+#: 可編輯教材的 ET 角色：router 的 `require_et_roles` 與上傳第 3 段的重驗共用（#905 B1）
+EDITOR_ROLES = frozenset({ET_TEACHER, ET_ADMIN})
 
 #: 參數取不到時的保守預設值（與 `DP_PARAM` seed 一致）。參數被誤刪時寧可用預設值
 #: 繼續服務，也不要讓整個上傳功能掛掉。
@@ -364,9 +369,9 @@ class EtMaterialService:
         # 2. **結束交易**、寫檔、`ffprobe`——不持連線
         # 3. **取鎖後重新解析**再寫 DB：解析（含複製進暫存區）一律在鎖內，與其他寫入路徑一致
         #
-        # ⚠️ 代價：第 1 段的「同名影片」檢查是在無鎖狀態下做的，兩個分頁同時上傳同名檔
-        # 可能都通過。那是**可自行修復**的狀態（教師看得到兩列、可刪掉一列），而持鎖
-        # 數分鐘擋住全班學員不是。
+        # 第 1 段的「同名影片」檢查不持鎖，兩個分頁同時上傳同名檔都會通過；第 3 段取鎖後**再查一次**
+        # （#905 B2）。持鎖數分鐘會擋住全班學員，所以不在第 1 段取鎖，而是把擋重複分成兩次：
+        # 第 1 段為了省下寫檔與等待，第 3 段為了正確。
         existing_names = await self._existing_video_names(db, material_id, operator.user_id)
 
         # ⚠️ 限制由 `resolve_video_limits` 解析——**前端的文案與 `accept` 走的是同一支**，
@@ -398,7 +403,22 @@ class EtMaterialService:
             # 刪了這份教材，或課程狀態變了。重新解析在鎖內完成授權、必要時重新複製進暫存區，
             # 教材已不在就拋 404（下方 except 會把檔刪掉）；不重新解析而沿用第 1 段的結果，
             # 會造出指向已刪父節點的孤兒（`_validate_tree` 之後每一次「更新」都 500）。
+            # 第 1 段載入的實體（請求開頭的使用者、課程）此時可能已過時數分鐘：`expire_on_commit=False`
+            # 讓它們不會隨 commit 過期，同一個 session 再查**同一列實體**只會拿回記憶體裡的舊值。
+            # 不先過期的話，下面的重驗讀到的是請求開頭的狀態（code review HIGH）
+            db.expire_all()
+            await self._reauthorize(db, operator.user_id)
             ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator)
+            if ref is None:
+                # 草稿課程不走暫存區、`_staged_material` 不取鎖；同名重查要與另一個分頁的寫入互斥。
+                # 「是草稿」是取鎖**之前**判定的：等鎖期間課程可能剛被發布，鎖內再解析一次，
+                # 否則會繞過暫存區直接寫進已發布課程的活表（code review MEDIUM）
+                await self._stage_writer.lock_course(db, course_id)
+                db.expire_all()
+                ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator)
+            ensure_video_name_unused(
+                existing_names=await self._video_names_locked(db, material_id, ref), file_name=file_name
+            )
             if ref is not None:
                 # 暫存模式：**檔案照樣落盤**（無從暫存），但列進暫存區，按「更新」才進活表。
                 #
@@ -525,6 +545,28 @@ class EtMaterialService:
             db, resolved.course_id, ENTITY_MATERIAL, material_id, operator, gone_error=_NOT_FOUND
         )
         return ref, resolved.course_id
+
+    async def _reauthorize(self, db: AsyncSession, user_id: str) -> None:
+        """第 3 段寫入前重驗身分與角色（#905 B1）。
+
+        帳號狀態與 ET 角色由 router 的 dependency（`get_jwt_payload`、`require_et_roles`）驗一次。FastAPI 先收完
+        body 才跑 dependency，所以網路傳輸不在空窗內；空窗是之後的第 1 段、把暫存檔串流寫進儲存區，加上
+        `ffprobe`（上限 30 秒，`video_probe`），期間被停用、鎖定或撤掉教師角色仍會寫入（security review）。
+        呼叫前須已 `expire_all()`，理由見 `upload_video` 第 3 段。
+
+        Raises:
+            AppError: 帳號狀態不允許（401 / 403，見 `ensure_user_active`）；不再具備可編輯的角色（403 `ET_AUTH_001`）。
+        """
+        await ensure_user_active(db, user_id)
+        if not (await load_et_roles(db, user_id)) & EDITOR_ROLES:
+            raise AppError(status_code=403, detail="需要教育訓練模組權限", error_code="ET_AUTH_001")
+
+    async def _video_names_locked(self, db: AsyncSession, material_id: int, ref) -> set[str]:
+        """第 3 段（已持課程鎖）重查同名用的現有檔名：暫存模式比暫存區、否則比活表（同 `_existing_video_names`）。"""
+        if ref is not None:
+            staged = await self._stage_writer.children_of(db, ref.course_id, ENTITY_MATERIAL_VIDEO, ref.stage_id)
+            return {str(v.payload.get("file_name") or "") for v in staged}
+        return {v.file_name for v in await self._materials.list_videos(db, material_id)}
 
     async def _existing_video_names(self, db: AsyncSession, material_id: int, actor_id: str) -> set[str]:
         """上傳前的**唯讀**檢查：授權，並回傳要比對同名的現有影片檔名（#833 A1）。

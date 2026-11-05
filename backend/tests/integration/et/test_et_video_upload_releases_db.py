@@ -25,10 +25,12 @@ import pytest
 from sqlalchemy import func, select, update
 
 from app.core.config import settings
+from app.dp.users.models import DpUser
 from app.et.constants import ITEM_MATERIAL
 from app.et.course.models import EtCourse, EtCourseContentStage
 from app.et.material import service as material_service
 from app.et.material.models import EtMaterial, EtMaterialVideo
+from app.et.roles.models import EtUserRole
 from tests.integration.et.test_et_staged_write_paths import _bearer, _course_with_content, _publish, _user
 
 pytestmark = pytest.mark.integration
@@ -186,10 +188,17 @@ async def test_上傳期間課程換了擁有者_第3段擋下並刪檔(client, 
         await _publish(client, db, uid, ids["course_id"])
 
     async def transfer() -> None:
-        await db.execute(update(EtCourse).where(EtCourse.course_id == ids["course_id"]).values(owner_id=other))
+        await db.execute(
+            update(EtCourse)
+            .where(EtCourse.course_id == ids["course_id"])
+            .values(owner_id=other)
+            .execution_options(synchronize_session=False)
+        )
 
+    pinned = await db.get(EtCourse, ids["course_id"])  # 留住實體，理由見 `test_上傳期間帳號停用或角色被撤`
     during_probe(transfer)
     r = await _upload(client, uid, ids["material_id"])
+    assert pinned is not None
 
     assert r.status_code == 403, r.text
     assert len(promoted) == 1, "前置：檔案確實搬到過正式路徑"
@@ -233,3 +242,114 @@ async def test_暫存區已刪掉的教材_寫檔前就回404(client, db, in_tra
 
     assert r.status_code == 404, r.text
     assert in_transaction_during_io == {"save": [], "probe": []}, "教材已刪，不該開始寫檔"
+
+
+# ⚠️ 一律 `synchronize_session=False`：正式環境是**別的連線**停用帳號，不會同步本請求 session 裡已載入的
+# 物件；預設的同步會順手改掉 identity map 裡的實體，第 3 段若讀到舊物件就看不出來（code review）。
+async def _disable_account(db, uid: str) -> None:
+    await db.execute(
+        update(DpUser)
+        .where(DpUser.user_id == uid)
+        .values(status="DISABLED")
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def _revoke_teacher(db, uid: str) -> None:
+    await db.execute(
+        update(EtUserRole)
+        .where(EtUserRole.user_id == uid)
+        .values(is_active=False)
+        .execution_options(synchronize_session=False)
+    )
+
+
+@pytest.mark.parametrize(
+    ("published", "revoke"),
+    [(False, _disable_account), (True, _disable_account), (False, _revoke_teacher)],
+    ids=["草稿課程_帳號停用", "已發布課程_帳號停用", "草稿課程_撤銷教師角色"],
+)
+async def test_上傳期間帳號停用或角色被撤_第3段擋下並刪檔(
+    client, db, promoted, during_probe, published, revoke
+) -> None:
+    """#905 B1：身分與角色只在請求開頭由 dependency 驗一次，上傳可達數分鐘；
+    第 3 段原本只重驗擁有者，期間被停用或撤掉教師角色仍會寫入。"""
+    uid = await _user(db, "ZT_UPR12" if published else ("ZT_UPR13" if revoke is _disable_account else "ZT_UPR14"))
+    ids = await _course_with_content(client, db, uid)
+    if published:
+        await _publish(client, db, uid, ids["course_id"])
+
+    # 留住請求開頭載入的實體：identity map 是弱參照，沒人留著時物件被回收，第 3 段重查自然讀到新值、
+    # 「讀到舊物件」的錯就看不出來。正式環境只要有任何一層留著它（如日後的 dependency）就會中
+    pinned = [await db.get(DpUser, uid), await db.get(EtCourse, ids["course_id"])]
+    during_probe(lambda: revoke(db, uid))
+    r = await _upload(client, uid, ids["material_id"])
+    assert all(p is not None for p in pinned)
+
+    assert r.status_code == 403, r.text
+    assert len(promoted) == 1, "前置：檔案確實搬到過正式路徑"
+    assert not Path(promoted[0]).exists(), "第 3 段擋下後，正式路徑的檔必須刪掉"
+    if published:
+        assert await _stage_rows(db, ids["course_id"]) == 0, "擋下時不可留下暫存區"
+    else:
+        videos = await db.scalar(
+            select(func.count()).select_from(EtMaterialVideo).where(EtMaterialVideo.material_id == ids["material_id"])
+        )
+        assert videos == 0
+
+
+@pytest.mark.parametrize("published", [False, True], ids=["草稿課程", "已發布課程（暫存模式）"])
+async def test_兩個分頁同時上傳同名檔_後到者在第3段擋下並刪檔(client, db, promoted, during_probe, published) -> None:
+    """#905 B2：第 1 段的同名檢查不持鎖，兩個分頁同時上傳同名檔原本都會通過。
+
+    以「本次上傳的 `ffprobe` 期間，另一個分頁完成了同名上傳」模擬：後到者在第 3 段取鎖後重查、回 409。
+    """
+    uid = await _user(db, "ZT_UPR15" if published else "ZT_UPR16")
+    ids = await _course_with_content(client, db, uid)
+    if published:
+        await _publish(client, db, uid, ids["course_id"])
+
+    other_tab: list[int] = []
+
+    async def other_tab_uploads() -> None:
+        if other_tab:  # 另一個分頁的上傳也會經過這個 ffprobe，只觸發一次
+            return
+        other_tab.append(0)
+        r = await _upload(client, uid, ids["material_id"])
+        other_tab[0] = r.status_code
+
+    during_probe(other_tab_uploads)
+    r = await _upload(client, uid, ids["material_id"])
+
+    assert other_tab == [201], "前置：另一個分頁的同名上傳先完成"
+    assert r.status_code == 409, r.text
+    assert r.json()["error_code"] == "ET_MATERIAL_005"
+    assert len(promoted) == 2, "前置：兩支都搬到過正式路徑"
+    assert Path(promoted[0]).exists(), "先完成的那支保留"
+    assert not Path(promoted[1]).exists(), "後到者擋下後，正式路徑的檔必須刪掉"
+
+
+async def test_上傳期間草稿課程被發布_影片進暫存區不進活表(client, db, promoted, during_probe) -> None:
+    """第 1 段判定「草稿」之後課程被發布：第 3 段必須以發布後的狀態解析、走暫存區。
+    沿用舊判定直接寫活表的話，已發布課程憑空多一支影片、學員立刻看得到（code review MEDIUM）。
+
+    ⚠️ 本測試的發布發生在第 3 段**之前**；「發布恰好落在第 3 段判定與取鎖之間」需要兩個並行的交易，
+    單一 session 的測試重現不了，鎖內重新解析那一步靠讀程式碼確認。
+    """
+    uid = await _user(db, "ZT_UPR17")
+    ids = await _course_with_content(client, db, uid)
+    pinned = await db.get(EtCourse, ids["course_id"])  # 留住實體，理由見 `test_上傳期間帳號停用或角色被撤`
+
+    async def publish() -> None:
+        await _publish(client, db, uid, ids["course_id"])
+
+    during_probe(publish)
+    r = await _upload(client, uid, ids["material_id"])
+
+    assert pinned is not None
+    assert r.status_code == 201, r.text
+    assert r.json()["video_id"] < 0, "已發布課程的上傳應進暫存區（對外是負數 id）"
+    live = await db.scalar(
+        select(func.count()).select_from(EtMaterialVideo).where(EtMaterialVideo.material_id == ids["material_id"])
+    )
+    assert live == 0, "不可繞過暫存區直接寫進已發布課程的活表"
