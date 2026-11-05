@@ -83,6 +83,8 @@
 
 `app.dp.audit.verify.verify_chain(db)` 唯讀走訪全表（`LOG_ID` ASC）重算並比對 `ROW_HASH`，回 `ChainVerifyResult`（`status`＝OK｜BROKEN｜EMPTY、`total`、首斷點 `LOG_ID` / `LOG_TIME` / `FUNC_NAME`）。任一列遭竄改（含攻擊者一併改該列自身 hash）都會在該列或下一列現形。
 
+分批走訪、**每批結束時 `commit()`**（#905 B12，避免長交易卡住 VACUUM），所以傳進來的 session 不可帶著未提交的寫入；範圍是開始時的最大 `LOG_ID` 為止。
+
 ops 例行稽核 / CI 可直接執行（退出碼 0＝完好、1＝斷鏈）：
 
 ```bash

@@ -129,6 +129,118 @@ async def test_verify_reports_first_break_only(db):
     assert result.first_broken_log_id == log_ids[1]
 
 
+# ── 分批驗鏈（#905 B12）──────────────────────────────────────────────────
+# 整表在同一個交易內走訪的話，表很大時長時間持有快照，VACUUM 推進不了；改為每批一個交易。
+
+
+def _count_commits(monkeypatch, db, on_commit=None) -> list[int]:
+    """記錄 verify_chain 結束交易的次數（savepoint fixture 下 commit 只釋放 savepoint，資料仍在）。"""
+    calls: list[int] = []
+    original = db.commit
+
+    async def _spy() -> None:
+        calls.append(1)
+        await original()
+        if on_commit is not None:
+            await on_commit(len(calls))
+
+    monkeypatch.setattr(db, "commit", _spy)
+    return calls
+
+
+async def test_verify_ends_transaction_between_batches(db, monkeypatch):
+    """每批各自結束交易：5 列、每批 2 列 → 取上界 1 次 + 3 批（2、2、1）＝ 4 次。"""
+    await _write_rows(db, 5)
+    commits = _count_commits(monkeypatch, db)
+
+    result = await verify_chain(db, batch_size=2)
+
+    assert result.status == "OK"
+    assert result.total == 5
+    assert len(commits) == 4
+
+
+async def test_verify_carries_prev_hash_across_batches(db):
+    """批次邊界不能斷鏈：每批第一列要接上前一批最後一列的存檔 hash，完整鏈照樣 OK。"""
+    await _write_rows(db, 7)
+
+    result = await verify_chain(db, batch_size=3)
+
+    assert result.status == "OK"
+    assert result.total == 7
+
+
+async def test_verify_detects_break_at_batch_boundary(db):
+    """竄改落在下一批第一列時仍抓得到、指向該列（每批重新從 None 接鏈的話會漏掉）。"""
+    await _write_rows(db, 6)
+    log_ids = list(
+        (await db.execute(text('SELECT "LOG_ID" FROM "DP_AUDIT_LOG" ORDER BY "LOG_ID" ASC'))).scalars().all()
+    )
+    victim = log_ids[3]  # batch_size=3 → 第二批的第一列
+    await _tamper(db, "ROW_HASH", "0" * 64, victim)
+
+    result = await verify_chain(db, batch_size=3)
+
+    assert result.status == "BROKEN"
+    assert result.first_broken_log_id == victim
+
+
+async def test_verify_with_expiring_session(db):
+    """CLI 的 session 是預設的 `expire_on_commit=True`：commit 後再讀 ORM 欄位會觸發 lazy load 而失敗。
+
+    `db` fixture 是 `expire_on_commit=False`，看不出「先 commit 才讀欄位」的錯；這裡另開一個綁同一條連線、
+    會過期的 session，資料仍在同一個測試交易內。
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    await _write_rows(db, 5)
+    await db.flush()
+
+    async with AsyncSession(bind=db.bind, join_transaction_mode="create_savepoint") as expiring:
+        result = await verify_chain(expiring, batch_size=2)
+
+    assert result.status == "OK"
+    assert result.total == 5
+
+
+async def test_verify_excludes_rows_written_after_start(db, monkeypatch):
+    """驗到開始時的最大 LOG_ID 為止：途中新寫入的稽核不算進來，迴圈不會被持續寫入拖著跑。"""
+    await _write_rows(db, 4)
+
+    async def _write_during_verify(count: int) -> None:
+        if count == 2:  # 第一批結束之後
+            await _write_rows(db, 1)
+
+    _count_commits(monkeypatch, db, on_commit=_write_during_verify)
+
+    result = await verify_chain(db, batch_size=2)
+
+    assert result.status == "OK"
+    assert result.total == 4
+
+
+async def test_verify_detects_tail_deleted_during_verify(db, monkeypatch):
+    """取上界之後鏈尾被刪（需特權、先停用 trigger）：最後沒讀到上界那一列 → BROKEN，指向上界。
+
+    各批快照不同，刪掉的列之後讀不到；只比對前後兩列的 hash 抓不到「尾巴整段消失」。
+    """
+    await _write_rows(db, 4)
+    upper = (await db.execute(text('SELECT max("LOG_ID") FROM "DP_AUDIT_LOG"'))).scalar()
+
+    async def _delete_tail(count: int) -> None:
+        if count == 1:  # 取完上界之後、第一批之前
+            await db.execute(text('ALTER TABLE "DP_AUDIT_LOG" DISABLE TRIGGER "TRG_DP_AUDIT_LOG_DENY_MODIFY"'))
+            await db.execute(text('DELETE FROM "DP_AUDIT_LOG" WHERE "LOG_ID" = :id'), {"id": upper})
+
+    _count_commits(monkeypatch, db, on_commit=_delete_tail)
+
+    result = await verify_chain(db, batch_size=2)
+
+    assert result.status == "BROKEN"
+    assert result.first_broken_log_id == upper
+    assert result.total == 3
+
+
 # ── CLI 入口 `python -m app.dp.audit.verify`（_amain 組裝層 + 退出碼語意）──────────
 
 
