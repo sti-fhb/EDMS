@@ -9,12 +9,14 @@
 """
 
 import asyncio
+import inspect
 import json
 from datetime import timedelta
 
 import httpx
 import pytest
-from fastapi import Request
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.routing import APIRoute
 
 from app.core.auth import JwtPayload, get_jwt_payload
@@ -81,21 +83,98 @@ def test_匯出門檻比照_ET_週報匯出():
 # ── 守門：所有匯出端點都要限流 ─────────────────────────────────────────────
 
 
+def _named_like_export(path: str) -> bool:
+    return "/export" in path or path.endswith(".csv")
+
+
+def _is_file_download(route: APIRoute) -> bool:
+    """把磁碟上的檔案串流出去（DM 文件、ET 教材文件與影片）：回傳型別或 `response_class` 是 `FileResponse`。
+
+    這類不屬匯出限流的範圍：送檔前已交還 DB 連線（`core/db.release_db_before_streaming`，有守門），
+    串流期間由 nginx 的下載並行上限管。⚠️ 應用層的限流並不一致：DM 三支沒有，ET 兩支只吃一般門檻
+    （#905 B7 code review，已記入收尾摘要）。⚠️ 假設是「不整批撈 DB」——先查 DB 組成暫存檔再回
+    `FileResponse` 的匯出會被這條豁免放過，寫那種端點時要自己掛匯出限流。
+    """
+    returns = inspect.signature(route.endpoint).return_annotation
+    candidates = (returns, getattr(route.response_class, "value", route.response_class))
+    return any(isinstance(c, type) and issubclass(c, FileResponse) for c in candidates)
+
+
+def _is_export(route: APIRoute) -> bool:
+    """GET、不是 204，且「路徑像匯出」或「沒有 `response_model`、又不是檔案下載」（#905 B8）。
+
+    只看路徑的話，取名不同的匯出（如 `/report/download`）就漏掉了。`response_model` 是 None 代表回應
+    不是 JSON 模型、是 handler 自己組的內容——這不依賴 handler 有沒有寫回傳型別註記（DM、DP 多數沒寫），
+    也涵蓋 `PlainTextResponse` 等子類別。2026-11-05 實測：符合者正好是 7 支匯出加 5 支檔案下載。
+    """
+    if "GET" not in route.methods or route.status_code == 204:
+        return False
+    return _named_like_export(route.path) or (route.response_model is None and not _is_file_download(route))
+
+
 def _export_routes() -> list[APIRoute]:
     routes = [
         r
         for included in app.routes
         if type(included).__name__ == "_IncludedRouter"
         for r in included.original_router.routes
-        if isinstance(r, APIRoute) and "GET" in r.methods and ("/export" in r.path or r.path.endswith(".csv"))
+        if isinstance(r, APIRoute) and _is_export(r)
     ]
     # 正向錨點：與 OpenAPI 列出的匯出端點一一對上，避免展開方式失效時守門變成空集合而全綠
-    openapi = {
-        p for p, ops in app.openapi()["paths"].items() if "get" in ops and ("/export" in p or p.endswith(".csv"))
-    }
-    assert {r.path for r in routes} == openapi
+    openapi = {p for p, ops in app.openapi()["paths"].items() if "get" in ops and _named_like_export(p)}
+    assert {r.path for r in routes if _named_like_export(r.path)} == openapi
     assert len(routes) >= 7
     return routes
+
+
+def _route(path: str, endpoint, **kwargs) -> APIRoute:
+    router = APIRouter()
+    router.add_api_route(path, endpoint, methods=["GET"], **kwargs)
+    return router.routes[0]
+
+
+async def _download() -> Response:  # pragma: no cover — 只看簽章
+    return Response()
+
+
+async def _no_annotation():  # pragma: no cover — 只看簽章
+    return Response()
+
+
+async def _stream() -> StreamingResponse:  # pragma: no cover — 只看簽章
+    return StreamingResponse(iter([b""]))
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "kwargs"),
+    [
+        (_download, {}),
+        (_no_annotation, {"response_model": None}),
+        (_stream, {}),
+        (_no_annotation, {"response_class": PlainTextResponse, "response_model": None}),
+    ],
+    ids=["回傳 Response", "沒寫回傳型別", "StreamingResponse", "PlainTextResponse"],
+)
+def test_取名不像匯出但回傳自組內容者也算匯出(endpoint, kwargs):
+    assert _is_export(_route("/api/x/report/download", endpoint, **kwargs))
+
+
+def test_檔案下載不算匯出():
+    async def file() -> FileResponse:  # pragma: no cover — 只看簽章
+        return FileResponse("x")
+
+    assert not _is_export(_route("/api/x/documents/{doc_id}/file", file))
+
+
+def test_回_204_者不算匯出():
+    assert not _is_export(_route("/api/x/ping", _download, status_code=204))
+
+
+def test_回_JSON_模型者不算匯出():
+    async def listing() -> dict:  # pragma: no cover — 只看簽章
+        return {}
+
+    assert not _is_export(_route("/api/x/items", listing, response_model=dict))
 
 
 def _dependency_names(route: APIRoute) -> list[str]:
@@ -115,6 +194,32 @@ def test_每支匯出端點都掛使用者與_IP_兩個維度的限流(route):
 
     assert any(n.startswith(("rate_limit_by_user.", "rate_limit_by_et_user.")) for n in names), names
     assert any(n.startswith("rate_limit_by_ip.") for n in names), names
+
+
+def _limiters(route: APIRoute, prefixes: tuple[str, ...]) -> list[SlidingWindowRateLimiter]:
+    """該路由的限流 dependency 用到的限流器（取自工廠函式的閉包）。"""
+    found: list[SlidingWindowRateLimiter] = []
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dep = stack.pop()
+        stack.extend(dep.dependencies)
+        if getattr(dep.call, "__qualname__", "").startswith(prefixes):
+            cells = getattr(dep.call, "__closure__", None) or ()
+            found.extend(c.cell_contents for c in cells if isinstance(c.cell_contents, SlidingWindowRateLimiter))
+    return found
+
+
+@pytest.mark.parametrize("route", _export_routes(), ids=lambda r: r.path)
+def test_每支匯出端點的限流門檻不寬於匯出門檻(route):
+    """掛了限流還不夠，門檻要是**匯出**的門檻（#905 B7）。
+
+    ET 追蹤的兩支 CSV 原本只吃 router 層的一般查詢門檻（每人每分鐘 180 次），上面那條守門照樣綠。
+    """
+    user = _limiters(route, ("rate_limit_by_user.", "rate_limit_by_et_user."))
+    ip = _limiters(route, ("rate_limit_by_ip.",))
+
+    assert user and min(lim._max for lim in user) <= EXPORT_USER_RATE_MAX, [lim._max for lim in user]
+    assert ip and min(lim._max for lim in ip) <= EXPORT_IP_RATE_MAX, [lim._max for lim in ip]
 
 
 @pytest.mark.parametrize("route", _export_routes(), ids=lambda r: r.path)
@@ -304,3 +409,117 @@ async def test_匯出被取消時名額歸還():
     again = limit_concurrent_exports(payload=_payload("ZT_CANCEL"))
     await again.__anext__()
     await again.aclose()
+
+
+# ── ET 追蹤的兩支 CSV（#905 B7）──────────────────────────────────────────
+
+_TRACKING = ["/api/et/courses/1/students.csv", "/api/et/courses/1/survey-result.csv"]
+_STUDENT_ONLY = "ZT_STUDENT"
+
+
+@pytest.fixture
+def tracking_app(overridden_app):
+    """ET 存取閘換成假的：使用者 ID 以 `ZT_STUDENT` 開頭者只有學員角色（過不了教師閘），其餘為教師。"""
+    from app.et import deps as et_deps
+    from app.et.roles.authz import ET_TEACHER
+    from app.et.tracking import router as tracking_router
+
+    async def fake_et_context(request: Request) -> et_deps.EtContext:
+        user = request.headers["x-test-user"]
+        return et_deps.EtContext(
+            user_id=user, roles=frozenset({"STUDENT" if user.startswith(_STUDENT_ONLY) else ET_TEACHER})
+        )
+
+    from app.et.reports import router as reports_router
+
+    limiters = [
+        tracking_router._user_limiter,
+        tracking_router._ip_limiter,
+        tracking_router._export_user_limiter,
+        tracking_router._export_ip_limiter,
+        tracking_router._heavy_user_limiter,
+        tracking_router._heavy_ip_limiter,
+        reports_router._user_limiter,
+        reports_router._ip_limiter,
+    ]
+    for lim in limiters:
+        lim._hits.clear()
+    overridden_app.dependency_overrides[et_deps.get_et_context] = fake_et_context
+    try:
+        yield overridden_app
+    finally:
+        overridden_app.dependency_overrides.pop(et_deps.get_et_context, None)
+        for lim in limiters:
+            lim._hits.clear()
+
+
+async def test_ET_追蹤_CSV_兩支共用匯出門檻_第_11_次回_429(tracking_app):
+    """原本只吃一般查詢的每分鐘 180 次；兩支共用一份匯出計數。"""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=tracking_app), base_url="http://t") as client:
+        allowed = [(await _get(client, _TRACKING[i % 2], "ZT_T1")).status_code for i in range(EXPORT_USER_RATE_MAX)]
+        blocked = await _get(client, _TRACKING[0], "ZT_T1")
+
+    assert allowed == [599] * EXPORT_USER_RATE_MAX
+    assert blocked.status_code == 429
+    assert json.loads(blocked.text) == _429
+
+
+@pytest.mark.parametrize("path", _TRACKING)
+async def test_ET_追蹤_CSV_非教師不佔匯出名額(tracking_app, path):
+    """匯出限流排在教師閘之後：學員（人人都有這個角色）連打不能把同一 IP 教師的名額用掉。"""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=tracking_app), base_url="http://t") as client:
+        denied = [(await _get(client, path, f"{_STUDENT_ONLY}{i}")).status_code for i in range(EXPORT_IP_RATE_MAX)]
+        teacher = await _get(client, path, "ZT_TEACHER")
+
+    assert denied == [403] * EXPORT_IP_RATE_MAX
+    assert teacher.status_code == 599
+
+
+async def test_ET_追蹤一般門檻也排在教師閘之後(tracking_app, monkeypatch):
+    """router 層的一般門檻（每 IP 600）原本排在教師閘之前：4 個學員帳號連打就把同一 IP 的教師整頁擋成 429
+    （#905 B7 security review M-1）。把門檻調小重現，免得真的打 600 次。"""
+    from app.et.tracking import router as tracking_router
+
+    monkeypatch.setattr(tracking_router._ip_limiter, "_max", 5)
+    path = "/api/et/courses/1/students"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=tracking_app), base_url="http://t") as client:
+        denied = [(await _get(client, path, f"{_STUDENT_ONLY}{i}")).status_code for i in range(6)]
+        teacher = await _get(client, path, "ZT_TEACHER")
+
+    assert denied == [403] * 6
+    assert teacher.status_code == 599, "學員被擋下的請求不該用掉同一 IP 教師的名額"
+
+
+async def test_ET_週報匯出_非教師不佔名額(tracking_app):
+    """週報的角色閘原本只在端點參數、最後才解析，學員在被 403 之前已記到匯出門檻（security review M-3）。"""
+    path = "/api/et/reports/weekly/students.csv"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=tracking_app), base_url="http://t") as client:
+        denied = [(await _get(client, path, f"{_STUDENT_ONLY}{i}")).status_code for i in range(EXPORT_IP_RATE_MAX)]
+        teacher = await _get(client, path, "ZT_TEACHER")
+
+    assert denied == [403] * EXPORT_IP_RATE_MAX
+    assert teacher.status_code == 599
+
+
+_HEAVY = ["/api/et/courses/1/survey-result", "/api/et/courses/1/attempt-overview"]
+
+
+@pytest.mark.parametrize("path", _HEAVY)
+async def test_ET_重型讀取第_31_次回_429(tracking_app, path):
+    """問卷結果 JSON 與 CSV 是同一份查詢、同一份具名文字答案；只吃一般門檻（180）的話改打 JSON 就繞過
+    匯出門檻（security review M-2）。作答總覽同樣不分頁、一次撈全班。"""
+    from app.et.tracking import router as tracking_router
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=tracking_app), base_url="http://t") as client:
+        allowed = [(await _get(client, path, "ZT_T1")).status_code for _ in range(tracking_router._HEAVY_USER_RATE)]
+        blocked = await _get(client, path, "ZT_T1")
+
+    assert allowed == [599] * tracking_router._HEAVY_USER_RATE
+    assert blocked.status_code == 429
+
+
+def test_ET_重型讀取門檻介於一般查詢與匯出之間():
+    from app.et.tracking import router as tracking_router
+
+    assert EXPORT_USER_RATE_MAX < tracking_router._HEAVY_USER_RATE < tracking_router._USER_RATE
+    assert EXPORT_IP_RATE_MAX < tracking_router._HEAVY_IP_RATE < tracking_router._IP_RATE
