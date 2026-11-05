@@ -17,7 +17,8 @@ from app.dm.roles.authz import DM_ADMIN, DM_VIEWER
 from app.dm.roles.models import DmUserRole
 from app.dp.users.models import DpUser
 
-pytestmark = pytest.mark.integration
+# 撤下維運帳號（#927）的角色：本檔以「全部管理者 / 審核者」為母體斷言收件人，只看本測試建的資料
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("ops_account_without_roles")]
 
 
 async def _all_units_id(db):

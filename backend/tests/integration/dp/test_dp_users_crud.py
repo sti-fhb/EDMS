@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from app.core.auth import create_access_token
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.ops_account import OPS_USER_ID
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
 from app.dp.notify.schemas import SendResult
@@ -372,7 +373,8 @@ async def test_list_filters_by_keyword_and_status(db):
     locked = await svc.list_users(db, keyword=None, status="locked", page=1, limit=20)
     assert {u.user_id for u in locked["data"]} == {"c1"}
     active = await svc.list_users(db, keyword=None, status="active", page=1, limit=20)
-    assert {u.user_id for u in active["data"]} == {"a1"}
+    # 維運帳號（#927）由 migration 種入、為啟用中，不屬本測試資料
+    assert {u.user_id for u in active["data"]} - {OPS_USER_ID} == {"a1"}
 
 
 async def test_list_users_keyword_treats_underscore_literally(db):

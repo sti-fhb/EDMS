@@ -199,6 +199,9 @@ class Settings(BaseSettings):
     # 母體」等斷言的預期值（CI 實測 7 條 integration 測試因此失敗），
     # 見 tests/integration/conftest.py 之 apply_migrations 與 .github/workflows/ci.yml。
     # ⚠️ 日後輪替示範帳號密碼，一律在目標環境直接操作，不再以 migration 寫入雜湊。
+    #   唯一例外是廠商維運帳號的**初始**密碼（#927，`36af0d3943bf`）：它必須在各環境部署後即可登入，
+    #   故寫入雜湊並設 MUST_CHANGE_PWD；各環境部署後須立即登入改掉，repo 裡公開的雜湊才作廢
+    #   （後端尚未全面擋「須變更密碼」的 API 呼叫，不能只靠旗標，見該 migration 檔頭）。
     SEED_DEMO_ACCOUNTS: bool = True
 
     @model_validator(mode="after")

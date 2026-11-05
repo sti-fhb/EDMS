@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.cooldown import VerifySendCooldown
 from app.core.exceptions import AppError
 from app.core.operator import OperatorInfo
+from app.core.ops_account import is_ops_account
 from app.core.pagination import PaginatedResult, paginate
 from app.core.request_context import get_client_ip
 from app.core.utils import format_taipei_date, utcnow
@@ -330,8 +331,12 @@ class UsersService:
         action 已由 UserStatusUpdate（Literal）收斂為 disable / enable，非法值於 422 擋下。
 
         Raises:
-            AppError: 帳號不存在（404 DP_USER_008）、停用自己（403 DP_USER_006）。
+            AppError: 帳號不存在（404 DP_USER_008）、停用自己（403 DP_USER_006）、
+                停用廠商維運帳號（403 DP_USER_012）。
         """
+        # 維運帳號先於自我保護判斷：維運帳號停用自己時，回「維運帳號不可停用」比「不可停用自己」更貼切
+        if action == "disable" and is_ops_account(user_id):
+            raise AppError(status_code=403, detail="此帳號為系統維運帳號，不可停用", error_code="DP_USER_012")
         if action == "disable" and user_id == operator.user_id:
             raise AppError(status_code=403, detail=_SELF_PROTECT_MSG, error_code="DP_USER_006")
 
@@ -379,9 +384,13 @@ class UsersService:
     ) -> UserResponse:
         """維護基本資料（#67）：僅更新**姓名**；Email 為登入帳號、唯讀不可代改。
 
+        維運帳號（#927）不可經此改名；其本人改自己的姓名走個人資料維護（US8），不受影響。
+
         Raises:
-            AppError: 帳號不存在（404 DP_USER_008）。
+            AppError: 帳號不存在（404 DP_USER_008）、修改廠商維運帳號姓名（403 DP_USER_013）。
         """
+        if is_ops_account(user_id):
+            raise AppError(status_code=403, detail="此帳號為系統維運帳號，不可修改姓名", error_code="DP_USER_013")
         user = await self._require_user(db, user_id)
         before = {"user_name": user.user_name}
         now = utcnow()

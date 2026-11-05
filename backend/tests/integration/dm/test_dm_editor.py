@@ -628,7 +628,7 @@ async def test_submit_twice_blocked_by_single_pending(db):
 # ── reviewer 下拉 + options ───────────────────────────
 
 
-async def test_list_reviewers_excludes_self(db):
+async def test_list_reviewers_excludes_self(db, ops_account_without_roles):
     await _seed_user(db, "me", "我")
     await _seed_user(db, "r1", "審核一")
     await _seed_user(db, "r2", "審核二")

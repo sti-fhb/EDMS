@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.module_assign import AssignmentView
 from app.core.operator import OperatorInfo
+from app.core.ops_account import is_ops_account
 from app.core.request_context import get_client_ip
 from app.et.catalog.models import TAG_TYPE_AUDIENCE, TAG_TYPE_UNIT, EtTag, EtUserTag
 from app.et.catalog.pair import Pair, decode_pair, encode_pair
@@ -80,6 +81,18 @@ def ensure_not_self_admin_removal(operator_id: str, user_id: str, roles: set[str
     """
     if operator_id == user_id and ROLE_ADMIN not in roles:
         raise AppError(status_code=403, detail="無法取消自己的管理者角色", error_code="ET_ROLE_001")
+
+
+def ensure_ops_default_roles_kept(user_id: str, roles: set[str]) -> None:
+    """廠商維運帳號（#927）須保留 ET `ADMIN`（migration 種入的預設角色），不論操作者是誰。
+
+    另加的 TEACHER / STUDENT 可增可減；同一請求內的標籤異動照常。
+
+    Raises:
+        AppError: 維運帳號儲存後之角色集不含 ADMIN（403 ET_ROLE_005）。
+    """
+    if is_ops_account(user_id) and ROLE_ADMIN not in roles:
+        raise AppError(status_code=403, detail="此帳號為系統維運帳號，不可移除其預設角色", error_code="ET_ROLE_005")
 
 
 def _user_not_found() -> AppError:
@@ -195,11 +208,13 @@ class EtAssignService:
 
         Raises:
             AppError: 自我保護（403 `ET_ROLE_001`）、標籤無效 / 未啟用（422 `ET_ROLE_002`）、
-                角色代碼無效（422 `ET_ROLE_003`）、查無帳號（404 `ET_ROLE_004`）。
+                角色代碼無效（422 `ET_ROLE_003`）、查無帳號（404 `ET_ROLE_004`）、
+                拿掉維運帳號之預設角色（403 `ET_ROLE_005`）。
         """
         _ensure_valid_roles(roles)
         desired = _decode_groups(groups)
-        # 自我保護先於任何寫入
+        # 保護檢核先於任何寫入；維運帳號規則排在自我保護之前，理由同 DM 之 assign_roles_audiences
+        ensure_ops_default_roles_kept(user_id, roles)
         ensure_not_self_admin_removal(operator_id, user_id, roles)
         # 輸入檢核（純函式）之後、讀現況之前：查無帳號不必再碰 ET 任何表
         if not await self._accounts.exists(db, user_id):
