@@ -1,7 +1,7 @@
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
@@ -91,13 +91,36 @@ class UsersRepository:
         從未登入（LAST_LOGIN_DATE 為 null）者以 CREATED_DATE 為閒置起算基準（spec_us11 FR-05）。
         廠商維運帳號（#927）無條件排除——它平時本來就不登入，久未登入正是常態。
         """
-        stmt = select(DpUser).where(
+        stmt = select(DpUser).where(*self._idle_active_conditions(idle_before))
+        return list((await db.execute(stmt)).scalars().all())
+
+    @staticmethod
+    def _idle_active_conditions(idle_before: datetime) -> tuple:
+        """「閒置逾期之啟用帳號」的條件；掃描（`find_idle_active`）與停用（`disable_if_still_idle`）共用。"""
+        return (
             DpUser.deleted == 0,
             DpUser.status == "ACTIVE",
             func.coalesce(DpUser.last_login_date, DpUser.created_date) < idle_before,
             DpUser.user_id != OPS_USER_ID,
         )
-        return list((await db.execute(stmt)).scalars().all())
+
+    async def disable_if_still_idle(
+        self, db: AsyncSession, *, user_id: str, idle_before: datetime, operator_id: str, now: datetime
+    ) -> bool:
+        """仍符合閒置條件才停用；回傳是否真的停用了（#905 B5 security review）。
+
+        掃描與停用之間可能過了數十秒（等稽核鎖、逾時重試），期間使用者可能剛登入、或已被管理者停用。
+        以單一條件式 UPDATE 在寫入當下重新判定：READ COMMITTED 下等到列鎖後會以最新版本重新評估 WHERE，
+        所以「剛登入」的人不會被停用，也不會寫出 before 值不實的稽核。
+        """
+        stmt = (
+            update(DpUser)
+            .where(DpUser.user_id == user_id, *self._idle_active_conditions(idle_before))
+            .values(status="DISABLED", updated_user=operator_id, updated_date=now)
+            .returning(DpUser.user_id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await db.execute(stmt)).scalar_one_or_none() is not None
 
     async def find_pwd_expiring(
         self, db: AsyncSession, *, not_expired_after: datetime, remind_on_or_before: datetime

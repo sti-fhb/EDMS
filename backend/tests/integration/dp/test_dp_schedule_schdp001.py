@@ -92,7 +92,7 @@ async def test_閒置禁用單筆失敗不中止整批(db, monkeypatch):
     await _seed_user(db, user_id="idle_b", email="idle_b@x.com", last_login=now - timedelta(days=120))
     await db.commit()
 
-    original = UsersRepository.set_status
+    original = UsersRepository.disable_if_still_idle
     calls = {"n": 0}
 
     async def flaky(self, db_, **kwargs):
@@ -101,12 +101,183 @@ async def test_閒置禁用單筆失敗不中止整批(db, monkeypatch):
             raise RuntimeError("模擬單筆失敗")
         return await original(self, db_, **kwargs)
 
-    monkeypatch.setattr(UsersRepository, "set_status", flaky)
+    monkeypatch.setattr(UsersRepository, "disable_if_still_idle", flaky)
 
     disabled = await _service.disable_idle_accounts(db)
 
     assert calls["n"] == 2, "第一筆失敗後就沒再處理第二筆——整批被中止了"
     assert disabled == 1
+
+
+def _lock_timeout() -> Exception:
+    """等稽核鎖逾時：55P03 的 DBAPIError。
+
+    ⚠️ 正式環境的 `orig` 是 SQLAlchemy asyncpg 轉接層包過的例外（`sqlstate` 由轉接層帶上），這裡直接用
+    asyncpg 例外；兩者都有 `sqlstate`，判斷式只讀它。真實鎖逾時的形狀由 `test_core_db_busy_timeouts.py` 守門。
+    """
+    import asyncpg.exceptions as pg_exc
+    from sqlalchemy.exc import DBAPIError
+
+    return DBAPIError.instance(
+        statement="SELECT pg_advisory_xact_lock($1)",
+        params=(1,),
+        orig=pg_exc.LockNotAvailableError("canceling statement due to lock timeout"),
+        dbapi_base_err=Exception,
+    )
+
+
+async def _audit_rows(db, target_id: str) -> int:
+    rows = await db.scalars(select(DpAuditLog).where(DpAuditLog.target_id == target_id))
+    return len(rows.all())
+
+
+async def test_閒置禁用遇稽核鎖逾時_原地重試成功(db, monkeypatch):
+    """#905 B5：等稽核鎖超過 `DB_AUDIT_LOCK_TIMEOUT_MS` 就放棄該筆的話，那個帳號要等到隔天的排程才停用。
+    鎖逾時是暫時性的，原地重試。"""
+    now = utcnow()
+    await _seed_user(db, user_id="lock_a", email="lock_a@x.com", last_login=now - timedelta(days=120))
+    await db.commit()
+
+    from app.dp.audit.service import AuditLogService
+
+    original = AuditLogService.log_action
+    calls = {"n": 0}
+
+    async def busy_once(self, db_, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _lock_timeout()
+        return await original(self, db_, **kwargs)
+
+    monkeypatch.setattr(AuditLogService, "log_action", busy_once)
+
+    disabled = await _service.disable_idle_accounts(db)
+
+    assert calls["n"] == 2, "鎖逾時後應重試同一筆"
+    assert disabled == 1
+    assert (await _get(db, "lock_a")).status == "DISABLED"
+    assert await _audit_rows(db, "lock_a") == 1, "重試成功只留一筆稽核（第一次已 rollback）"
+
+
+async def test_閒置禁用持續鎖逾時_重試有上限且不擋其餘(db, monkeypatch):
+    """鎖一直拿不到時不能無限重試（每次等 10 秒）；放棄該筆後照常處理下一筆。"""
+    now = utcnow()
+    await _seed_user(db, user_id="lock_b", email="lock_b@x.com", last_login=now - timedelta(days=120))
+    await _seed_user(db, user_id="lock_c", email="lock_c@x.com", last_login=now - timedelta(days=130))
+    await db.commit()
+
+    from app.dp.audit.service import AuditLogService
+
+    original = AuditLogService.log_action
+    attempts: dict[str, int] = {}
+
+    async def busy_for_b(self, db_, **kwargs):
+        target = kwargs["target_id"]
+        attempts[target] = attempts.get(target, 0) + 1
+        if target == "lock_b":
+            raise _lock_timeout()
+        return await original(self, db_, **kwargs)
+
+    monkeypatch.setattr(AuditLogService, "log_action", busy_for_b)
+
+    disabled = await _service.disable_idle_accounts(db)
+
+    assert attempts == {"lock_b": 3, "lock_c": 1}, "鎖逾時共試 3 次（原本 1 次 + 重試 2 次）"
+    assert disabled == 1
+    assert (await _get(db, "lock_b")).status == "ACTIVE"
+    assert (await _get(db, "lock_c")).status == "DISABLED"
+
+
+async def test_閒置禁用非鎖逾時的錯誤不重試(db, monkeypatch):
+    """只有鎖逾時是暫時性的；其他錯誤（含查詢逾時 57014）重試也只是再等一次，照舊記失敗、隔天補做。"""
+    now = utcnow()
+    await _seed_user(db, user_id="lock_d", email="lock_d@x.com", last_login=now - timedelta(days=120))
+    await db.commit()
+
+    import asyncpg.exceptions as pg_exc
+    from sqlalchemy.exc import DBAPIError
+
+    from app.dp.audit.service import AuditLogService
+
+    calls = {"n": 0}
+
+    async def query_canceled(self, db_, **kwargs):
+        calls["n"] += 1
+        raise DBAPIError.instance(
+            statement="SELECT 1",
+            params=(),
+            orig=pg_exc.QueryCanceledError("canceling statement due to statement timeout"),
+            dbapi_base_err=Exception,
+        )
+
+    monkeypatch.setattr(AuditLogService, "log_action", query_canceled)
+
+    assert await _service.disable_idle_accounts(db) == 0
+    assert calls["n"] == 1
+
+
+async def test_重試前剛登入的帳號不被停用(db, monkeypatch):
+    """第一次等鎖逾時、rollback 之後，該使用者剛好登入（另一個交易 commit）：重試時必須依寫入當下的狀態
+    重新判定，不可把剛登入的人停用、也不可寫出 before 值不實的稽核（#905 B5 security review L1）。"""
+    from sqlalchemy import update
+
+    from app.dp.audit.service import AuditLogService
+
+    now = utcnow()
+    await _seed_user(db, user_id="lock_e", email="lock_e@x.com", last_login=now - timedelta(days=120))
+    await db.commit()
+
+    original_audit = AuditLogService.log_action
+    calls = {"n": 0}
+
+    async def busy_once(self, db_, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _lock_timeout()
+        return await original_audit(self, db_, **kwargs)
+
+    original_rollback = db.rollback
+
+    async def rollback_then_login() -> None:
+        await original_rollback()
+        if calls["n"] == 1:  # 第一次失敗回滾後，模擬使用者登入成功並 commit
+            await db.execute(
+                update(DpUser)
+                .where(DpUser.user_id == "lock_e")
+                .values(last_login_date=utcnow())
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+
+    monkeypatch.setattr(AuditLogService, "log_action", busy_once)
+    monkeypatch.setattr(db, "rollback", rollback_then_login)
+
+    disabled = await _service.disable_idle_accounts(db)
+
+    assert calls["n"] == 1, "重試時已不符合閒置條件，不該再寫稽核"
+    assert disabled == 0
+    assert (await _get(db, "lock_e")).status == "ACTIVE"
+    assert await _audit_rows(db, "lock_e") == 0
+
+
+async def test_閒置禁用有失敗時彙總記一筆_WARNING(db, monkeypatch, caplog):
+    """逐筆的 ERROR 散落各處；有失敗時另記一筆彙總，安全控制連續幾天靜默失效才看得到（security review M1）。"""
+    import logging
+
+    now = utcnow()
+    await _seed_user(db, user_id="lock_f", email="lock_f@x.com", last_login=now - timedelta(days=120))
+    await db.commit()
+
+    async def always_fail(self, db_, **kwargs):
+        raise RuntimeError("模擬單筆失敗")
+
+    monkeypatch.setattr(UsersRepository, "disable_if_still_idle", always_fail)
+
+    with caplog.at_level(logging.WARNING, logger="app.dp.users.service"):
+        assert await _service.disable_idle_accounts(db) == 0
+
+    summary = [r for r in caplog.records if r.levelno == logging.WARNING and "閒置禁用失敗 1 筆" in r.getMessage()]
+    assert len(summary) == 1
 
 
 async def test_密碼到期提醒單筆失敗不中止整批(db, monkeypatch):

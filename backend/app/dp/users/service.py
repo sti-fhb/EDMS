@@ -10,9 +10,9 @@
 
 import logging
 from collections.abc import Collection
-from datetime import timedelta
+from datetime import datetime, timedelta
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -38,6 +38,10 @@ _FUNC_NAME = "DP-USERS"
 _INVITE_TEMPLATE = "ACCOUNT_INVITE"
 _PWD_EXPIRY_TEMPLATE = "PWD_EXPIRY_REMIND"  # noqa: S105 — 通知範本代碼，非密碼
 _SYSTEM_USER = "SYSTEM"
+
+#: 等稽核鎖逾時（55P03）時同一筆的重試次數（#905 B5）。每次最多等 `DB_AUDIT_LOCK_TIMEOUT_MS`（10 秒），
+#: 所以這筆最多多花 20 秒；仍拿不到就放棄，隔天的排程補做。
+_LOCK_RETRIES = 2
 _PENDING_INVITE_MSG = "此 Email 已有待啟用邀請，請改用重寄"
 _EMAIL_TAKEN_MSG = "此 Email 已被使用"
 _NOT_FOUND_MSG = "查無此帳號"
@@ -56,6 +60,15 @@ def _iso(value: object) -> object:
 def _send_cooldown_key(email: str) -> str:
     """建立 / 重新邀請的冷卻分桶鍵（Email 維度）。"""
     return f"invite:send:{email}"
+
+
+def _is_lock_timeout(exc: Exception) -> bool:
+    """等稽核鎖逾時：暫時性、值得原地重試。查詢逾時（57014）等其他錯誤重試也只是再等一次，不在此列。
+
+    與 `main._is_db_busy` 讀同一個 `exc.orig.sqlstate`（正式環境的形狀由
+    `tests/integration/test_core_db_busy_timeouts.py` 以真實鎖逾時守門），改一處要看另一處。
+    """
+    return isinstance(exc, DBAPIError) and getattr(exc.orig, "sqlstate", None) == "55P03"
 
 
 class UsersService:
@@ -417,7 +430,8 @@ class UsersService:
         單一帳號失敗 rollback 不擋其餘，且每筆結束即釋放稽核 chain 之 advisory xact lock（避免整批
         持鎖阻塞並行登入稽核）。回傳成功禁用筆數。
 
-        ⚠️ **迴圈只帶 id、逐筆重取實體**：`rollback()` 會使掃描階段取得的 ORM 實體**全數過期**
+        ⚠️ **迴圈只帶 id、不沿用掃描階段的實體**（停用以條件式 UPDATE 依 id 寫入）：
+        `rollback()` 會使掃描階段取得的 ORM 實體**全數過期**
         （連 PK 都不能再讀——屬性存取觸發 lazy refresh，async 下無 greenlet context 即
         `MissingGreenlet`）。沿用掃描階段的實體會讓上面那句「不擋其餘」在第一次失敗後就不成立。
         """
@@ -426,31 +440,52 @@ class UsersService:
         idle_before = now - timedelta(days=idle_days)
         user_ids = [u.user_id for u in await self._repo.find_idle_active(db, idle_before=idle_before)]
 
-        disabled = 0
+        disabled = failed = 0
         for user_id in user_ids:
-            try:
-                user = await self._repo.get_by_id(db, user_id)
-                if user is None:  # 掃描後才被刪除（軟刪除）——跳過而非整批失敗
-                    continue
-                await self._repo.set_status(db, user=user, status="DISABLED", operator_id=_SYSTEM_USER, now=now)
-                await self._audit.log_action(
-                    db,
-                    module="DP",
-                    func_name=_FUNC_NAME,
-                    action_type="UPDATE",
-                    result="SUCCESS",
-                    operator_id=_SYSTEM_USER,
-                    target_id=user_id,
-                    description=f"閒置逾 {idle_days} 日自動禁用",
-                    before_value={"status": "ACTIVE"},
-                    after_value={"status": "DISABLED"},
-                )
-                await db.commit()
-                disabled += 1
-            except Exception:
-                await db.rollback()
-                logger.exception("SCHDP001 閒置禁用失敗 user_id=%s", user_id)
+            # 等稽核鎖逾時是暫時性的（另一個交易持鎖較久）：原地重試，不讓這個帳號晚一天才停用（#905 B5）
+            for attempt in range(_LOCK_RETRIES + 1):
+                try:
+                    if await self._disable_idle_one(db, user_id, idle_days=idle_days, idle_before=idle_before, now=now):
+                        disabled += 1
+                    break
+                except Exception as exc:
+                    await db.rollback()
+                    if _is_lock_timeout(exc) and attempt < _LOCK_RETRIES:
+                        logger.warning("SCHDP001 等稽核鎖逾時，重試 user_id=%s attempt=%d", user_id, attempt + 1)
+                        continue
+                    logger.exception("SCHDP001 閒置禁用失敗 user_id=%s attempts=%d", user_id, attempt + 1)
+                    failed += 1
+                    break
+        if failed:
+            # 逐筆的 ERROR 散落在 log 裡；這是安全控制，連續幾天靜默失效要看得到（#905 B5 security review）
+            logger.warning("SCHDP001 閒置禁用失敗 %d 筆，隔天的排程補做", failed)
         return disabled
+
+    async def _disable_idle_one(
+        self, db: AsyncSession, user_id: str, *, idle_days: int, idle_before: datetime, now: datetime
+    ) -> bool:
+        """停用一個閒置帳號並寫稽核、commit；寫入當下已不符合閒置條件者回 False、不寫稽核。
+
+        掃描後才被刪除、剛登入、已被管理者停用，都在條件式 UPDATE 裡判定（見 `disable_if_still_idle`）。
+        """
+        if not await self._repo.disable_if_still_idle(
+            db, user_id=user_id, idle_before=idle_before, operator_id=_SYSTEM_USER, now=now
+        ):
+            return False
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="UPDATE",
+            result="SUCCESS",
+            operator_id=_SYSTEM_USER,
+            target_id=user_id,
+            description=f"閒置逾 {idle_days} 日自動禁用",
+            before_value={"status": "ACTIVE"},
+            after_value={"status": "DISABLED"},
+        )
+        await db.commit()
+        return True
 
     async def purge_expired_pending(self, db: AsyncSession) -> int:
         """清理**逾期滿保留期**的待驗證 / 待啟用列，回傳刪除筆數（#226）。
