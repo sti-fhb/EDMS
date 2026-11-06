@@ -20,7 +20,7 @@ from app.core.rate_limit import (
     rate_limit_by_ip,
 )
 from app.et.course.schemas import MAX_INT4
-from app.et.deps import EtContext, rate_limit_by_et_user, require_et_roles
+from app.et.deps import EtContext, get_et_context, rate_limit_by_et_user, require_et_roles
 from app.et.reports.service import EtReportsService
 from app.et.roles.authz import ET_ADMIN, ET_TEACHER
 
@@ -36,10 +36,17 @@ _SCOPE = "et-report-export"
 _user_limiter = SlidingWindowRateLimiter(max_requests=_USER_RATE, window_seconds=RATE_WINDOW_SECONDS)
 _ip_limiter = SlidingWindowRateLimiter(max_requests=_IP_RATE, window_seconds=RATE_WINDOW_SECONDS)
 
+#: 角色閘的單一實例：router 層與端點參數共用同一個 callable，FastAPI 同一請求只執行一次。
+_require_reporter = require_et_roles(ET_TEACHER, ET_ADMIN)
+
 router = APIRouter(
     prefix="/api/et/reports",
     tags=["et-reports"],
+    # 🔴 角色閘排在限流**之前**（#905 B7 security review M-3）：原本角色閘只在端點參數、最後才解析，
+    # 學員帳號在被 403 之前已記到匯出門檻，6 個學員帳號就能讓同一 IP 的教師整分鐘匯不了週報
     dependencies=[
+        Depends(get_et_context),
+        Depends(_require_reporter),
         Depends(rate_limit_by_et_user(_user_limiter, _SCOPE)),
         Depends(rate_limit_by_ip(_ip_limiter, _SCOPE)),
     ],
@@ -52,7 +59,7 @@ _service = EtReportsService()
 @router.get("/weekly/students.csv", dependencies=[Depends(limit_concurrent_exports)])
 async def download_weekly_students_csv(
     db: AsyncSession = Depends(get_db),
-    ctx: EtContext = Depends(require_et_roles(ET_TEACHER, ET_ADMIN)),
+    ctx: EtContext = Depends(_require_reporter),
     course_id: int | None = Query(
         default=None,
         ge=1,

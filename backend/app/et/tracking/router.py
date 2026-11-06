@@ -17,6 +17,8 @@ from app.core.http_cache import NO_STORE_HEADERS
 from app.core.operator import OperatorInfo, get_operator
 from app.core.pagination import PagedResponse
 from app.core.rate_limit import (
+    EXPORT_IP_RATE_MAX,
+    EXPORT_USER_RATE_MAX,
     RATE_WINDOW_SECONDS,
     SlidingWindowRateLimiter,
     limit_concurrent_exports,
@@ -46,11 +48,44 @@ _SCOPE = "et-tracking"
 _user_limiter = SlidingWindowRateLimiter(max_requests=_USER_RATE, window_seconds=RATE_WINDOW_SECONDS)
 _ip_limiter = SlidingWindowRateLimiter(max_requests=_IP_RATE, window_seconds=RATE_WINDOW_SECONDS)
 
+#: 兩支 CSV 另吃匯出門檻（#905 B7），門檻理由見 `core/rate_limit.EXPORT_USER_RATE_MAX`。原本只吃上面的
+#: 一般查詢門檻：每分鐘 180 次、而每次都是整班撈資料組 CSV。兩支共用一份計數；掛在 route 上、排在
+#: 角色閘之後，非教師在閘口 403、不佔名額。
+_EXPORT_SCOPE = "et-tracking-export"
+_export_user_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_USER_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+_export_ip_limiter = SlidingWindowRateLimiter(max_requests=EXPORT_IP_RATE_MAX, window_seconds=RATE_WINDOW_SECONDS)
+#: 角色閘的單一實例：router 層與各端點共用同一個 callable，FastAPI 同一請求只執行一次。
+_require_teacher = require_et_roles(ET_TEACHER, ET_ADMIN)
+
+#: 重型讀取（#905 B7 security review M-2）：問卷結果（含具名問答文字）與作答總覽不分頁、一次撈全班，
+#: 成本與對應的 CSV 相同，只吃一般查詢的每分鐘 180 次的話，改打 JSON 就繞過匯出門檻。不掛同時執行數
+#: 上限——頁面一開就會載入這兩支，掛了會誤擋。門檻比一般查詢緊、比匯出寬：教師切換課程仍順暢。
+_HEAVY_USER_RATE = 30
+_HEAVY_IP_RATE = 180
+_HEAVY_SCOPE = "et-tracking-heavy"
+_heavy_user_limiter = SlidingWindowRateLimiter(max_requests=_HEAVY_USER_RATE, window_seconds=RATE_WINDOW_SECONDS)
+_heavy_ip_limiter = SlidingWindowRateLimiter(max_requests=_HEAVY_IP_RATE, window_seconds=RATE_WINDOW_SECONDS)
+_HEAVY_DEPENDENCIES = [
+    Depends(rate_limit_by_et_user(_heavy_user_limiter, _HEAVY_SCOPE)),
+    Depends(rate_limit_by_ip(_heavy_ip_limiter, _HEAVY_SCOPE)),
+]
+
+_EXPORT_DEPENDENCIES = [
+    Depends(_require_teacher),
+    Depends(rate_limit_by_et_user(_export_user_limiter, _EXPORT_SCOPE)),
+    Depends(rate_limit_by_ip(_export_ip_limiter, _EXPORT_SCOPE)),
+    # 每人同時一支匯出，與其他匯出共用名額（#833）
+    Depends(limit_concurrent_exports),
+]
+
 router = APIRouter(
     prefix="/api/et",
     tags=["ET 學員追蹤"],
+    # 🔴 角色閘排在限流**之前**（#905 B7 security review M-1）：學員角色人人都有、自助註冊是開的，
+    # 限流在前的話，幾個學員帳號連打就能把同一 IP 的教師整頁擋成 429
     dependencies=[
         Depends(get_et_context),
+        Depends(_require_teacher),
         Depends(rate_limit_by_et_user(_user_limiter, _SCOPE)),
         Depends(rate_limit_by_ip(_ip_limiter, _SCOPE)),
     ],
@@ -89,7 +124,7 @@ async def list_students(
 @router.get(
     "/courses/{course_id}/attempt-overview",
     response_model=AttemptOverview,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_HEAVY_DEPENDENCIES],
 )
 async def attempt_overview(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
@@ -180,7 +215,7 @@ async def remove_student(
 @router.get(
     "/courses/{course_id}/survey-result",
     response_model=SurveyResult,
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN))],
+    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), *_HEAVY_DEPENDENCIES],
 )
 async def survey_result(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
@@ -202,8 +237,7 @@ async def survey_result(
 @router.get(
     "/courses/{course_id}/students.csv",
     response_class=Response,
-    # 每人同時一支匯出，與其他匯出共用名額（#833）
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(limit_concurrent_exports)],
+    dependencies=_EXPORT_DEPENDENCIES,
 )
 async def export_students_csv(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
@@ -226,8 +260,7 @@ async def export_students_csv(
 @router.get(
     "/courses/{course_id}/survey-result.csv",
     response_class=Response,
-    # 每人同時一支匯出，與其他匯出共用名額（#833）
-    dependencies=[Depends(require_et_roles(ET_TEACHER, ET_ADMIN)), Depends(limit_concurrent_exports)],
+    dependencies=_EXPORT_DEPENDENCIES,
 )
 async def export_survey_csv(
     course_id: Annotated[int, Path(ge=1, le=MAX_BIGINT)],
