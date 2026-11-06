@@ -14,6 +14,7 @@ from sqlalchemy.exc import DataError, DBAPIError
 from sqlalchemy.exc import TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core import loop_watchdog
 from app.core.access_log_redaction import install_access_log_redaction
 from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
@@ -91,9 +92,13 @@ async def lifespan(app: "FastAPI"):
         run_forever(SmtpMailer(), stop_event, poll_interval_seconds=settings.MAIL_WORKER_POLL_INTERVAL_SECONDS)
     )
     scheduler = await start_scheduler()
+    # loop 卡住時硬結束、交給容器重啟（#905 B16）；啟動工作做完才開始計時
+    watchdog = loop_watchdog.start(settings.EVENT_LOOP_WATCHDOG_SEC)
     try:
         yield
     finally:
+        # 關閉流程可能超過門檻（下面等發信 worker 收斂最多 30 秒），先停
+        await loop_watchdog.stop(watchdog)
         # 先關排程引擎（等當前 job 跑完），再請 worker 優雅收斂（跑完當前 cycle 並 commit），
         # 逾時才強制取消——避免在「已透過 SMTP 寄出、尚未 commit」的空窗被 cancel 導致 rollback 後重送。
         await shutdown_scheduler(scheduler)

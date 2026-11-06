@@ -72,7 +72,9 @@ _PG_DETAIL_RE = re.compile(r"\n(?:DETAIL|HINT|CONTEXT):.*?(?=\n\[SQL:|\Z)", re.D
 # Pydantic ValidationError 會 echo 觸發驗證失敗的原始輸入值（可能是密碼 / PARAM_VALUE）。
 _INPUT_VALUE_RE = re.compile(r"input_value=.*?(?=, input_type=|\]|\Z)", re.DOTALL)
 # JWT / API Key 原始值屬禁寫入 log 之敏感資料；保留前綴供比對。
-_JWT_RE = re.compile(r"eyJ[\w-]{4,}\.[\w-]{4,}\.[\w-]*")
+# 各段設長度上限：不設的話每個 `eyJ` 起點都吃到底再回溯，`"eyJ" * 26_000`（約 80 KB）實測 45 秒，
+# 而這段跑在 event loop 上——有了 event loop watchdog 就等於可以觸發重啟（#905 B16 security review）
+_JWT_RE = re.compile(r"eyJ[\w-]{4,4096}\.[\w-]{4,4096}\.[\w-]{0,4096}")
 # 保守樣式：只認一般 Email 字面，避免誤傷檔名 / 網址。長度設上限（RFC 5321：本地端 64、每段網域 63）：
 # 不設的話一長串沒有 @ 的字元會讓每個起點都吃到底再回溯，耗時與長度平方成正比——這段跑在
 # logger.exception() 當下、與 event loop 同一條執行緒（#905 security review，10 萬字元實測 30 秒以上）
@@ -223,8 +225,16 @@ def _mask_db_values(text: str) -> str:
     return _mask_quoted_values(head) + rest
 
 
+#: 例外訊息遮罩前的長度上限：所有規則的耗時因此有上界，單一例外也撐不爆 log（#905 B16 security review）。
+#: 截斷點切在值的引號中間時，DB 規則對未閉合的引號遮到結尾，不會漏出半個值
+_MAX_MESSAGE_CHARS = 8192
+_TRUNCATED_MARK = "…[訊息過長，已截斷]"
+
+
 def _redact_message(exc: BaseException, *, db_rules: bool) -> str:
     text = str(exc)
+    if len(text) > _MAX_MESSAGE_CHARS:
+        text = text[:_MAX_MESSAGE_CHARS] + _TRUNCATED_MARK
     return redact_sensitive(_mask_db_values(text) if db_rules else text)
 
 

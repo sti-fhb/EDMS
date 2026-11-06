@@ -34,6 +34,15 @@ def test_後端有健康檢查():
     assert "start_period" in hc, "啟動時跑 migration、暖機 bcrypt，給一段寬限期才開始算失敗"
 
 
+def test_後端程式結束時容器會被重新啟動():
+    """event loop 卡住時 watchdog 以結束碼 1 結束程式（#905 B16），靠重啟策略拉起來；沒有重啟策略的話
+    卡住會變成**停機**。正式環境疊加基底 `docker-compose.yml`，重啟策略設在那裡。"""
+    base = yaml.safe_load((_COMPOSE.parent / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    policy = _services()["edms-backend"].get("restart") or base["edms-backend"].get("restart")
+
+    assert policy in ("unless-stopped", "always", "on-failure"), policy
+
+
 def _serve(status: int) -> tuple[http.server.HTTPServer, int]:
     class _H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
