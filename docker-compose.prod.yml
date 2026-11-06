@@ -57,6 +57,12 @@
 #     sudo docker inspect -f '{{.State.Health.Status}}' edms-backend   → healthy / unhealthy
 #     sudo docker inspect -f '{{json .State.Health.Log}}' edms-backend → 最近幾次檢查的結果
 #   要自動重啟需另加 autoheal 之類的容器，它得掛 Docker socket（等同主機 root），屬另案取捨
+#   ⚠️ 例外：**event loop 卡住**超過 `EVENT_LOOP_WATCHDOG_SEC`（預設 120 秒）時，後端自己印出堆疊、以結束碼 1
+#   結束，由基底 `docker-compose.yml` 的 `restart: unless-stopped` 重啟（#905 B16，`core/loop_watchdog`）。
+#   重啟次數與當時卡在哪：
+#     sudo docker inspect -f '{{.RestartCount}}' edms-backend   （每次部署重建容器會歸零；OOM 重啟也算在內）
+#     sudo docker logs edms-backend --since 1h 2>&1 | grep -A40 "Timeout ("
+#   DB 斷線、連線池滿等「loop 沒卡住、只是回不了 200」的 unhealthy 仍不會重啟
 # - `deploy.resources.limits.pids`：擋 fork bomb 與子行程失控。⛔ **不要改用 `pids_limit`**：VM 上的
 #   compose 把兩者視為同一個設定，服務已有 `deploy.resources.limits`（cpus / memory）時再寫
 #   `pids_limit`，會以「can't set distinct values on 'pids_limit' and 'deploy.resources.limits.pids'」

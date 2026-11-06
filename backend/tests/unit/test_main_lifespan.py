@@ -94,3 +94,35 @@ async def test_app_lifespan_startup_failure_hides_original_message(monkeypatch):
 
     assert sent[-1]["type"] == "lifespan.startup.failed"
     assert secret not in sent[-1]["message"]
+
+
+async def test_lifespan_starts_and_stops_loop_watchdog(monkeypatch):
+    """lifespan 以 settings 的門檻啟用 watchdog，關閉時先停（#905 B16）。"""
+    calls: list[tuple] = []
+
+    async def _noop_async(*_args) -> None:
+        return None
+
+    async def _fake_run(mailer, stop_event, **kwargs):
+        await stop_event.wait()
+
+    def _fake_start(timeout_sec):
+        calls.append(("start", timeout_sec))
+        return "TASK"
+
+    async def _fake_stop(task):
+        calls.append(("stop", task))
+
+    monkeypatch.setattr("main.run_forever", _fake_run)
+    monkeypatch.setattr("main.start_scheduler", _noop_async)
+    monkeypatch.setattr("main.shutdown_scheduler", _noop_async)
+    monkeypatch.setattr("main.warm_up_password_backend", _noop_async)
+    monkeypatch.setattr("main.shutdown_password_executor", lambda: None)
+    monkeypatch.setattr("main.loop_watchdog.start", _fake_start)
+    monkeypatch.setattr("main.loop_watchdog.stop", _fake_stop)
+    monkeypatch.setattr("main.settings.EVENT_LOOP_WATCHDOG_SEC", 180.0)
+
+    async with lifespan(app):
+        assert calls == [("start", 180.0)]
+
+    assert calls == [("start", 180.0), ("stop", "TASK")]

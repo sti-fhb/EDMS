@@ -442,6 +442,19 @@ sudo docker compose -p edms -f /opt/edms/repo/docker-compose.yml \
 sudo systemctl start edms-deploy.service
 ```
 
+### 後端自動重啟（event loop watchdog，#905 B16）
+
+後端的 event loop 卡住約 `EVENT_LOOP_WATCHDOG_SEC`（預設 120 秒）時，程式會印出所有 thread 的堆疊、以結束碼 1
+結束，由 compose 的 `restart: unless-stopped` 重啟。處理中的請求會失敗，其餘代價見 `backend/app/core/loop_watchdog.py`。
+
+```bash
+sudo docker inspect -f '{{.RestartCount}}' edms-backend            # 重啟次數（每次部署重建容器會歸零；OOM 重啟也算在內）
+sudo docker logs edms-backend --since 1h 2>&1 | grep -A40 "Timeout (" # watchdog 觸發時卡在哪
+```
+
+短時間內反覆重啟（例如 1 小時內 3 次以上）代表啟動後很快又卡住，看上面的堆疊找卡住的程式。要暫時停用，在
+`.env.prod` 設 `EVENT_LOOP_WATCHDOG_SEC=0` 後重新部署。
+
 ---
 
 ## 4. 兩個容易靜默失敗的設定
@@ -608,5 +621,9 @@ EDMS 與 TBMS 同樣要交付院內封閉網路，故受三道約束：
 1. **映像執行期不得依賴對外連線**——`backend/Dockerfile` 的 `ENV UV_NO_SYNC=1`，CI 每次以 `docker run --network none` 實測
 2. **前端資源全數自帶**——不得引用任何外部 CDN 的字型、圖示、JS
 3. **交付方式**為離線包 `docker load` 或院內私有 registry
+
+⚠️ 院內交付版（TBMS repo `scripts/onprem-packaging/`）的 compose，`edms-backend` **必須**有 `restart: unless-stopped`（或
+`always`）：後端的 event loop watchdog 預設啟用（§3），卡住時是結束程式交給重啟策略拉起來，沒有重啟策略的話卡住會變成停機。
+做不到時把 `EVENT_LOOP_WATCHDOG_SEC` 設 0。
 
 院內的分流架構**尚未定義**（院內沒有 Cloudflare Tunnel，GCP 的做法搬不過去），見共存規劃 §3。院內亦無 GitHub Actions，屆時部署方式需另行設計——本檔的 pull-based 機制依賴 Artifact Registry，院內不適用。

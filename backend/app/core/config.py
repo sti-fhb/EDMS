@@ -157,6 +157,14 @@ class Settings(BaseSettings):
     # 120 秒：aiosmtplib 的單一指令逾時是 60 秒，整封與它同值會把「慢但能通」的伺服器誤判失敗（code review）。
     # ⚠️ 必須遠小於 `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`，啟動時檢查（`_validate_idle_timeout_covers_mail_send`）。
     MAIL_SEND_TIMEOUT_SEC: float = Field(default=120, gt=0)
+    # event loop 卡住超過幾秒就印出堆疊並結束程式、交給容器重啟（#905 B16，見 `core/loop_watchdog`；0 = 不啟用）。
+    # 未設定時依 DEBUG：production 120 秒、開發 0——除錯器停在中斷點也會讓 loop 停住，開發時啟用會把伺服器殺掉。
+    # 120 秒（2026-11-06 使用者裁示）：2026-11-06 盤點，loop 上最長的同步工作是組 1 萬筆的 CSV（1 秒內）；
+    # ffprobe 走 `to_thread`、密碼雜湊有專用執行緒池、DB 全是 async。又要大於健康檢查判定 unhealthy 的
+    # 90 秒（30 秒 × 3 次），兩者才不會互相干擾。
+    # ⚠️ 觸發是硬結束：處理中的請求失敗、發信 worker 寄出未寫回的那封重啟後再寄一次（完整代價見
+    # `core/loop_watchdog`）。只接受 0 或 90～3600 秒，啟動時檢查。
+    EVENT_LOOP_WATCHDOG_SEC: float | None = Field(default=None, ge=0)
 
     # 邀請重寄冷卻（US4 dp-users，#72）——同一筆邀請（invite_id）重寄的最小間隔秒數，
     # 防對單一受邀信箱短時間反覆轟炸。刻意不設操作者總量限流（批次為多人建帳號屬正常，見 router）。
@@ -242,6 +250,21 @@ class Settings(BaseSettings):
                 "MAIL_WORKER_POLL_INTERVAL_SECONDS 在 production（DEBUG=false）不得低於 60："
                 "worker 每輪最多寄 MAIL.RATE_PER_MIN 封，縮短輪距會放大發信速率上限"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_event_loop_watchdog(self) -> "Settings":
+        """未設定時依 DEBUG 決定預設；明確設定時只接受 0 或 90～3600 秒（#905 B16）。
+
+        - 下限 90：健康檢查判定 unhealthy 的時間（30 秒 × 3 次）；過短會把正當的卡頓當成卡死而硬結束程式
+        - 上限 3600：`inf` 等值會讓 faulthandler 溢位、watchdog 靜默失效（code review H1）
+        """
+        value = self.EVENT_LOOP_WATCHDOG_SEC
+        if value is None:
+            # 不用 `self.X = ...`：日後若開了 validate_assignment，在 after-validator 裡賦值會遞迴
+            object.__setattr__(self, "EVENT_LOOP_WATCHDOG_SEC", 0.0 if self.DEBUG else 120.0)
+        elif value != 0 and not 90 <= value <= 3600:
+            raise ValueError("EVENT_LOOP_WATCHDOG_SEC 須為 0（不啟用）或 90～3600 秒")
         return self
 
     @model_validator(mode="after")

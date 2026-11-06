@@ -566,3 +566,50 @@ async def test_lifespan_success_passes_state_through():
     sent, exc = await _run_lifespan_protocol(redact_lifespan_errors(lifespan))
     assert exc is None
     assert [m["type"] for m in sent] == ["lifespan.startup.complete", "lifespan.shutdown.complete"]
+
+
+# ---- 遮罩本身的耗時上界（#905 B16 security review）----
+# 遮罩跑在 logger.exception() 當下、與 event loop 同一條執行緒；有了 event loop watchdog，卡住超過門檻
+# 就會重啟程式，所以「特製輸入讓遮罩跑很久」等於可以觸發重啟。
+
+
+def test_jwt_pattern_linear_on_long_input():
+    """`eyJ` 起點的規則原本每個起點都吃到底再回溯，耗時與長度平方成正比（約 80 KB 實測 45 秒）。
+
+    ⚠️ 不用絕對秒數當門檻：這台開發機多個 session 共用，整套並行時同一段輸入實測從 0.45 秒被拖到 6.9 秒，
+    絕對門檻會假紅。改量**長度加倍時耗時變成幾倍**——線性約 2、平方約 4；負載同時拖慢兩次量測，比例大致不變。
+    各取 3 次最小值，濾掉單次被排程打斷的雜訊。
+    """
+    import time
+
+    def fastest(text: str) -> float:
+        runs = []
+        for _ in range(3):
+            started = time.perf_counter()
+            redact_sensitive(text)
+            runs.append(time.perf_counter() - started)
+        return min(runs)
+
+    small = fastest("eyJ" * 10_000)
+    large = fastest("eyJ" * 20_000)
+    assert large / small < 3, (small, large)
+
+
+def test_jwt_still_masked_after_length_limit():
+    assert "eyJzdWIiOiJ1MSJ9" not in redact_sensitive("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1MSJ9.abcdef")
+
+
+def test_long_exception_message_truncated_before_masking():
+    """遮罩前先截斷：所有規則的耗時都有上界，log 也不會被單一例外撐爆。"""
+    from app.core.log_redaction import redact_exception_message
+
+    out = redact_exception_message(ValueError("x" * 50_000))
+    assert len(out) < 9_000
+    assert "已截斷" in out
+
+
+def test_truncation_does_not_leak_value_cut_at_boundary():
+    """截斷點切在引號中間時，未閉合的引號照樣遮到結尾（DB 錯誤鏈）。"""
+    message = "x" * 8_180 + f'invalid input syntax for type integer: "{_ID}"'
+    out = format_exception_for_log(_pg_error(message))
+    assert _ID not in out

@@ -675,3 +675,50 @@ def test_idle_timeout_defaults_pass_the_check() -> None:
     """正向錨點：預設值本身要能啟動，且邊界（剛好 2 倍）放行。"""
     assert _settings_with_scan_ttl()
     assert _settings_with_scan_ttl(MAIL_SEND_TIMEOUT_SEC=150, DB_IDLE_IN_TRANSACTION_TIMEOUT_MS=300_000)
+
+
+# --- EVENT_LOOP_WATCHDOG_SEC（#905 B16）---
+
+
+def test_event_loop_watchdog_production_預設_120_秒(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EVENT_LOOP_WATCHDOG_SEC", raising=False)
+    assert _settings_with_frontend("https://edms.example.com", debug=False).EVENT_LOOP_WATCHDOG_SEC == 120
+
+
+def test_event_loop_watchdog_開發環境預設不啟用(monkeypatch: pytest.MonkeyPatch) -> None:
+    """除錯器停在中斷點也會讓 loop 停住，開發時啟用會把伺服器殺掉。"""
+    monkeypatch.delenv("EVENT_LOOP_WATCHDOG_SEC", raising=False)
+    assert _settings_with_scan_ttl().EVENT_LOOP_WATCHDOG_SEC == 0
+
+
+def test_event_loop_watchdog_明確設定時照用(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EVENT_LOOP_WATCHDOG_SEC", raising=False)
+    assert _settings_with_scan_ttl(EVENT_LOOP_WATCHDOG_SEC=300).EVENT_LOOP_WATCHDOG_SEC == 300
+    assert (
+        _settings_with_frontend("https://edms.example.com", debug=False)
+        .model_copy(update={"EVENT_LOOP_WATCHDOG_SEC": 0})
+        .EVENT_LOOP_WATCHDOG_SEC
+        == 0
+    )
+
+
+@pytest.mark.parametrize("value", [1, 30, 59, 89])
+def test_event_loop_watchdog_過短時啟動失敗(monkeypatch: pytest.MonkeyPatch, value: int) -> None:
+    """過短會把正當的卡頓當成卡死而硬結束程式。"""
+    monkeypatch.delenv("EVENT_LOOP_WATCHDOG_SEC", raising=False)
+    with pytest.raises(ValueError, match="EVENT_LOOP_WATCHDOG_SEC"):
+        _settings_with_scan_ttl(EVENT_LOOP_WATCHDOG_SEC=value)
+
+
+def test_event_loop_watchdog_邊界_90_秒放行(monkeypatch: pytest.MonkeyPatch) -> None:
+    """下限 90 秒＝健康檢查判定 unhealthy 的時間（30 秒 × 3 次）。"""
+    monkeypatch.delenv("EVENT_LOOP_WATCHDOG_SEC", raising=False)
+    assert _settings_with_scan_ttl(EVENT_LOOP_WATCHDOG_SEC=90).EVENT_LOOP_WATCHDOG_SEC == 90
+
+
+@pytest.mark.parametrize("value", [float("inf"), 3601, 1e10])
+def test_event_loop_watchdog_過大或非有限值啟動失敗(monkeypatch: pytest.MonkeyPatch, value: float) -> None:
+    """`inf` 等值通過下限檢查、卻讓 faulthandler 溢位：watchdog 靜默失效（code review H1）。"""
+    monkeypatch.delenv("EVENT_LOOP_WATCHDOG_SEC", raising=False)
+    with pytest.raises(ValueError):
+        _settings_with_scan_ttl(EVENT_LOOP_WATCHDOG_SEC=value)
