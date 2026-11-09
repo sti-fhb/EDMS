@@ -3,7 +3,7 @@
 # ecosystem）每週檢查並開 PR 更新 digest；合併前須確認映像實際建得起來（ci.yml 不建本映像）。
 #
 # uv 寫成獨立階段而非 `COPY --from=ghcr.io/...`：Dependabot 只更新 FROM，寫在 COPY 裡會漏追版。
-FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # 建置階段：以 uv 安裝依賴到 /app/.venv。
 # uv 只在此階段使用，最終映像不放 uv／uvx：執行期本就不需要 uv，直接執行 .venv 內的指令即可。
