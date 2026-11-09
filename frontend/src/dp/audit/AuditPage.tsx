@@ -162,10 +162,9 @@ export function AuditPage() {
               label="起日"
               value={filters.date_from}
               onChange={(e) => setField("date_from", e.target.value)}
-              // 預設為昨天（#926），而訖日的 min 綁在起日上——不講的話，想查更早的人會先去點
-              // 訖日、發現選不到更早的日期，進而誤以為系統裡沒有更早的記錄。提示放在起日旁邊，
-              // 因為那正是要動手的欄位。
-              helperText="預設只查昨天起，要查更早請調整起日"
+              // ⛔ 不要在此加 helperText：篩選列是 `alignItems: flex-end`（底邊對齊），
+              // helper 長在輸入框下方會把起日的框往上頂、與其他篩選欄位錯開（#926 加過一次，
+              // 經裁示移除）。要補充說明請寫在手冊，不要動這一列的高度。
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.date_to || todayTaipei() } }}
             />
             <TextField
