@@ -452,6 +452,8 @@ sudo docker inspect -f '{{.RestartCount}}' edms-backend            # 重啟次�
 sudo docker logs edms-backend --since 1h 2>&1 | grep -A40 "Timeout (" # watchdog 觸發時卡在哪
 ```
 
+外部的可用性監控（GCP uptime check，連續失敗 5 分鐘寄信）見 [monitoring.md](monitoring.md)。
+
 短時間內反覆重啟（例如 1 小時內 3 次以上）代表啟動後很快又卡住，看上面的堆疊找卡住的程式。要暫時停用，在
 `.env.prod` 設 `EVENT_LOOP_WATCHDOG_SEC=0` 後重新部署。
 
@@ -544,7 +546,7 @@ sudo tail -20 /opt/backup/edms-db/files-backup.log
 | **寄信未實測** | SMTP 已設定但沒實際送過信。註冊／忘記密碼流程能否運作未經驗證 |
 | **備份還原未演練** | §5.1 寫了還原步驟但沒跑過。「備份沒演練過等於沒有」 |
 | **檔案 rsync 未在有實際檔案時驗過** | 首次執行時兩個目錄都是空的。上傳第一份文件後應手動跑一次 `sudo systemctl start edms-backup.service` 確認 |
-| **未納入監控** | 容器掛掉不會有人知道。TBMS 有 `monitoring.md` 定義的 VM 層告警，EDMS 尚未納入 |
+| **未納入監控** | 容器掛掉不會有人知道。EDMS 的 uptime check 與告警步驟見 [monitoring.md](monitoring.md)，待有 GCP 權限的維運建立並驗證後刪除本列（#905） |
 | **最小權限 DB 角色切換** | 待維運執行 §2.8，完成後刪除本列 |
 | **第一個帳號為手動 bootstrap** | 因當時無 SMTP，帳號與 ET／DM 角色是直接以 app 的 ORM 寫入的，未走正規註冊流程 |
 

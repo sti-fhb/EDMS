@@ -175,3 +175,30 @@ def test_上傳端點縮短_body_讀取逾時():
     """上傳串流不緩衝（`proxy_request_buffering off`）：慢速送 body 的請求佔著後端的上傳名額（#833 A3），
     預設 60 秒的讀取間隔縮短為 30 秒。"""
     assert _directive(_read("api-upload.conf"), "client_body_timeout") == "30s"
+
+
+def _size_kb(value: str) -> float:
+    match = re.fullmatch(r"(\d+)([kKmM]?)", value)
+    assert match, value
+    number, unit = int(match.group(1)), match.group(2).lower()
+    return number * {"": 1 / 1024, "k": 1, "m": 1024}[unit]
+
+
+def test_body_緩衝不大於_nginx_預設():
+    """請求 body 在記憶體的緩衝不調大（#905 B14，與 TBMS 一致採 nginx 預設 16k）。
+
+    每條連線最多佔這麼多記憶體，乘上同時連線數（每 IP 20 條 `api_conn`、多 IP）就是 nginx 的記憶體曝險；
+    超過的部分寫進暫存檔，功能不受影響——`/api/` 的 body 上限 2m，本來就有大於緩衝的請求在走這條路。
+    """
+    confs = sorted(_NGINX.glob("*.conf"))
+    assert _NGINX / "nginx.conf" in confs, "正向錨點：掃描範圍至少要有 nginx.conf，路徑漂移時不能空轉成全綠"
+    values = []
+    for conf in confs:
+        values += re.findall(r"^\s*client_body_buffer_size\s+([^;]+);", conf.read_text(encoding="utf-8"), re.M)
+    assert all(_size_kb(v.strip()) <= 16 for v in values), values
+
+
+def test_一般_API_縮短_body_讀取逾時():
+    """body 超過記憶體緩衝就寫 nginx 暫存檔（#905 B14 改回預設 16k 後更常發生），而暫存檔與後端、TBMS 共用磁碟。
+    慢速送 body 的請求能一直佔著暫存檔，比照上傳端點把讀取間隔從預設 60 秒縮短為 30 秒。"""
+    assert _directive(_read("nginx.conf"), "client_body_timeout") == "30s"
