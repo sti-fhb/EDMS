@@ -188,7 +188,7 @@ localStorage.setItem("last_category", id)        // ❌ 無前綴
 
 ### `date.ts` · `src/utils/date.ts`
 時間顯示用此模組，禁止 `new Date(...).toLocaleString(...)` 或自行時區換算。
-目前提供六支（2026-10-06 依 #539 更正：本段原寫「三支」，漏記 #483 新增的 `todayTaipei`、`formatDateTimeTaipei`）。格式化函式的 **null / 空 / 非法值一律回 `—`**（不是空字串），呼叫端**不需要**再自己判斷 null 補「—」：
+目前提供七支（2026-10-06 依 #539 更正：本段原寫「三支」，漏記 #483 新增的 `todayTaipei`、`formatDateTimeTaipei`；2026-11-09 依 #926 加入 `yesterdayTaipei`）。格式化函式的 **null / 空 / 非法值一律回 `—`**（不是空字串），呼叫端**不需要**再自己判斷 null 補「—」：
 
 | 函式 | 用途 |
 |---|---|
@@ -196,6 +196,7 @@ localStorage.setItem("last_category", id)        // ❌ 無前綴
 | **`formatDateTimeTaipei(value)`** | **第 2 層**：日期 + 時分，`YYYY/MM/DD HH:mm`，台灣時間；所在畫面有台灣日界的日期篩選（成員見下） |
 | `formatDateTime(value)` | **第 3 層**：日期 + 時分，`YYYY/MM/DD HH:mm`，瀏覽器本地時區；其餘畫面 |
 | `todayTaipei()` | 台灣時間的今天 `YYYY-MM-DD`，供 `<input type="date">` 的 min / max |
+| `yesterdayTaipei()` | 台灣時間的昨天 `YYYY-MM-DD`，供查詢起日的預設下界（DP05，#926）|
 | `toDateTimeLocalInput(value)` | ISO → `<input type="datetime-local">` 所需的本地牆上時間 |
 | `fromDateTimeLocalInput(value)` | 反向，本地牆上時間 → ISO UTC |
 

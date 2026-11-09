@@ -5,6 +5,7 @@ import { QUERY_KEYS } from "../../constants/queryKeys"
 import { useNotification } from "../../contexts/NotificationContext"
 import { usePagedQuery } from "../../hooks/usePagedQuery"
 import { toBlobApiError } from "../../services/http"
+import { yesterdayTaipei } from "../../utils/date"
 import { auditApi } from "./auditService"
 import type { AuditFilterParams, AuditLogRow, AuditOption } from "./auditService"
 
@@ -26,13 +27,25 @@ export interface AuditFilters {
   date_to: string
 }
 
-export const EMPTY_AUDIT_FILTERS: AuditFilters = {
-  operator: "",
-  func: "",
-  action_type: "",
-  result: "",
-  date_from: "",
-  date_to: "",
+/**
+ * 查詢列的預設值：起日＝台灣時間的昨天、訖日留空（#926，比照 TBMS DP11）。
+ *
+ * 不給起日的話，後端 `count_logs()` 會對整張 `DP_AUDIT_LOG` 計數——稽核表只增不減，
+ * 一進頁面就得等。給了下界才讓 `IX_DP_AUDIT_LOG_CREATED_DATE` 有範圍可縮。
+ *
+ * ⚠️ 必須是**函式**，不可改回模組層常數：常數在 import 當下就求值，`vi.setSystemTime()`
+ * 是測試 body 裡才呼叫的，屆時值已凍結成真實的昨天、造假時間控制不到它（本檔的
+ * 日期測試正是這個寫法）。順帶也讓分頁開著跨過午夜後，清除篩選能取到新的昨天。
+ */
+export function defaultAuditFilters(): AuditFilters {
+  return {
+    operator: "",
+    func: "",
+    action_type: "",
+    result: "",
+    date_from: yesterdayTaipei(),
+    date_to: "",
+  }
 }
 
 /** 空字串欄位轉 undefined，避免帶入無意義 query string。 */
@@ -72,8 +85,11 @@ export function useAuditOptions() {
 /** 操作記錄查詢頁狀態（多條件查詢 / 後端分頁 / 明細檢視 / CSV 匯出）。 */
 export function useAuditLogs() {
   const { message } = useNotification()
-  // 已送出的查詢（與輸入分離：按「查詢」才套用；匯出亦以此為準，確保與畫面一致）
-  const [query, setQuery] = useState({ ...EMPTY_AUDIT_FILTERS, page: 1, limit: DEFAULT_LIMIT })
+  // 已送出的查詢（與輸入分離：輸入欄變動後防抖 400ms 才套用，本頁沒有「查詢」按鈕，見
+  // AuditPage；匯出亦以此為準，確保與畫面一致）。
+  // ⚠️ 初始值與畫面輸入框**兩處**都取自 defaultAuditFilters()：只改畫面那側的話，篩選欄
+  // 會顯示昨天、但首次送出的查詢仍不帶 date_from，全表計數照跑而畫面看不出差別（#926）。
+  const [query, setQuery] = useState(() => ({ ...defaultAuditFilters(), page: 1, limit: DEFAULT_LIMIT }))
   const [selected, setSelected] = useState<AuditLogRow | null>(null)
   const [exporting, setExporting] = useState(false)
 

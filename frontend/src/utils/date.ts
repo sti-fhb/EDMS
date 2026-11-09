@@ -93,6 +93,25 @@ export function todayTaipei(): string {
 }
 
 /**
+ * 昨天的日期（`YYYY-MM-DD`，**台灣時間**）；供查詢起日的預設下界使用（DP05，#926）。
+ *
+ * ⚠️ 不可用 `new Date(Date.now() - 86400000).toISOString().slice(0, 10)`：那是 **UTC** 的日期。
+ * 台灣時間 00:00–08:00 之間，UTC 還停在前一天，再減 24 小時就退成**前天**——而台灣白天時兩者
+ * 答案相同，所以這個錯誤只在清晨現形，平常測不出來（同 `todayTaipei` 的 #483 形狀）。
+ *
+ * 以 24 小時位移再換算台灣日期是安全的：台灣固定 UTC+8、無夏令時間，任一時刻減 24 小時
+ * 必然落在台灣的前一個日曆日。
+ *
+ * 📌 本函式**不屬於**檔頭「三層規則」的成員——那組規則管的是顯示用的格式化函式
+ * （`formatDateTaipei` / `formatDateTimeTaipei` / `formatDateTime`）。本函式與 `todayTaipei`
+ * 同類，都是供 `<input type="date">` 取值用的，不需列入第 2 層成員表。
+ */
+export function yesterdayTaipei(): string {
+  const p = taipeiParts(new Date(Date.now() - 24 * 60 * 60 * 1000))
+  return `${p.year}-${p.month}-${p.day}`
+}
+
+/**
  * 格式化為 `YYYY/MM/DD HH:mm`（**台灣時間**）；null / 空 / 非法值回 `—`。
  *
  * 三層規則的**第 2 層**：所在畫面有以台灣日界切日的日期篩選（含共用同一元件的延伸頁）。
