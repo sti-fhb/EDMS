@@ -17,7 +17,7 @@ import { formatDateTimeTaipei, todayTaipei } from "../../utils/date"
 import { AuditDetailDialog } from "./AuditDetailDialog"
 import { labelOf } from "./auditLabels"
 import type { AuditLogRow, AuditOption } from "./auditService"
-import { EMPTY_AUDIT_FILTERS, useAuditLogs, useAuditOptions } from "./useAuditLogs"
+import { defaultAuditFilters, useAuditLogs, useAuditOptions } from "./useAuditLogs"
 import type { AuditFilters } from "./useAuditLogs"
 
 const ALL = "全部"
@@ -44,10 +44,12 @@ export function AuditPage() {
   const audit = useAuditLogs()
   const { setSelected, search } = audit
   const { funcOptions, actionOptions, resultOptions } = useAuditOptions()
-  const [filters, setFilters] = useState<AuditFilters>(EMPTY_AUDIT_FILTERS)
+  // 傳函式本身＝lazy initializer，React 只在首次 render 呼叫一次
+  const [filters, setFilters] = useState<AuditFilters>(defaultAuditFilters)
 
   const setField = (key: keyof AuditFilters, value: string) => setFilters((prev) => ({ ...prev, [key]: value }))
-  const clearFilters = () => setFilters(EMPTY_AUDIT_FILTERS)
+  // 清除是回到預設（起日仍為昨天），不是清空：清空等於把進頁面就全表計數的狀況放回來（#926）
+  const clearFilters = () => setFilters(defaultAuditFilters())
 
   // 即時篩選：篩選欄異動即（防抖）套用查詢，無「查詢」按鈕
   useEffect(() => {
@@ -160,6 +162,10 @@ export function AuditPage() {
               label="起日"
               value={filters.date_from}
               onChange={(e) => setField("date_from", e.target.value)}
+              // 預設為昨天（#926），而訖日的 min 綁在起日上——不講的話，想查更早的人會先去點
+              // 訖日、發現選不到更早的日期，進而誤以為系統裡沒有更早的記錄。提示放在起日旁邊，
+              // 因為那正是要動手的欄位。
+              helperText="預設只查昨天起，要查更早請調整起日"
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: filters.date_to || todayTaipei() } }}
             />
             <TextField

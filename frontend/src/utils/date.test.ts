@@ -5,7 +5,14 @@
 // adapter 並以 `TypeError: Invalid URL` 失敗。
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { formatDateTaipei, formatDateTimeTaipei, fromDateTimeLocalInput, toDateTimeLocalInput, todayTaipei } from "./date"
+import {
+  formatDateTaipei,
+  formatDateTimeTaipei,
+  fromDateTimeLocalInput,
+  toDateTimeLocalInput,
+  todayTaipei,
+  yesterdayTaipei,
+} from "./date"
 
 describe("datetime-local 與 ISO 8601 轉換", () => {
   it("往返後回到原本的本地牆上時間", () => {
@@ -123,5 +130,47 @@ describe("todayTaipei（日期選擇器上限）", () => {
 
   it("格式為 YYYY-MM-DD（<input type=\"date\"> 可直接吃）", () => {
     expect(at("2026-02-03T04:05:06Z")).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+})
+
+describe("yesterdayTaipei（查詢起日的預設下界）", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const at = (iso: string): string => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(iso))
+    return yesterdayTaipei()
+  }
+
+  // 🥇 本組唯一抓得到「用 UTC 算昨天」的時間區間。台灣白天時 UTC 與台灣的「昨天」是同一天，
+  // 錯的寫法 `new Date(Date.now() - 86400000).toISOString().slice(0, 10)` 會給出相同答案；
+  // 只有台灣 00:00–07:59（UTC 仍停在前一天）兩者才分岔，此時截 UTC 字串會退成**前天**。
+  it("台灣已跨日、UTC 仍是前一天時，回台灣的昨天而非前天", () => {
+    expect(at("2026-09-30T23:30:00Z")).toBe("2026-09-30") // 台灣 10/01 07:30 → 昨天 09/30
+    expect(at("2026-10-05T17:30:00Z")).toBe("2026-10-05") // 台灣 10/06 01:30 → 昨天 10/05
+  })
+
+  it("台灣白天時回前一個台灣日曆日", () => {
+    expect(at("2026-10-01T04:00:00Z")).toBe("2026-09-30") // 台灣 10/01 12:00
+  })
+
+  it("台灣日界前後各差一天（固定 UTC+8、無夏令，24 小時位移必落在前一日曆日）", () => {
+    expect(at("2026-10-01T15:59:59Z")).toBe("2026-09-30") // 台灣 10/01 23:59:59
+    expect(at("2026-10-01T16:00:00Z")).toBe("2026-10-01") // 台灣 10/02 00:00:00
+  })
+
+  it("跨月與跨年邊界正確", () => {
+    expect(at("2026-10-01T04:00:00Z")).toBe("2026-09-30") // 月初 → 上月最後一天
+    expect(at("2026-01-01T04:00:00Z")).toBe("2025-12-31") // 年初 → 去年最後一天
+    expect(at("2024-03-01T04:00:00Z")).toBe("2024-02-29") // 閏年 2/29
+  })
+
+  it("恰為 todayTaipei 的前一天", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-10-06T01:00:00Z"))
+    expect(todayTaipei()).toBe("2026-10-06")
+    expect(yesterdayTaipei()).toBe("2026-10-05")
   })
 })

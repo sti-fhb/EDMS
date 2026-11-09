@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { http, HttpResponse } from "msw"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -284,7 +284,7 @@ describe("AuditPage 篩選選項來自後端（#477）", () => {
 
   // ⚠️ 本條在移除篩選**之前就是綠的**（沒人去點模組下拉，`module` 本來就是空字串而不送出），
   // 所以它**不是**「移除成功」的證據——那條是上面那個。它擋的是另一件事：UI 欄位拿掉、
-  // 但 `AuditFilters` / `EMPTY_AUDIT_FILTERS` 的殘留 state 被賦了非空預設值，導致畫面上
+  // 但 `AuditFilters` / `defaultAuditFilters()` 的殘留 state 被賦了非空預設值，導致畫面上
   // 看不到卻一直帶著 module 查詢。那種狀態上面那條驗不出來。
   it("殘留 state 不得讓查詢偷帶 module（#555 回歸護欄，非移除之證據）", async () => {
     const seen: URLSearchParams[] = []
@@ -395,5 +395,104 @@ describe("AuditPage 時刻欄以台灣時間呈現（#559）", () => {
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("2026/10/01 00:30")).toBeInTheDocument()
     expect(within(dialog).queryByText("2026/09/30 16:30")).not.toBeInTheDocument()
+  })
+})
+
+describe("AuditPage 起日預設昨天（#926）", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** 只假造 Date；計時器仍用真的，MSW 與 React 的非同步更新才不會卡住（同 #539 的寫法）。 */
+  const freezeAt = (utcIso: string) => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(utcIso))
+  }
+
+  const captureQueries = () => {
+    const seen: URLSearchParams[] = []
+    server.use(
+      http.get("/api/dp/audit/logs", ({ request }) => {
+        seen.push(new URL(request.url).searchParams)
+        return HttpResponse.json({ data: [], meta: { total: 0, page: 1, limit: 20, total_pages: 0 } })
+      }),
+    )
+    return seen
+  }
+
+  it("一進頁面：起日預設台灣時間的昨天，訖日留空", async () => {
+    freezeAt("2026-10-06T01:00:00Z") // 台灣 10/06 09:00
+    renderWithProviders(<AuditPage />)
+
+    expect(await screen.findByLabelText("起日")).toHaveValue("2026-10-05")
+    expect(screen.getByLabelText("訖日")).toHaveValue("")
+  })
+
+  // ⚠️ 這條是本案的關鍵護欄。初始值有兩處——送出的查詢（useAuditLogs 的 query）與畫面輸入框
+  // （AuditPage 的 filters）。只讓畫面那側帶昨天的話，**篩選欄看起來完全正確**，但首次查詢
+  // 仍不帶 date_from、後端照樣對全表計數，也就是這個 issue 要解的那件事根本沒解掉。
+  // 斷言「第一次」而非「某一次」：防抖 400ms 後會再送一次帶日期的，用 some() 會讓上述缺陷漏網。
+  it("首次送出的查詢就帶 date_from，不是防抖後才補上", async () => {
+    const seen = captureQueries()
+    freezeAt("2026-10-06T01:00:00Z")
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("查無符合條件之紀錄")
+
+    // 正向錨點：先確認請求真的送出過，否則下面的斷言會在空陣列上恆真
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+    expect(seen[0].get("date_from")).toBe("2026-10-05")
+    expect(seen[0].has("date_to")).toBe(false)
+  })
+
+  it("點清除篩選後起日回到昨天，不是清空", async () => {
+    const user = userEvent.setup()
+    freezeAt("2026-10-06T01:00:00Z")
+    renderWithProviders(<AuditPage />)
+
+    const dateFrom = await screen.findByLabelText("起日")
+    fireEvent.change(dateFrom, { target: { value: "2026-01-02" } })
+    expect(dateFrom).toHaveValue("2026-01-02")
+    const operator = screen.getByLabelText("操作者（姓名 / Email）")
+    await user.type(operator, "王")
+
+    await user.click(screen.getByRole("button", { name: "清除篩選" }))
+
+    expect(dateFrom).toHaveValue("2026-10-05")
+    // 配一條確實被清掉的欄位當對照：否則「清除鈕根本沒接上」也會讓上一行通過
+    expect(operator).toHaveValue("")
+  })
+
+  // 🥇 **只有這條抓得到「用 UTC 算昨天」**。台灣白天時 UTC 與台灣的「昨天」是同一天，
+  // 錯的實作（`new Date(Date.now() - 86400000).toISOString().slice(0, 10)`）會給出一樣的答案，
+  // 上面三條全綠也證明不了時區有算對。台灣 00:00–07:59 才是兩者分岔的區間：
+  // 此刻台灣 10/06 01:30 → 正確為 10/05；截 UTC 字串則得 10/04。
+  it("台灣凌晨（UTC 仍是前一天）時，昨天仍以台灣日界計", async () => {
+    freezeAt("2026-10-05T17:30:00Z") // 台灣 10/06 01:30
+    renderWithProviders(<AuditPage />)
+
+    expect(await screen.findByLabelText("起日")).toHaveValue("2026-10-05")
+  })
+
+  // 匯出以「已送出的查詢」為準，所以預設起日會跟著進匯出。若哪天匯出改成讀畫面上的
+  // filters，而兩者又不同步，使用者就會下載到與清單不一致的檔案——這條擋的是那個。
+  it("匯出沿用當下查詢條件，帶著預設起日", async () => {
+    const exportSpy = vi
+      .spyOn(auditApi, "exportCsv")
+      .mockResolvedValue(new Blob(["﻿LOG_ID\n"], { type: "text/csv" }))
+    // @ts-expect-error jsdom 未實作 createObjectURL，測試以 mock 補上
+    global.URL.createObjectURL = vi.fn(() => "blob:audit")
+    // @ts-expect-error jsdom 未實作 revokeObjectURL，測試以 mock 補上
+    global.URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+
+    const user = userEvent.setup()
+    freezeAt("2026-10-06T01:00:00Z")
+    renderWithProviders(<AuditPage />)
+    await screen.findByText("成功")
+
+    await user.click(screen.getByRole("button", { name: "匯出" }))
+
+    await waitFor(() => expect(exportSpy).toHaveBeenCalled())
+    expect(exportSpy).toHaveBeenCalledWith(expect.objectContaining({ date_from: "2026-10-05" }))
   })
 })
