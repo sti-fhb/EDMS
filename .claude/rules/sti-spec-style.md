@@ -71,6 +71,10 @@ grep -rE "\bEA\b|Sparx|Enterprise Architect|\{[A-F0-9]{8}-[A-F0-9]{4}-" docs/spe
 
 > 此檢核也適用於本檔本身——本檔的「EA」「Enterprise Architect」字眼是規則描述用，不算違規；檢核時僅針對 spec / UC / RQ 文件。
 
+## 6. 系統參數不得承載部署資訊
+
+新增或修改系統參數（DP_PARAM）、可維護連線設定前，先 Read `.claude/rules/sti-architecture-constraints.md` §部署設定與可維護設定之界線並依其判定。
+
 ## 變更歷史
 
 - **2026-04-20** 使用者首次明示「正式 md 不要有 EA」
