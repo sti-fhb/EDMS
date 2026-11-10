@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { containsLink, NAME_LINK_MESSAGE } from "../../utils/linkDetect"
 
 const emailField = z
   .string()
@@ -12,6 +13,7 @@ const nameField = z
   .trim()
   .min(1, { message: "請輸入姓名" })
   .max(50, { message: "姓名長度不可超過 50 字元" })
+  .refine((v) => !containsLink(v), { message: NAME_LINK_MESSAGE })
 
 /** 建立帳號表單驗證（US4 #67 邀請流程）：管理者不設密碼，僅 Email / 姓名。命名對齊後端 `UserCreate`。 */
 export const UserCreateSchema = z.object({

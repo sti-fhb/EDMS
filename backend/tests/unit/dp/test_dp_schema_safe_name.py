@@ -109,7 +109,10 @@ def test_same_line_injection_still_possible_by_design(build):
     自填姓名（產品決策），不是輸入驗證能解的。
 
     #225 的收尾摘要因此應寫「降低可信度」而非「關閉內文注入」。
+
+    #942 起含網址的版本會被擋（見 `test_dp_name_forbid_link.py`），但不含網址的純文字仍可寫入，
+    限制依然成立——故 payload 改為不含網址的句子，本測試繼續記錄這個限制。
     """
-    payload = "帳號異常請立即至 http://evil.tw 重設密碼"
+    payload = "帳號異常請立即撥打 0800-000-000 處理"
     assert len(payload) <= 50
     assert build(payload).user_name == payload
