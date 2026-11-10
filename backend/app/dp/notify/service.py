@@ -6,10 +6,14 @@
 """
 
 import logging
+import re
 import string
+import unicodedata
+from urllib.parse import SplitResult, urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
 from app.dp.notify.redaction import ONE_TIME_LINK_VARIABLES
@@ -33,6 +37,42 @@ _SUBJECT_LINK_MSG = "主旨不得使用重設、驗證或啟用連結等一次�
 
 #: 主旨連結檢核的探針值：與真實渲染不可能自然出現的 ASCII 標記（主旨的代入值字元剝除不會動到它）。
 _LINK_PROBE = "__EDMS_ONE_TIME_LINK_PROBE__"
+
+#: `ensure_links_same_site` 的對外訊息（#940）。不回顯網址或主機（sti-error-codes）。
+_EXTERNAL_LINK_MSG = "範本中的網址僅限本系統網域，請移除外部連結"
+
+#: 網址可由哪些字元組成：RFC 3986 的 unreserved + reserved + `%`。遇到空白、非 ASCII（中文、
+#: 全形標點）或 `\` 即視為網址結束——瀏覽器把 `\` 當 `/`，在該處截斷得到的主機正是瀏覽器實際
+#: 連線的主機（`https://evil\@本站` → evil）。
+_URL_CHARS = r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]"
+
+#: 郵件軟體會自動轉成連結的三種寫法（#940）：`協定://`、開頭 `//`、開頭 `www.`，不分大小寫。
+#:
+#: - 協定分支以 `://` 為錨點、往前取**整段**連續的協定字元，交給 `_link_scheme` 判斷。
+#:   ⚠️ 不要改回「協定須以字母開頭 + 前方否定斷言」：`.https://`、`1https://` 會因此在任何
+#:   位置都匹配不到而整條放行（#940 review），郵件軟體卻仍從 `https://` 轉連結。
+#: - `//` 分支排除前面是英數、`:`、`/` 的情況：`https://` 已由協定分支吃掉，`a/b//c` 不是網址。
+#: - `www.` 分支只排除前面是英數（`awww.` 不是起點）；`-www.`、`.www.` 照樣抓。
+_URL_PATTERN = re.compile(
+    rf"(?P<scheme>[A-Za-z0-9+.\-]*)://(?P<rest>{_URL_CHARS}*)"
+    rf"|(?<![A-Za-z0-9:/])//(?P<relative>{_URL_CHARS}+)"
+    rf"|(?<![A-Za-z0-9])(?P<www>www\.{_URL_CHARS}*)",
+    re.IGNORECASE,
+)
+
+#: 網址尾端常見的句讀；只在判斷主機時剝掉，免得「…/x.」「[…]」被當成主機的一部分而誤擋。
+_URL_TRAILING_PUNCT = ".,;:!?'\")]"
+
+#: 掃描前先刪掉的字元：瀏覽器解析主機時會忽略它們（UTS46 的 default ignorable），留著的話
+#: `本站­evil.com` 會在該字元處被截成「本站」而放行，瀏覽器實際連的卻是 `本站evil.com`。
+_IGNORABLE_CHARS = dict.fromkeys(
+    (0x00AD, 0x034F, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xFEFF)
+)
+
+#: 第二輪渲染的探針值：變數緊貼主機時（`https://本站{x}`），能把主機接長的值就會讓檢核看見。
+_HOST_EXTEND_PROBE = ".zz9-probe"
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 #: 單次 `send_email` 的收件人上限（對齊 TBMS 慣例）。**公開常數**：傳多人清單的呼叫方
 #: 需據此分批，故由 `app.services` 一併匯出（#563）。
@@ -326,6 +366,88 @@ def ensure_subject_without_link(*, subject: str, variables: str | None) -> None:
     probe = {name: (_LINK_PROBE if name in link_vars else "") for name in declared}
     if _LINK_PROBE in _render(subject, probe, single_line=True):
         raise AppError(status_code=422, detail=_SUBJECT_LINK_MSG, error_code="DP_MAIL_013")
+
+
+def ensure_links_same_site(*, subject: str, body: str, variables: str | None) -> None:
+    """儲存前驗證主旨與內文中的網址皆指向本系統；違反拋 `AppError(422, DP_MAIL_014)`（#940）。
+
+    系統信以正式寄件人寄出，收件人會信任信中連結；範本若能放任意網址，系統信就能被設定成
+    導向外部網站。規則不分範本種類：網址的主機與連接埠須等於 `FRONTEND_BASE_URL`。
+
+    ⚠️ 與 `ensure_renderable` 同一姿態：**先跑 `_render` 再找網址**，讓判斷對象與實際寄出的
+    文字一致（`{{` 跳脫等差異不會造成誤判）。由系統代入的連結變數（`{reset_link}`、
+    `{COURSE_URL}`…）寄送時才產生、本來就指向本站，渲染後不留下網址，自然放行。
+
+    變數值寄送時才知道，故**渲染兩輪**：代入空字串一輪、代入 `_HOST_EXTEND_PROBE` 一輪，任一輪
+    出現外部網址即擋。只跑空字串那輪時，`https://本站{user_name}/x` 會放行，而姓名若是
+    `.evil.com`，寄出的主機就成了 `本站.evil.com`（#940 review）。
+
+    掃描前先以 NFKC 正規化、把 `。` 換成 `.`、刪掉瀏覽器會忽略的字元：瀏覽器解析主機時會這樣
+    處理，不先做的話 `本站。evil.com`、全形 `ｈｔｔｐｓ://` 會在非 ASCII 處被截斷而放行。
+
+    須在 `ensure_renderable` **之後**呼叫：無法渲染的範本已由 DP_MAIL_011 擋下，此處的
+    `_render` 不會再拋例外。
+
+    Args:
+        subject: 待存的主旨。
+        body: 待存的內文。
+        variables: 該範本的 `VARIABLES` 欄原始值。
+
+    Raises:
+        AppError: 主旨或內文含非本系統的網址（422 `DP_MAIL_014`）。
+    """
+    names = declared_variable_names(variables)
+    own = urlsplit(settings.FRONTEND_BASE_URL)
+    for value in ("", _HOST_EXTEND_PROBE):
+        probe = dict.fromkeys(names, value)
+        for text in (_render(subject, probe, single_line=True), _render(body, probe)):
+            normalized = unicodedata.normalize("NFKC", text).replace("。", ".").translate(_IGNORABLE_CHARS)
+            for match in _URL_PATTERN.finditer(normalized):
+                if not _is_own_site(match, own):
+                    raise AppError(status_code=422, detail=_EXTERNAL_LINK_MSG, error_code="DP_MAIL_014")
+
+
+def _link_scheme(match: re.Match[str]) -> str | None:
+    """命中的協定：協定分支須**整段**等於 http(s)，否則回 `""` 由呼叫端拒絕；`//`、`www.` 分支無協定。
+
+    整段比對：`.https://`、`1https://` 的整段是 `.https`、`1https`，因此一律拒絕——郵件軟體仍會
+    從 `https://` 開始轉連結，前綴字元是什麼都不該讓它過關。代價是 `xhttps://本站` 這種罕見寫法也被擋。
+    """
+    if match.group("rest") is None:
+        return None
+    run = match.group("scheme").lower()
+    return run if run in _DEFAULT_PORTS else ""
+
+
+def _is_own_site(match: re.Match[str], own: SplitResult) -> bool:
+    """`_URL_PATTERN` 的一筆命中是否指向本系統（協定 http(s)、主機與連接埠相同、無帳密）。
+
+    判斷一律「看不懂就拒絕」：解析失敗（含 `[`、`]` 不成對）、連接埠不合法、帶帳密前綴
+    （`本站@外部` 實際連到外部），都視為外部網址。
+    """
+    scheme = _link_scheme(match)
+    if scheme == "":
+        return False
+    # 依分支取，不可用 `or` 串接：協定分支的 `rest` 可以是空字串（`https://` 後面沒東西）
+    branch = "rest" if scheme is not None else ("relative" if match.group("relative") is not None else "www")
+    candidate = match.group(branch).rstrip(_URL_TRAILING_PUNCT)
+    try:
+        parts = urlsplit("//" + candidate)
+        port = parts.port
+    except ValueError:
+        return False
+    if "@" in parts.netloc:
+        return False
+    if parts.hostname is None or parts.hostname != (own.hostname or "").lower():
+        return False
+
+    own_port = own.port or _DEFAULT_PORTS.get(own.scheme.lower())
+    if port is not None:
+        return port == own_port
+    # 未寫連接埠：只有本站本身也走該協定的預設連接埠時才算同一處
+    if own.port is None:
+        return True
+    return scheme is not None and _DEFAULT_PORTS[scheme] == own.port
 
 
 def _channel_allows_email(channel: str) -> bool:

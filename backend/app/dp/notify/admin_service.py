@@ -19,7 +19,7 @@ from app.dp.audit.service import AuditLogService
 from app.dp.notify.models import DpNotifyTemplate
 from app.dp.notify.repository import NotifyRepository
 from app.dp.notify.schemas import TemplateResponse, TemplateUpdate
-from app.dp.notify.service import ensure_renderable, ensure_subject_without_link
+from app.dp.notify.service import ensure_links_same_site, ensure_renderable, ensure_subject_without_link
 
 _FUNC_NAME = "DP-TEMPLATES"
 _NOT_FOUND_MSG = "通知範本不存在"
@@ -90,6 +90,7 @@ class TemplateAdminService:
                 站內範本（403 DP_MAIL_010）、管道唯讀（403 DP_MAIL_009）、
                 系統信停用（403 DP_MAIL_003）、佔位無法渲染（422 DP_MAIL_011）、
                 主旨含換行（422 DP_MAIL_012）、主旨含一次性連結變數（422 DP_MAIL_013）、
+                網址非本系統網域（422 DP_MAIL_014）、
                 版本衝突（409 DP_MAIL_004）。
         """
         # 授權在**查存在之前**（#534）：順序反過來的話，DM-only 管理者對 `PUT /ET/XXX` 會由
@@ -139,6 +140,8 @@ class TemplateAdminService:
         ensure_renderable(subject=data.subject, body=data.body, variables=template.variables)
         # 主旨禁用一次性連結類變數（#50）：須在 ensure_renderable 之後（理由見該函式 docstring）。
         ensure_subject_without_link(subject=data.subject, variables=template.variables)
+        # 網址僅限本系統網域（#940）：同樣須在 ensure_renderable 之後，不分模組一律套用。
+        ensure_links_same_site(subject=data.subject, body=data.body, variables=template.variables)
 
         before = _snapshot(template)
         now = utcnow()
