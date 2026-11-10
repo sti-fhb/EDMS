@@ -121,6 +121,25 @@ describe("TemplatesPage 通知範本維護（條列 + 編輯展開）", () => {
     ).toBeInTheDocument()
   })
 
+  it("後端擋下外部網址（422 DP_MAIL_014）→ 顯示可讀錯誤訊息（#940）", async () => {
+    // 前端不另做網址檢查：前端拿不到後端的 FRONTEND_BASE_URL，以瀏覽器網址判斷會與後端不一致
+    server.use(
+      http.put("/api/dp/notify/templates/:module/:code", () =>
+        HttpResponse.json(
+          { error_code: "DP_MAIL_014", error_message: "範本中的網址僅限本系統網域，請移除外部連結" },
+          { status: 422 },
+        ),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<TemplatesPage />)
+    await user.click(await screen.findByRole("button", { name: "編輯" }))
+    await user.click(await screen.findByRole("button", { name: "儲存" }))
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "確定儲存" }))
+
+    expect(await screen.findByText("範本中的網址僅限本系統網域，請移除外部連結")).toBeInTheDocument()
+  })
+
   it("編輯儲存遇版本衝突（409 DP_MAIL_004）→ 顯示錯誤訊息", async () => {
     server.use(
       http.put("/api/dp/notify/templates/:module/:code", () =>

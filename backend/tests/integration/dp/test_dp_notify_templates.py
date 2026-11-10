@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app.core.auth import create_access_token
+from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
 from app.core.operator import OperatorInfo
@@ -18,7 +19,12 @@ from app.dp.audit.models import DpAuditLog
 from app.dp.notify.admin_service import TemplateAdminService
 from app.dp.notify.models import DpNotifyTemplate
 from app.dp.notify.schemas import TemplateUpdate
-from app.dp.notify.service import declared_variable_names, ensure_renderable, ensure_subject_without_link
+from app.dp.notify.service import (
+    declared_variable_names,
+    ensure_links_same_site,
+    ensure_renderable,
+    ensure_subject_without_link,
+)
 from app.dp.users.models import DpUser
 from app.et.roles.gate import et_is_module_admin
 
@@ -461,6 +467,67 @@ async def test_主旨含一次性連結變數被擋下(db):
     assert exc.value.error_code == "DP_MAIL_013"
 
 
+async def test_DP_系統信存入外部網址被擋下(db):
+    """#940 接線：以真實種子 PWD_RESET 驗 DP 系統信套用網址檢核，且被擋下時不寫入。"""
+    row = await db.scalar(
+        select(DpNotifyTemplate).where(DpNotifyTemplate.module == "DP", DpNotifyTemplate.template_code == "PWD_RESET")
+    )
+    version, body_before = row.version, row.body
+
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module="DP",
+            template_code="PWD_RESET",
+            data=_upd(subject=row.subject, body="請點 https://evil.example.com/?r={reset_link}", version=version),
+            operator=_OP,
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.error_code == "DP_MAIL_014"
+    await db.refresh(row)
+    assert (row.version, row.body) == (version, body_before), "被擋下的內容不得寫入"
+
+
+@pytest.mark.parametrize("module", ["ET", "DM"])
+async def test_模組範本存入外部網址被擋下_本站網址可存(db, admin_gate, module):
+    """#940：ET / DM 模組範本套用同一條規則（DP 見上一條）。
+
+    ⚠️ 正向錨點不可省——若檢核把所有網址都擋掉，「外部網址被擋」也會恆真。故先驗本站網址
+    存得進去、版本前進並留稽核，再驗外部網址被擋、不寫入、不多留稽核。
+    """
+    admin_gate(et_admins=("admin01",), dm_admins=("admin01",))
+    code = f"ZT_URL_{module}"
+    await _make_template(db, module=module, code=code, version=1, subject="主旨", body="{user_name}")
+
+    own = await TemplateAdminService().update_template(
+        db,
+        module=module,
+        template_code=code,
+        data=_upd(body=f"{{user_name}} 請至 {settings.FRONTEND_BASE_URL}/x 查看", version=1),
+        operator=_OP,
+    )
+    assert own.version == 2
+    assert await _count_audit(db, f"{module}.{code}") == 1
+
+    with pytest.raises(AppError) as exc:
+        await TemplateAdminService().update_template(
+            db,
+            module=module,
+            template_code=code,
+            data=_upd(body="{user_name} 請至 https://evil.example.com 查看", version=2),
+            operator=_OP,
+        )
+
+    assert exc.value.error_code == "DP_MAIL_014"
+    row = await db.scalar(
+        select(DpNotifyTemplate).where(DpNotifyTemplate.module == module, DpNotifyTemplate.template_code == code)
+    )
+    assert row.version == 2, "版本不得被 bump"
+    assert "evil" not in row.body, "被擋下的內容不得寫入"
+    assert await _count_audit(db, f"{module}.{code}") == 1, "被擋下的請求不得留稽核"
+
+
 async def test_既有範本全數通過新檢核(db):
     """**所有** seed 範本都必須過得了 `ensure_renderable`（#534）。
 
@@ -496,6 +563,8 @@ async def test_既有範本全數通過新檢核(db):
             ensure_renderable(subject=subject, body=body, variables=variables)
             # #50：主旨禁用一次性連結變數。SA 裁示時確認種子主旨不含；此處對全庫實測釘住。
             ensure_subject_without_link(subject=subject, variables=variables)
+            # #940：網址僅限本系統網域。種子只用連結變數、不含字面網址；此處對全庫實測釘住。
+            ensure_links_same_site(subject=subject, body=body, variables=variables)
         except AppError:
             bad.append(f"{module}/{code}（VARIABLES={variables!r}）")
     assert bad == [], "下列既有範本過不了新檢核，管理者將無法編輯它們：\n  " + "\n  ".join(bad)
