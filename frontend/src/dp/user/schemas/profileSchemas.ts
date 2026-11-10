@@ -1,11 +1,17 @@
 import { z } from "zod"
+import { containsLink, NAME_LINK_MESSAGE } from "../../../utils/linkDetect"
 
 // 密碼字元類型（大寫 / 小寫 / 數字 / 特殊符號），對齊後端 password_policy 複雜度判定。
 const CHAR_CLASSES = [/[a-z]/, /[A-Z]/, /\d/, /[^a-zA-Z0-9\s]/]
 
 /** 姓名變更表單驗證（US8），對齊後端 `NameUpdate`（DP_USER.USER_NAME 長度 50）。 */
 export const NameSchema = z.object({
-  user_name: z.string().trim().min(1, { message: "請輸入姓名" }).max(50, { message: "姓名不可超過 50 字" }),
+  user_name: z
+    .string()
+    .trim()
+    .min(1, { message: "請輸入姓名" })
+    .max(50, { message: "姓名不可超過 50 字" })
+    .refine((v) => !containsLink(v), { message: NAME_LINK_MESSAGE }),
 })
 
 /** Email 變更表單驗證（US8），對齊後端 `EmailChangeRequest`；唯一性由後端權威檢核。 */

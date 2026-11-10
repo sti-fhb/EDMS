@@ -10,7 +10,9 @@ Unicode 特殊字元（如土耳其文 `İ`）之小寫規則可能與 Postgres 
 
 from typing import Annotated
 
-from pydantic import BeforeValidator, StringConstraints
+from pydantic import AfterValidator, BeforeValidator, StringConstraints
+
+from app.core.link_scan import contains_link
 
 # 輕量 email 格式（同 US1/US2 既有 regex；大小寫無關，正規化前後皆適用）
 _EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -48,8 +50,9 @@ LoginEmailStr = Annotated[
 # 與信件結構無關，且部分書寫系統的正常姓名會用到格式字元，一併擋會誤傷真人姓名。
 #
 # ⚠️ 本型別**不**消除信件內文注入，只降低其保真度：姓名長度上限 50，攻擊者仍可放入同一行的
-# 完整句子（範本內文首行為 `{user_name} 您好：`，故「帳號異常請立即至 http://evil.tw 重設密碼」
-# 會渲染成一句看似系統訊息的文字）。真正要消除需改範本設計或不回顯使用者自填姓名，屬產品決策。
+# 完整句子（範本內文首行為 `{user_name} 您好：`）。#942 起姓名不得含網址（見 `_reject_link`），
+# 「帳號異常請立即至 http://evil.tw 重設密碼」會被擋，但不含網址的純文字（如「帳號異常請洽 0800…」）
+# 仍可寫入。真正要消除需改範本設計或不回顯使用者自填姓名，屬產品決策。
 #
 # 順序：pydantic 先 strip 再驗 pattern（已實測），故前後空白（含換行）維持既有的 strip 行為，
 # 只有**內部**的控制字元會被拒。
@@ -66,11 +69,27 @@ _UNSAFE_LINE_CHARS = r"\x00-\x1f\x7f-\x9f\u2028\u2029"
 
 SAFE_SINGLE_LINE_PATTERN = rf"^[^{_UNSAFE_LINE_CHARS}]+$"
 
-# 姓名進入點（自助註冊 / 本人改姓名 / 管理者代建與維護）：strip + 長度 + 拒控制字元。
+
+def _reject_link(value: str) -> str:
+    """姓名不得含網址（#942）；含則拋 `ValueError`，由 FastAPI 轉 422。
+
+    上方註解所說「姓名可放入同一行的完整句子」的那句話，殺傷力來自其中的網址：自助註冊與
+    Email 變更可指定任意收件信箱，姓名中的網址會以正式寄件人寄到他人信箱，郵件軟體還會轉成
+    可點連結。姓名沒有放網址的正當需求，故一律拒絕、不區分是否指向本系統。網址的認定與通知
+    範本檢核（#940）共用 `app.core.link_scan`。
+    """
+    if contains_link(value):
+        raise ValueError("姓名不得包含網址")
+    return value
+
+
+# 姓名進入點（自助註冊 / 本人改姓名 / 管理者代建與維護）：strip + 長度 + 拒控制字元 + 拒網址。
 # 長度 50 對齊 `DP_USER.USER_NAME`。管理者輸入的姓名同樣會進邀請信內文，故不因「已認證」而放寬。
+# 網址檢核掛在 `StringConstraints` 之後，檢查的是 strip 過、已通過長度與控制字元檢核的值。
 SafeNameStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=SAFE_SINGLE_LINE_PATTERN),
+    AfterValidator(_reject_link),
 ]
 
 # ── multipart（`Form()`）欄位專用：允許空值的單行 pattern 與「先 strip」的前置驗證 ──────────

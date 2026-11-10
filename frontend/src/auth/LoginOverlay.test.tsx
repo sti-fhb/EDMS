@@ -204,6 +204,22 @@ describe("LoginOverlay", () => {
     expect(screen.getByRole("button", { name: "建立帳號" })).toBeInTheDocument()
   })
 
+  it("姓名含網址 → 前端 Zod 擋下、不送出（#942）", async () => {
+    let posted = false
+    server.use(
+      http.post("/api/register", () => {
+        posted = true
+        return HttpResponse.json({ message: "ok", retry_after: 600 }, { status: 202 })
+      }),
+    )
+    renderLogin()
+    const user = userEvent.setup()
+    await fillRegister(user, { user_name: "請至 https://evil.example.com 處理" })
+    expect(await screen.findByText("姓名不得包含網址")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "建立帳號" })).toBeInTheDocument()
+    expect(posted).toBe(false)
+  })
+
   it("忘記密碼 → 送出後顯示統一提示（防列舉）", async () => {
     renderLogin()
     const user = userEvent.setup()

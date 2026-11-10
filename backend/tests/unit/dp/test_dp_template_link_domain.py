@@ -63,8 +63,8 @@ def _check(*, subject: str = "主旨", body: str = "內文", variables: str | No
         "ｈｔｔｐｓ://evil.example.com/x",  # 全形協定
         f"https://{_HOST}。evil.example.com/x",  # 瀏覽器把 U+3002 當成 .，主機被接長
         f"https://{_HOST}．evil．example．com/x",  # 全形句點
-        f"https://{_HOST}­evil.example.com/x",  # 軟連字號會被瀏覽器刪掉
-        f"https://{_HOST}​.evil.example.com/x",  # 零寬空白
+        f"https://{_HOST}\u00adevil.example.com/x",  # 軟連字號會被瀏覽器刪掉
+        f"https://{_HOST}\u200b.evil.example.com/x",  # 零寬空白
         f"https://{_HOST}{{user_name}}/x",  # 變數緊貼主機：寄送時代入值可把主機接長
         f"//{_HOST}{{user_name}}/x",
         f"[https://{_HOST}](https://evil.example.com)",  # 解析器會拋錯的寫法：應 422，不是 500
@@ -80,6 +80,15 @@ def test_body_with_external_url_rejected(body):
     # 訊息不嵌入動態值（sti-error-codes）：不得回顯網址或主機
     assert "evil" not in exc.value.detail
     assert _HOST not in exc.value.detail
+
+
+def test_unc_path_rejected():
+    """UNC 路徑一律不是本站網址（#942）：Outlook 會轉成 file: 連結並以 SMB 連線。"""
+    bs = chr(92)
+    for body in (f"{bs}{bs}evil.example.com{bs}share", f"{bs}{bs}{_HOST}{bs}share"):
+        with pytest.raises(AppError) as exc:
+            _check(body=body)
+        assert exc.value.error_code == "DP_MAIL_014"
 
 
 def test_subject_with_external_url_rejected():
