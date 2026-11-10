@@ -32,6 +32,7 @@
 
 | 主題 | 檔案 |
 |------|------|
+| 架構硬性約束（部署設定界線） | `.claude/rules/sti-architecture-constraints.md` |
 | 命名慣例（檔案 / 函式 / class / DB） | `.claude/rules/sti-naming-conventions.md` |
 | 程式碼風格（immutability、安全、註解） | `.claude/rules/sti-coding-style.md` |
 | API 路徑與目錄結構 | `.claude/rules/sti-api-routes.md` |
