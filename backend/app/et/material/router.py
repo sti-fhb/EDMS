@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import JwtPayload, get_jwt_payload
 from app.core.db import get_db
 from app.core.operator import OperatorInfo, get_operator
 from app.core.upload_form_limits import LimitedFormRoute
@@ -114,6 +115,7 @@ async def upload_material_video(
     material_id: Annotated[int, Path(ge=-MAX_BIGINT, le=MAX_BIGINT)],  # 負數＝暫存新增（#631）
     file: UploadFile = File(...),
     operator: OperatorInfo = Depends(get_operator),
+    payload: JwtPayload = Depends(get_jwt_payload),
     db: AsyncSession = Depends(get_db),
 ) -> VideoRow:
     """上傳教材影片（multipart，**分塊串流寫檔**）。
@@ -121,5 +123,9 @@ async def upload_material_video(
     單檔上限取自 `DP_PARAM.ET_VIDEO_MAX_SIZE_MB`（預設 500 MB），格式取自
     `ET_VIDEO_ALLOWED_FORMATS`。長度以 `ffprobe` 解析，**取不到不存檔**
     （`ET_MATERIAL_004`）——覆蓋率的分母缺了它，章節永遠無法解鎖。
+
+    另注入 `payload` 只為取 `auth_time` 供串流寫檔後的重驗比對密碼變更時點（#941）；
+    `OperatorInfo` 只帶 `user_id`，不含登入時間。FastAPI 的 dependency 於同一請求內有快取，
+    與 `get_operator` 內部的 `get_jwt_payload` 是同一次執行，不會重複認證。
     """
-    return await _service.upload_video(db, material_id, file, operator=operator)
+    return await _service.upload_video(db, material_id, file, operator=operator, auth_time=payload.auth_time)

@@ -1,17 +1,19 @@
 """US8 個人資料維護整合測試：姓名 / 密碼變更（驗舊 / 複雜度特權 12 / 重複性 / 清 MUST_CHANGE / 稽核）、
 Email 延遲切換（唯一 / token 寄新信箱 / 舊仍有效 / 驗證切換 / 逾時作廢）、速率限制、公開密碼政策。"""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select, update
 
-from app.core.auth import create_access_token
+from app.core.auth import create_access_token, get_jwt_payload
 from app.core.exceptions import AppError
 from app.core.module_admin import module_admin_gate
 from app.core.password_policy import hash_password, verify_password
 from app.core.utils import utcnow
 from app.dp.audit.models import DpAuditLog
+from app.dp.user import profile_service as profile_service_module
 from app.dp.user.email_change_service import EmailChangeService
 from app.dp.user.models import DpPwdHistory, DpPwdReset
 from app.dp.user.profile_service import ProfileService
@@ -22,6 +24,10 @@ pytestmark = pytest.mark.integration
 
 _GOOD_PWD = "Abcd1234"
 _NEW_PWD = "Xyz98765!"
+
+
+def _creds(token: str) -> HTTPAuthorizationCredentials:
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
 async def _make_user(db, *, user_id="pf", email="pf@edms.local", must_change=False, pwd=_GOOD_PWD):
@@ -94,6 +100,69 @@ async def test_change_password_success(db):
     assert user.must_change_pwd is False  # 強制變更旗標已清（AC / FR-08 收尾）
     hist = (await db.execute(select(DpPwdHistory).where(DpPwdHistory.user_id == "cp"))).scalars().all()
     assert any(verify_password(_NEW_PWD, h.pwd_hash) for h in hist)
+
+
+async def test_change_password_invalidates_tokens_issued_before(db):
+    """變更密碼後，變更前簽發的 token 立即失效；之後登入取得的仍正常（#941）。
+
+    這條驗的是**因果鏈的終點**：`test_dp_auth_middleware` 那幾條手動設 `PWD_CHANGED_DATE`
+    來驗閘門，證明不了「`change_password` 這個動作真的會推進該欄位」。少了本條，
+    把 `update_password` 的 `pwd_changed_date` 拿掉也不會有任何測試變紅。
+
+    ⚠️ 舊 token 的 `auth_time` 刻意取明確早於變更時點的值，**不可用當下簽發**：
+    判定以整秒比較，同一秒內完成「簽發 → 改密碼」時 floor 後相等而不被拒。
+    """
+    await _make_user(db, user_id="cpinv", email="cpinv@edms.local")  # pwd_changed_date = 昨天
+    old_token = create_access_token(sub="cpinv", ttl_minutes=15, auth_time=utcnow() - timedelta(minutes=5))
+
+    # 前置：改密碼之前這張 token 是好的——少了它，下面的 401 可能根本與密碼變更無關
+    payload = await get_jwt_payload(credentials=_creds(old_token), db=db)
+    assert payload.sub == "cpinv"
+
+    await ProfileService().change_password(
+        db, user_id="cpinv", old_password=_GOOD_PWD, new_password=_NEW_PWD, confirm_password=_NEW_PWD
+    )
+
+    with pytest.raises(AppError) as exc:
+        await get_jwt_payload(credentials=_creds(old_token), db=db)
+    assert exc.value.status_code == 401
+    assert exc.value.error_code == "DP_AUTH_002"
+
+    # 變更後才簽發的 token 照常可用（否則使用者改完密碼就再也登不進來）
+    new_payload = await get_jwt_payload(credentials=_creds(create_access_token(sub="cpinv", ttl_minutes=15)), db=db)
+    assert new_payload.sub == "cpinv"
+
+
+async def test_pwd_changed_date_taken_after_hashing(db, monkeypatch):
+    """`PWD_CHANGED_DATE` 必須取在雜湊**之後**，不得沿用函式開頭的時間（#941）。
+
+    它是「變更前簽發的 token 一律失效」的判定基準。函式開頭到寫入之間要跑 verify、
+    三次 DB 往返與 `is_reused`（`HISTORY_COUNT` 上限 24 ⇒ 最長約 4.4 秒）——沿用開頭的值
+    會讓這幾秒內以舊密碼登入取得的 token 在變更後仍然有效，直接抵銷本功能。
+
+    🥇 判準取「雜湊被呼叫的時點」而非固定秒數：不依賴機器快慢、不需 sleep，而沿用開頭
+    時間的實作必然早於它（中間隔著 verify 與多次查詢），因此一定紅。
+    """
+    await _make_user(db, user_id="cpts", email="cpts@edms.local")
+
+    hash_called_at: list[datetime] = []
+    real_hash = profile_service_module.hash_password_async
+
+    async def spy_hash(password: str) -> str:
+        hash_called_at.append(utcnow())
+        return await real_hash(password)
+
+    monkeypatch.setattr(profile_service_module, "hash_password_async", spy_hash)
+
+    await ProfileService().change_password(
+        db, user_id="cpts", old_password=_GOOD_PWD, new_password=_NEW_PWD, confirm_password=_NEW_PWD
+    )
+
+    assert hash_called_at, "前置：雜湊確實被呼叫過"
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "cpts"))).scalar_one()
+    assert user.pwd_changed_date >= hash_called_at[0], (
+        "PWD_CHANGED_DATE 早於雜湊開始，代表沿用了函式開頭的時間，變更期間的舊密碼登入會存活"
+    )
 
 
 async def test_change_password_wrong_old(db):

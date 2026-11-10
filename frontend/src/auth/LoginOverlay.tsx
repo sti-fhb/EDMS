@@ -32,6 +32,15 @@ const SESSION_END_MESSAGE: Record<SessionEndReason, string> = {
   IDLE: "閒置逾時已自動登出，請重新登入",
   DISABLED: "帳號已停用，請洽管理者",
   LOCKED: "帳號已鎖定，請洽管理者或稍後再試",
+  PWD_CHANGED: "密碼已更新，請以新密碼重新登入", // DP-MSG-DP10-007（#941）
+}
+
+/** 只有「密碼已更新」是使用者自己完成的動作，其餘都是被動中斷。 */
+const SESSION_END_SEVERITY: Record<SessionEndReason, "info" | "warning" | "success"> = {
+  IDLE: "info",
+  DISABLED: "warning",
+  LOCKED: "warning",
+  PWD_CHANGED: "success",
 }
 
 /**
@@ -147,7 +156,7 @@ export function LoginOverlay() {
             {tab === "login" ? (
               <>
                 {sessionEndedReason !== null && errorMessage === null && (
-                  <Alert severity={sessionEndedReason === "IDLE" ? "info" : "warning"} sx={{ mb: 2 }}>
+                  <Alert severity={SESSION_END_SEVERITY[sessionEndedReason]} sx={{ mb: 2 }}>
                     {SESSION_END_MESSAGE[sessionEndedReason]}
                   </Alert>
                 )}

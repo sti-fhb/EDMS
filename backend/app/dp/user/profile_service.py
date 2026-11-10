@@ -120,7 +120,14 @@ class ProfileService:
             raise AppError(status_code=422, detail="不可與最近使用過之密碼相同", error_code="DP_PWD_003")
 
         new_hash = await hash_password_async(new_password)
-        await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user_id, now=now)
+        # ⚠️ `PWD_CHANGED_DATE` 取**寫入前**的時間，不沿用函式開頭的 `now`（#941 security review）：
+        # 它是「變更前簽發的 token 一律失效」的判定基準，而開頭到這裡之間要跑 verify（~185ms）、
+        # 三次 DB 往返與 is_reused（`HISTORY_COUNT` 上限 24 ⇒ 最長約 4.4 秒，見 password_hashing
+        # 檔頭）。沿用開頭的值，等於讓「這幾秒內以舊密碼登入」取得的 token 在變更後仍然有效
+        # ——而本功能的用途正是在對方已知密碼時把他踢掉，那個窗口會直接抵銷它。
+        # 稽核與歷程仍用 `now`：它們記的是「這次操作何時發生」，不是失效基準。
+        pwd_changed_at = utcnow()
+        await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user_id, now=pwd_changed_at)
         seq_no = await self._repo.next_pwd_seq_no(db, user_id)
         await self._repo.add_pwd_history(
             db, user_id=user_id, seq_no=seq_no, pwd_hash=new_hash, operator_id=user_id, now=now

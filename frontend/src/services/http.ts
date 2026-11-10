@@ -15,11 +15,16 @@ export function setAuthToken(token: string | null): void {
 }
 
 /**
- * 被動登出的原因——交由 `AuthProvider` 轉成登入畫面的提示文案（#741）。
+ * 工作階段結束的原因——交由 `AuthProvider` 轉成登入畫面的提示文案（#741）。
  *
  * `IDLE` 涵蓋 401 的全部情形（憑證無效 / 逾時 / 換發逾限），沿用原本的「閒置逾時」文案。
+ *
+ * ⚠️ `PWD_CHANGED` **不由 interceptor 產生**：它是使用者自己改完密碼後由元件主動觸發的
+ * （#941）。其餘成員才是後端回應映射而來，見 `ACCOUNT_BLOCKED_CODES` 與 401 分支。
+ * 自己改密碼時刻意不走 401 那條：舊 token 確實已失效，但若等某個背景請求撞上 401，
+ * 畫面會顯示「閒置逾時」而不是「密碼已更新」。
  */
-export type SessionEndReason = "IDLE" | "DISABLED" | "LOCKED"
+export type SessionEndReason = "IDLE" | "DISABLED" | "LOCKED" | "PWD_CHANGED"
 
 /**
  * 🔴 **會觸發自動登出的 403 只有這兩個** —— 它們代表「帳號本身不能再用」，與

@@ -19,12 +19,15 @@
 """
 
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select, update
 
+from app.core.auth import create_access_token
 from app.core.config import settings
+from app.core.utils import utcnow
 from app.dp.users.models import DpUser
 from app.et.constants import ITEM_MATERIAL
 from app.et.course.models import EtCourse, EtCourseContentStage
@@ -255,6 +258,28 @@ async def _disable_account(db, uid: str) -> None:
     )
 
 
+# 🥇 三個時點必須錯開，否則測不出「有沒有把 token 的 auth_time 傳進去」：
+#
+#   帳號原本的 pwd_changed_date ── token 的 auth_time ── 上傳期間改密碼 ── 重驗當下
+#        now-30m                      now-10m              now-5m          now
+#
+# 正確實作比的是 auth_time（now-10m < now-5m → 擋下）；若改成比 `utcnow()`
+# （now < now-5m → 不擋）測試就會紅。**第一版把變更時點設成未來（now+5s），
+# 兩種實作都會擋下、全綠，等於沒測到**——變異檢查當場抓到。
+_TOKEN_AGE = timedelta(minutes=10)
+_PWD_CHANGED_AGE = timedelta(minutes=5)
+_ACCOUNT_PWD_AGE = timedelta(minutes=30)
+
+
+async def _set_pwd_changed(db, uid: str, ago: timedelta) -> None:
+    await db.execute(
+        update(DpUser)
+        .where(DpUser.user_id == uid)
+        .values(pwd_changed_date=utcnow() - ago)
+        .execution_options(synchronize_session=False)
+    )
+
+
 async def _revoke_teacher(db, uid: str) -> None:
     await db.execute(
         update(EtUserRole)
@@ -296,6 +321,44 @@ async def test_上傳期間帳號停用或角色被撤_第3段擋下並刪檔(
             select(func.count()).select_from(EtMaterialVideo).where(EtMaterialVideo.material_id == ids["material_id"])
         )
         assert videos == 0
+
+
+async def test_上傳期間密碼被變更_第3段擋下並刪檔(client, db, promoted, during_probe) -> None:
+    """#941：密碼變更使變更前簽發的 token 失效，第 3 段的重驗一併比對密碼變更時點。
+
+    與上一條同一個空窗（串流寫檔 + `ffprobe`，上限 30 秒），差別只在失效的原因與狀態碼：
+    停用 / 撤角色是 403，token 失效是 **401**（與其他無效 token 同一個 `DP_AUTH_002`，
+    不替拿著舊 token 的一方指出「密碼剛被改過」）。
+
+    ⚠️ 本條**不在上一條的 parametrize 內**：那組斷言寫死 403，混進去會逼它改成也吃 401，
+    反而讓「停用該回 403」失去守門。
+    """
+    uid = await _user(db, "ZT_UPR17")
+    ids = await _course_with_content(client, db, uid)
+
+    # 帳號原本的變更時點要早於 token 的 auth_time，否則請求開頭的 dependency 就先擋下，
+    # 根本走不到第 3 段——那樣測的是另一道閘。
+    await _set_pwd_changed(db, uid, _ACCOUNT_PWD_AGE)
+    old_token = create_access_token(sub=uid, ttl_minutes=15, auth_time=utcnow() - _TOKEN_AGE)
+
+    # 留住請求開頭載入的實體：理由同上一條（identity map 是弱參照，沒人留著就看不出讀到舊物件）
+    pinned = [await db.get(DpUser, uid), await db.get(EtCourse, ids["course_id"])]
+    during_probe(lambda: _set_pwd_changed(db, uid, _PWD_CHANGED_AGE))
+    r = await client.post(
+        f"/api/et/materials/{ids['material_id']}/videos",
+        files={"file": ("lesson.mp4", _FIXTURE.read_bytes(), "video/mp4")},
+        headers={"Authorization": f"Bearer {old_token}"},
+    )
+    assert all(p is not None for p in pinned)
+
+    assert r.status_code == 401, r.text
+    assert r.json()["error_code"] == "DP_AUTH_002"
+    assert len(promoted) == 1, "前置：檔案確實搬到過正式路徑"
+    assert not Path(promoted[0]).exists(), "第 3 段擋下後，正式路徑的檔必須刪掉"
+    videos = await db.scalar(
+        select(func.count()).select_from(EtMaterialVideo).where(EtMaterialVideo.material_id == ids["material_id"])
+    )
+    assert videos == 0
 
 
 @pytest.mark.parametrize("published", [False, True], ids=["草稿課程", "已發布課程（暫存模式）"])

@@ -1,11 +1,16 @@
 """JWT 基礎（T013）純單元測試：簽發 / 解碼 / TTL / 換發上限（不連 DB）。"""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import jwt
 import pytest
 
-from app.core.auth import create_access_token, decode_access_token, renew_access_token
+from app.core.auth import (
+    create_access_token,
+    decode_access_token,
+    renew_access_token,
+    token_issued_before_password_change,
+)
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.utils import utcnow
@@ -130,3 +135,36 @@ def test_renew_rejects_invalid_token():
     with pytest.raises(AppError) as exc:
         renew_access_token(expired, ttl_minutes=15, renew_max_hours=8)
     assert exc.value.error_code == "DP_AUTH_002"
+
+
+class TestTokenIssuedBeforePasswordChange:
+    """密碼變更後使變更前簽發之 token 失效的判定（#941）。
+
+    `auth_time` 由 epoch **整數秒**還原（`_epoch_to_dt`），微秒恆為 0；
+    `PWD_CHANGED_DATE` 為 `TIMESTAMPTZ`、帶微秒。兩者直接比會把「同一秒內改完密碼又登入」
+    的新 token 誤判成舊的，故比較前須把 `pwd_changed_date` 取整秒。
+    """
+
+    def test_早於變更時間者為舊_token(self):
+        changed = datetime(2026, 11, 10, 8, 0, 1, 500000, tzinfo=timezone.utc)
+        auth_time = datetime(2026, 11, 10, 8, 0, 0, tzinfo=timezone.utc)
+        assert token_issued_before_password_change(auth_time, changed) is True
+
+    def test_晚於變更時間者不是舊_token(self):
+        changed = datetime(2026, 11, 10, 8, 0, 1, 500000, tzinfo=timezone.utc)
+        auth_time = datetime(2026, 11, 10, 8, 0, 2, tzinfo=timezone.utc)
+        assert token_issued_before_password_change(auth_time, changed) is False
+
+    # 🥇 本組唯一抓得到「忘了取整秒」的案例。直接比 datetime 時
+    # 08:00:01.000000 < 08:00:01.500000 成立 → 剛登入的新 token 會被誤拒而無限登出迴圈；
+    # 取整秒後兩者相等、不成立。上面兩條在有沒有取整秒時答案都一樣，證明不了這件事。
+    def test_同一秒內改完密碼又登入者不得被誤拒(self):
+        changed = datetime(2026, 11, 10, 8, 0, 1, 500000, tzinfo=timezone.utc)
+        auth_time = datetime(2026, 11, 10, 8, 0, 1, tzinfo=timezone.utc)
+        assert token_issued_before_password_change(auth_time, changed) is False
+
+    def test_變更時間本身無微秒時邊界仍正確(self):
+        changed = datetime(2026, 11, 10, 8, 0, 1, tzinfo=timezone.utc)
+        assert token_issued_before_password_change(changed - timedelta(seconds=1), changed) is True
+        assert token_issued_before_password_change(changed, changed) is False
+        assert token_issued_before_password_change(changed + timedelta(seconds=1), changed) is False

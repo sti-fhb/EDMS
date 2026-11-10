@@ -31,11 +31,13 @@ const EXPIRY_CHECK_MS = 15 * 1000
 const RENEW_INTERVAL_MS = 4 * 60 * 1000
 
 function Harness() {
-  const { isAuthenticated, sessionEndedReason } = useAuth()
+  const { isAuthenticated, sessionEndedReason, endSessionAfterPasswordChange } = useAuth()
   return (
     <>
       <div data-testid="status">{isAuthenticated ? "authed" : "anon"}</div>
       <div data-testid="reason">{sessionEndedReason ?? "none"}</div>
+      {/* 代替 ChangePasswordDialog / ForceChangePasswordShell 的觸發點（#941） */}
+      <button onClick={endSessionAfterPasswordChange}>模擬密碼變更完成</button>
       {!isAuthenticated && <LoginOverlay />}
     </>
   )
@@ -137,6 +139,49 @@ describe("AuthProvider 自動登出", () => {
     })
     expect(screen.getByTestId("status")).toHaveTextContent("anon")
     expect(screen.getByTestId("reason")).toHaveTextContent("IDLE")
+  })
+
+  it("換發在途時改完密碼 → 晚到的換發回應不得把工作階段救回來（#941）", async () => {
+    // 🔴 失敗方向已由 `http.ts` 的 `if (authToken …)` 擋住（token 清掉後在途 401 不再觸發
+    // 被動登出），**成功方向沒有那道閘**：晚到的 renew 回應會 applyToken 把 token 寫回去，
+    // 而換發沿用原 `auth_time`、後端在密碼變更後已判定它失效。畫面於是假裝還登入著，
+    // 下一個請求才 401 並顯示「閒置逾時」——正是本 issue 要避免的那個結果。
+    let releaseRenew: (() => void) | null = null
+    server.use(
+      msw.post("/api/dp/user/renew", async () => {
+        await new Promise<void>((resolve) => {
+          releaseRenew = resolve
+        })
+        return HttpResponse.json({ access_token: "renewed-token", expires_in: EXPIRES_IN_SEC })
+      }),
+    )
+
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] })
+    renderAuth()
+    await login()
+
+    // 製造一次操作，讓下一個換發 tick 成立
+    await act(async () => {
+      vi.advanceTimersByTime(100 * 1000)
+    })
+    fireEvent.mouseDown(document.body)
+    await act(async () => {
+      vi.advanceTimersByTime(RENEW_INTERVAL_MS - 100 * 1000)
+    })
+    expect(releaseRenew).not.toBeNull() // 前置：換發確實送出且仍在途
+
+    // 換發還沒回來，使用者就完成了密碼變更
+    fireEvent.click(screen.getByRole("button", { name: "模擬密碼變更完成" }))
+    expect(screen.getByTestId("status")).toHaveTextContent("anon")
+
+    // 換發這時才回來
+    await act(async () => {
+      releaseRenew?.()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId("status")).toHaveTextContent("anon")
+    expect(screen.getByTestId("reason")).toHaveTextContent("PWD_CHANGED")
   })
 
   it("使用中被管理者停用（403 DP_AUTH_004）→ 下一次請求即回登入畫面並提示已停用", async () => {

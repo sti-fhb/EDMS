@@ -11,14 +11,14 @@ import type { FormEvent } from "react"
 
 import { profileApi } from "./profileService"
 import { makeChangePasswordSchema } from "./schemas/profileSchemas"
-import { useNotification } from "../../contexts/NotificationContext"
+import { useAuth } from "../../auth/useAuth"
 import { usePasswordPolicy } from "../../hooks/usePasswordPolicy"
 import { toApiError } from "../../services/http"
 import { getFieldErrors } from "../../utils/zodUtils"
 
 /** 變更密碼對話框（US8）：舊 + 新 + 確認；提示依 PWD_POLICY 動態渲染；後端權威檢核複雜度 / 重複性。 */
 export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { message } = useNotification()
+  const { endSessionAfterPasswordChange } = useAuth()
   const { policy, hint } = usePasswordPolicy({ kind: "self" })
   const [oldPassword, setOldPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -55,8 +55,11 @@ export function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose
     setSubmitting(true)
     try {
       await profileApi.changePassword(parsed.data)
-      message.success("密碼已更新")
       handleClose()
+      // #941：變更當下舊 token 已失效（後端以 PWD_CHANGED_DATE 判定），清掉本機工作階段
+      // 回到登入頁。⛔ 不在此處 message.success：導頁後 Snackbar 會隨即消失，
+      // 「密碼已更新」改由登入畫面的 Alert 承接（DP-MSG-DP10-007）。
+      endSessionAfterPasswordChange()
     } catch (err) {
       setApiError(toApiError(err).errorMessage)
     } finally {

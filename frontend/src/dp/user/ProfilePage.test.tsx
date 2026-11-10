@@ -4,13 +4,59 @@ import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 
 import { ProfilePage } from "./ProfilePage"
+import { AuthProvider } from "../../auth/AuthProvider"
+import { LoginOverlay } from "../../auth/LoginOverlay"
+import { useAuth } from "../../auth/useAuth"
 import { renderWithProviders } from "../../test/renderWithProviders"
 import { server } from "../../test/server"
+
+/**
+ * 需包 `AuthProvider`：`ChangePasswordDialog` 於變更成功後要結束本機工作階段（#941），
+ * 用的是 `useAuth()`。共用的 `renderWithProviders` 刻意不含它（多數頁面用不到），
+ * 故在本檔包一層，而非去改那支被 60 多個測試檔共用的 helper。
+ */
+function renderProfile() {
+  return renderWithProviders(
+    <AuthProvider>
+      <ProfilePage />
+    </AuthProvider>,
+  )
+}
+
+/**
+ * 驗「變更後回到登入頁」用這一組：比照 `RootLayout`，未登入即改渲染 `LoginOverlay`，
+ * 於是登出與提示文案都從使用者看得到的畫面去斷言。其餘測試用上面的 `renderProfile`
+ * 即可——它們不關心登入狀態，硬要先登入只是增加噪音。
+ */
+function ProfileHarness() {
+  const { isAuthenticated } = useAuth()
+  return (
+    <>
+      <div data-testid="status">{isAuthenticated ? "authed" : "anon"}</div>
+      {isAuthenticated ? <ProfilePage /> : <LoginOverlay />}
+    </>
+  )
+}
+
+function renderProfileWithOverlay() {
+  return renderWithProviders(
+    <AuthProvider>
+      <ProfileHarness />
+    </AuthProvider>,
+  )
+}
+
+async function login(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("帳號（Email）"), "u@edms.local")
+  await user.type(screen.getByLabelText("密碼"), "Abcd1234")
+  await user.click(screen.getByRole("button", { name: "登入" }))
+  await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authed"))
+}
 
 describe("ProfilePage 個人資料維護", () => {
   it("載入後帶入現值，姓名可更新並提示成功", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
 
     const nameInput = await screen.findByDisplayValue("測試員")
     await user.clear(nameInput)
@@ -22,7 +68,7 @@ describe("ProfilePage 個人資料維護", () => {
 
   it("目前帳號唯讀、送出新 Email 後提示驗證信已寄", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
 
     expect(await screen.findByDisplayValue("me@example.com")).toBeDisabled()
     await user.type(screen.getByLabelText("變更為新 Email"), "new@example.com")
@@ -40,7 +86,7 @@ describe("ProfilePage 個人資料維護", () => {
       ),
     )
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
     const emailInput = await screen.findByLabelText("變更為新 Email")
     await user.type(emailInput, "taken@example.com")
     await user.click(screen.getByRole("button", { name: "寄驗證信" }))
@@ -61,7 +107,7 @@ describe("ProfilePage 個人資料維護", () => {
         }),
       ),
     )
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
     expect(await screen.findByText(/變更審核中：pending@example.com/)).toBeInTheDocument()
   })
 
@@ -78,7 +124,7 @@ describe("ProfilePage 個人資料維護", () => {
       }),
     )
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
 
     await screen.findByDisplayValue("me@example.com")
     expect(screen.queryByText(/變更審核中/)).not.toBeInTheDocument()
@@ -91,9 +137,10 @@ describe("ProfilePage 個人資料維護", () => {
     expect(await screen.findByText(/變更審核中：again@example.com/)).toBeInTheDocument()
   })
 
-  it("變更密碼對話框：填舊 / 新 / 確認送出 → 成功提示", async () => {
+  it("變更密碼成功 → 回到登入頁並提示密碼已更新，不顯示閒置逾時（#941）", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfileWithOverlay()
+    await login(user)
 
     await user.click(await screen.findByRole("button", { name: "變更密碼" }))
     await user.type(screen.getByLabelText("舊密碼"), "Abcd1234")
@@ -101,7 +148,11 @@ describe("ProfilePage 個人資料維護", () => {
     await user.type(screen.getByLabelText("確認新密碼"), "Xyz98765!")
     await user.click(screen.getByRole("button", { name: "儲存" }))
 
-    expect(await screen.findByText("密碼已更新")).toBeInTheDocument()
+    // 變更當下舊 token 即失效，留在原頁的話下一個請求就會 401
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anon"))
+    expect(await screen.findByText("密碼已更新，請以新密碼重新登入")).toBeInTheDocument()
+    // ⛔ 不得顯示「閒置逾時」：那是被動登出的文案，改成呼叫 /dp/user/logout 就會變成它
+    expect(screen.queryByText(/閒置逾時/)).not.toBeInTheDocument()
   })
 
   it("管理者（#623）：提示與前端檢核依本人適用門檻 12 字元，9 字元被擋下、不送出", async () => {
@@ -114,7 +165,7 @@ describe("ProfilePage 個人資料維護", () => {
       }),
     )
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
 
     await user.click(await screen.findByRole("button", { name: "變更密碼" }))
     // 公開政策端點仍回一般門檻 8：提示若出現 12，代表確實改讀本人適用的門檻
@@ -130,7 +181,7 @@ describe("ProfilePage 個人資料維護", () => {
 
   it("變更密碼：兩次不一致 → 前端擋下顯示錯誤", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<ProfilePage />)
+    renderProfile()
 
     await user.click(await screen.findByRole("button", { name: "變更密碼" }))
     await user.type(screen.getByLabelText("舊密碼"), "Abcd1234")

@@ -12,6 +12,8 @@
 `app/et/common/dm_client.get_dm_document_client()` 取得），不得 `from app.dm`。
 """
 
+from datetime import datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import ensure_user_active
@@ -332,7 +334,9 @@ class EtMaterialService:
         formats = frozenset(f.strip().lower().lstrip(".") for f in formats_raw.split(",") if f.strip())
         return max_size_mb, (formats or frozenset(_DEFAULT_FORMATS.split(",")))
 
-    async def upload_video(self, db: AsyncSession, material_id: int, upload, *, operator: OperatorInfo) -> VideoRow:
+    async def upload_video(
+        self, db: AsyncSession, material_id: int, upload, *, operator: OperatorInfo, auth_time: datetime
+    ) -> VideoRow:
         """上傳一支教材影片。
 
         ## 為何上傳是即時的、而其餘媒材是暫存的
@@ -407,7 +411,7 @@ class EtMaterialService:
             # 讓它們不會隨 commit 過期，同一個 session 再查**同一列實體**只會拿回記憶體裡的舊值。
             # 不先過期的話，下面的重驗讀到的是請求開頭的狀態（code review HIGH）
             db.expire_all()
-            await self._reauthorize(db, operator.user_id)
+            await self._reauthorize(db, operator.user_id, auth_time)
             ref, course_id = await self._staged_material(db, material_id, operator.user_id, operator)
             if ref is None:
                 # 草稿課程不走暫存區、`_staged_material` 不取鎖；同名重查要與另一個分頁的寫入互斥。
@@ -546,7 +550,7 @@ class EtMaterialService:
         )
         return ref, resolved.course_id
 
-    async def _reauthorize(self, db: AsyncSession, user_id: str) -> None:
+    async def _reauthorize(self, db: AsyncSession, user_id: str, auth_time: datetime) -> None:
         """第 3 段寫入前重驗身分與角色（#905 B1）。
 
         帳號狀態與 ET 角色由 router 的 dependency（`get_jwt_payload`、`require_et_roles`）驗一次。FastAPI 先收完
@@ -554,10 +558,13 @@ class EtMaterialService:
         `ffprobe`（上限 30 秒，`video_probe`），期間被停用、鎖定或撤掉教師角色仍會寫入（security review）。
         呼叫前須已 `expire_all()`，理由見 `upload_video` 第 3 段。
 
+        `auth_time` 取自本次請求的 JWT，一併比對密碼變更時點（#941）——空窗期間主人改了密碼，
+        這支上傳仍會寫入；與停用 / 撤角色是同一個空窗、同一條重驗。
+
         Raises:
             AppError: 帳號狀態不允許（401 / 403，見 `ensure_user_active`）；不再具備可編輯的角色（403 `ET_AUTH_001`）。
         """
-        await ensure_user_active(db, user_id)
+        await ensure_user_active(db, user_id, auth_time)
         if not (await load_et_roles(db, user_id)) & EDITOR_ROLES:
             raise AppError(status_code=403, detail="需要教育訓練模組權限", error_code="ET_AUTH_001")
 
