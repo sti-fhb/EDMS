@@ -105,3 +105,57 @@ async def test_expired_lock_passes(db):
     token = create_access_token(sub="user001", ttl_minutes=15)
     payload = await get_jwt_payload(credentials=_creds(token), db=db)
     assert payload.sub == "user001"
+
+
+async def test_token_issued_before_password_change_rejected(db):
+    """密碼變更前簽發的 token → 401 DP_AUTH_002（#941）。
+
+    回與其他無效 token 相同的碼：拿著舊 token 的那一方可能正是盜用者，
+    不替他指出「密碼剛被改過」。
+    """
+    user = await _make_user(db, "user001")
+    token = create_access_token(sub="user001", ttl_minutes=15, auth_time=utcnow() - timedelta(minutes=10))
+    user.pwd_changed_date = utcnow()
+    await db.flush()
+
+    with pytest.raises(AppError) as exc:
+        await get_jwt_payload(credentials=_creds(token), db=db)
+    assert exc.value.status_code == 401
+    assert exc.value.error_code == "DP_AUTH_002"
+
+
+async def test_token_issued_after_password_change_passes(db):
+    """變更後重新登入取得的 token → 通過（#941）。
+
+    與上一條配對的正向錨點：少了它，把判定寫成「一律拒絕」也會讓上一條通過，
+    而使用者將永遠登不進來。
+    """
+    user = await _make_user(db, "user001")
+    user.pwd_changed_date = utcnow() - timedelta(minutes=10)
+    await db.flush()
+    token = create_access_token(sub="user001", ttl_minutes=15)
+
+    payload = await get_jwt_payload(credentials=_creds(token), db=db)
+    assert payload.sub == "user001"
+
+
+async def test_password_change_does_not_affect_other_accounts(db):
+    """A 改密碼不影響 B 的 token（#941 AC 4）。
+
+    🔴 本條是「這道閘會不會誤殺」的唯一守門：只驗「該失效的失效了」的話，
+    把判定式寫成恆 True 也會全綠，而那會讓全系統每個人都登不進來。
+    """
+    a = await _make_user(db, "userA")
+    b = await _make_user(db, "userB")
+    # B 的密碼早就改過、之後才登入：auth_time 必然晚於 B 自己的 pwd_changed_date。
+    # ⚠️ 不可讓兩者都取當下——同一秒 floor 後相等雖然也會通過，但那是「邊界剛好成立」而非
+    # 「B 不受影響」，判準會與另一條邊界測試混在一起。
+    b.pwd_changed_date = utcnow() - timedelta(minutes=10)
+    await db.flush()
+    b_token = create_access_token(sub="userB", ttl_minutes=15)
+
+    a.pwd_changed_date = utcnow()
+    await db.flush()
+
+    payload = await get_jwt_payload(credentials=_creds(b_token), db=db)
+    assert payload.sub == "userB"

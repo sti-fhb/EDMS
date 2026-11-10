@@ -39,9 +39,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     expiresAtRef.current = next === null || expiresInSec === undefined ? null : Date.now() + expiresInSec * 1000
   }, [])
 
+  /**
+   * 工作階段世代：每結束一次就遞增。在途請求的回應以它判斷「還屬不屬於當下這個階段」。
+   *
+   * ⚠️ 需要它的是**成功**回應：失敗方向已由 `http.ts` 的 `if (authToken …)` 擋住
+   * （token 清掉後在途的 401 不會再觸發被動登出）。成功方向沒有那道閘——換發在途時
+   * 若使用者剛改完密碼，晚到的 `renew` 回應會把 token 寫回去，而那張 token **沿用原
+   * `auth_time`**、後端已判定失效：畫面假裝還登入著，下一個請求才 401 並顯示
+   * 「閒置逾時」，蓋掉「密碼已更新」（#941 code review MEDIUM）。
+   */
+  const sessionGenRef = useRef(0)
+
   /** 被動結束工作階段（非使用者自己按登出）：清狀態並記下原因，供登入畫面提示。 */
   const endSession = useCallback(
     (reason: SessionEndReason) => {
+      sessionGenRef.current += 1
       applyToken(null)
       setMustChangePwd(false)
       setSessionEndedReason(reason)
@@ -71,13 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // 登出 API 失敗（如網路 / 已逾時）仍清除本地狀態，確保使用者確實登出
     }
+    sessionGenRef.current += 1 // 同 endSession：擋掉在途請求的成功回應把 token 寫回來
     applyToken(null)
     setMustChangePwd(false)
     queryClient.clear() // 清快取，避免下一位登入者短暫看到前一位的資料
   }, [applyToken, queryClient])
 
-  // US8：強制變更頁完成密碼變更後清旗標，RootLayout 即撤下頁殼、放行一般功能（不需重登）。
-  const clearMustChangePwd = useCallback(() => setMustChangePwd(false), [])
+  // #941：密碼變更後，變更前簽發的 token 後端一律判定失效，本機也立即清掉——
+  // 留著只會讓下一個請求（換發計時器、背景 refetch）撞 401 而顯示「閒置逾時」。
+  // 走 endSession 而非 logout：logout 會先打 API，那個請求帶的正是已失效的舊 token。
+  const endSessionAfterPasswordChange = useCallback(() => endSession("PWD_CHANGED"), [endSession])
 
   // 被動登出：401（憑證失效 / 閒置逾時 / 換發逾限）→ IDLE；
   // 403 DP_AUTH_004 / 005（使用中被停用 / 鎖定）→ DISABLED / LOCKED（#741）。
@@ -106,9 +121,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token === null) return
     const timer = window.setInterval(() => {
       if (Date.now() - lastActivityRef.current < RENEW_INTERVAL_MS) {
+        const gen = sessionGenRef.current
         authApi
           .renew()
-          .then((res) => applyToken(res.access_token, res.expires_in))
+          .then((res) => {
+            // 在途期間工作階段已結束就丟棄這張 token，理由見 sessionGenRef
+            if (sessionGenRef.current !== gen) return
+            applyToken(res.access_token, res.expires_in)
+          })
           .catch(() => {
             // 換發失敗（逾限 / 失效）已由 response interceptor 觸發 onSessionEnded，此處不重複處置
           })
@@ -136,9 +156,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sessionEndedReason,
       login,
       logout,
-      clearMustChangePwd,
+      endSessionAfterPasswordChange,
     }),
-    [token, mustChangePwd, sessionEndedReason, login, logout, clearMustChangePwd],
+    [token, mustChangePwd, sessionEndedReason, login, logout, endSessionAfterPasswordChange],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

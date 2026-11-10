@@ -19,8 +19,14 @@ export interface AuthState {
   login: (email: string, password: string) => Promise<void>
   /** 登出：寫 LOGOUT 稽核（失敗仍清本地狀態）並清除 token。 */
   logout: () => Promise<void>
-  /** 清除強制變更旗標（US8：於強制變更頁完成密碼變更後呼叫，放行至一般功能）。 */
-  clearMustChangePwd: () => void
+  /**
+   * 密碼變更成功後結束本機工作階段（#941）：清 token 與旗標，登入畫面提示「密碼已更新」。
+   *
+   * ⛔ **不要改成呼叫 `logout()`**：變更當下舊 token 已被後端判定失效，`logout()` 會先打
+   * `/dp/user/logout`、拿到 401，被 interceptor 收斂成被動登出而顯示「閒置逾時」——
+   * 使用者剛成功改完密碼卻看到逾時訊息。
+   */
+  endSessionAfterPasswordChange: () => void
 }
 
 export const AuthContext = createContext<AuthState | undefined>(undefined)

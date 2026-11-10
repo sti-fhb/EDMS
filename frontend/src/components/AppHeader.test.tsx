@@ -16,7 +16,7 @@ const authStub: AuthState = {
   sessionEndedReason: null,
   login: async () => {},
   logout: async () => {},
-  clearMustChangePwd: () => {},
+  endSessionAfterPasswordChange: () => {},
 }
 
 const ME_PATH = "/api/dp/user/me"

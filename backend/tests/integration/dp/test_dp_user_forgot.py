@@ -3,8 +3,10 @@
 from datetime import timedelta
 
 import pytest
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 
+from app.core.auth import create_access_token, get_jwt_payload
 from app.core.exceptions import AppError
 from app.core.password_policy import hash_password, verify_password
 from app.core.utils import utcnow
@@ -18,6 +20,10 @@ pytestmark = pytest.mark.integration
 
 _GOOD_PWD = "Abcd1234"
 _NEW_PWD = "Xyz98765!"
+
+
+def _creds(token: str) -> HTTPAuthorizationCredentials:
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
 async def _make_user(db, *, user_id="fp", email="fp@edms.local", status="ACTIVE", locked_until=None):
@@ -131,6 +137,35 @@ async def test_reset_success(db):
     assert token.used_date is not None  # token 作廢
     audit = (await db.execute(select(DpAuditLog).where(DpAuditLog.func_name == "DP-FORGOT"))).scalars().all()
     assert audit and audit[-1].action_type == "UPDATE" and audit[-1].result == "SUCCESS"
+
+
+async def test_reset_invalidates_tokens_issued_before(db):
+    """忘記密碼重設後，重設前簽發的 token 立即失效（#941）。
+
+    帳號遭他人登入時，主人走忘記密碼也能踢掉對方——與自行變更密碼同一條閘，
+    但走的是另一支 service，故兩邊都要驗（`reset` 與 `change_password` 各自呼叫
+    `update_password`，其中一邊漏掉就只有一半生效）。
+
+    ⚠️ 舊 token 的 `auth_time` 刻意取明確早於重設時點的值，不可用當下簽發：
+    判定以整秒比較，同一秒內完成會 floor 後相等而不被拒。
+    """
+    await _make_user(db, user_id="rsinv", email="rsinv@edms.local")  # pwd_changed_date = 昨天
+    old_token = create_access_token(sub="rsinv", ttl_minutes=15, auth_time=utcnow() - timedelta(minutes=5))
+
+    # 前置：重設之前這張 token 是好的
+    assert (await get_jwt_payload(credentials=_creds(old_token), db=db)).sub == "rsinv"
+
+    plaintext = await _make_token(db, user_id="rsinv")
+    await ResetPasswordService().reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+
+    with pytest.raises(AppError) as exc:
+        await get_jwt_payload(credentials=_creds(old_token), db=db)
+    assert exc.value.status_code == 401
+    assert exc.value.error_code == "DP_AUTH_002"
+
+    # 重設後才簽發的 token 照常可用
+    fresh = create_access_token(sub="rsinv", ttl_minutes=15)
+    assert (await get_jwt_payload(credentials=_creds(fresh), db=db)).sub == "rsinv"
 
 
 async def test_reset_endpoint_success(client, db):

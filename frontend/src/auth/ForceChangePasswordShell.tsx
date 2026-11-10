@@ -23,7 +23,7 @@ import { getFieldErrors } from "../utils/zodUtils"
  * 旗標放行至一般功能（不需重登）。提示數字依 PWD_POLICY 動態渲染（併 #77）。
  */
 export function ForceChangePasswordShell() {
-  const { logout, clearMustChangePwd } = useAuth()
+  const { logout, endSessionAfterPasswordChange } = useAuth()
   const navigate = useNavigate()
   const { policy, hint } = usePasswordPolicy({ kind: "self" })
   const [oldPassword, setOldPassword] = useState("")
@@ -48,8 +48,10 @@ export function ForceChangePasswordShell() {
     setSubmitting(true)
     try {
       await profileApi.changePassword(parsed.data)
-      clearMustChangePwd() // 清旗標 → RootLayout 撤下頁殼、放行一般功能
-      // 頁殼為覆蓋當前 URL 的 overlay，完成後導主頁（/）——否則會停在底下殘留的 URL（如 /profile）
+      // #941：變更當下舊 token 已失效，沿用它進主頁會立刻被 401。清掉本機工作階段 →
+      // RootLayout 的 `!isAuthenticated` 分支即改渲染 LoginOverlay，並提示「密碼已更新」。
+      endSessionAfterPasswordChange()
+      // 頁殼為覆蓋當前 URL 的 overlay，重新登入後才不會停在底下殘留的 URL（如 /profile）
       navigate("/")
     } catch (err) {
       setApiError(toApiError(err).errorMessage)

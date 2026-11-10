@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest"
 
 import { AuthProvider } from "./AuthProvider"
 import { ForceChangePasswordShell } from "./ForceChangePasswordShell"
+import { LoginOverlay } from "./LoginOverlay"
+import { useAuth } from "./useAuth"
 import { server } from "../test/server"
 import { muiTheme } from "../styles/muiTheme"
 
@@ -24,6 +26,49 @@ function renderShell() {
       </ThemeProvider>
     </QueryClientProvider>,
   )
+}
+
+/**
+ * 需要「真的登入過」的情境用這一組（#941）：`renderShell` 直接渲染頁殼、`isAuthenticated`
+ * 恆為 false，看不出「變更後回到登入頁」這件事。此處比照 `RootLayout`：未登入即改渲染
+ * `LoginOverlay`，於是登出與提示文案都是從使用者看得到的畫面去斷言。
+ */
+function ShellHarness() {
+  const { isAuthenticated, mustChangePwd } = useAuth()
+  return (
+    <>
+      <div data-testid="status">{isAuthenticated ? "authed" : "anon"}</div>
+      {!isAuthenticated && <LoginOverlay />}
+      {isAuthenticated && mustChangePwd && <ForceChangePasswordShell />}
+    </>
+  )
+}
+
+function renderShellWithLogin() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={muiTheme}>
+        <MemoryRouter>
+          <AuthProvider>
+            <ShellHarness />
+          </AuthProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  )
+}
+
+async function login(user: ReturnType<typeof userEvent.setup>, { mustChange }: { mustChange: boolean }) {
+  server.use(
+    http.post("/api/login", () =>
+      HttpResponse.json({ access_token: "test-access-token", must_change_pwd: mustChange, expires_in: 900 }),
+    ),
+  )
+  await user.type(screen.getByLabelText("帳號（Email）"), "u@edms.local")
+  await user.type(screen.getByLabelText("密碼"), "Abcd1234")
+  await user.click(screen.getByRole("button", { name: "登入" }))
+  await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authed"))
 }
 
 describe("ForceChangePasswordShell 強制變更密碼（US8 填實提交）", () => {
@@ -66,6 +111,24 @@ describe("ForceChangePasswordShell 強制變更密碼（US8 填實提交）", ()
     await user.type(screen.getByLabelText("確認新密碼"), "Xyz98765!")
     await user.click(screen.getByRole("button", { name: "變更密碼" }))
     await waitFor(() => expect(screen.queryByRole("alert")).not.toHaveTextContent(/失敗|錯誤|不正確/))
+  })
+
+  it("完成強制變更 → 回到登入頁並提示密碼已更新，不顯示閒置逾時（#941）", async () => {
+    const user = userEvent.setup()
+    renderShellWithLogin()
+    await login(user, { mustChange: true })
+
+    await user.type(await screen.findByLabelText("舊密碼"), "Abcd1234")
+    await user.type(screen.getByLabelText("新密碼"), "Xyz98765!")
+    await user.type(screen.getByLabelText("確認新密碼"), "Xyz98765!")
+    await user.click(screen.getByRole("button", { name: "變更密碼" }))
+
+    // 回到登入頁：舊 token 在變更當下即失效，沿用它進主頁會被後端 401
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anon"))
+    expect(await screen.findByText("密碼已更新，請以新密碼重新登入")).toBeInTheDocument()
+    // ⛔ 不得顯示「閒置逾時」：那是被動登出的文案。若實作改成呼叫 /dp/user/logout，
+    // 該請求會帶著已失效的舊 token 拿到 401，被 interceptor 收斂成 IDLE 而蓋掉正確訊息。
+    expect(screen.queryByText(/閒置逾時/)).not.toBeInTheDocument()
   })
 
   it("舊密碼錯（422 DP_PWD_006，非 401）→ 顯示錯誤訊息、不觸發自動登出", async () => {

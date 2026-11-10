@@ -154,7 +154,10 @@ class ResetPasswordService:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
         # 更新（不改鎖定 / 停用）+ 追加歷程 + 稽核
-        await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user.user_id, now=now)
+        # ⚠️ `PWD_CHANGED_DATE` 取寫入前的時間，理由同 `profile_service.change_password`（#941）：
+        # 沿用函式開頭的 `now` 會讓「重設處理期間以舊密碼登入」取得的 token 在重設後仍有效。
+        pwd_changed_at = utcnow()
+        await self._repo.update_password(db, user=user, pwd_hash=new_hash, operator_id=user.user_id, now=pwd_changed_at)
         seq_no = await self._repo.next_pwd_seq_no(db, user.user_id)
         await self._repo.add_pwd_history(
             db, user_id=user.user_id, seq_no=seq_no, pwd_hash=new_hash, operator_id=user.user_id, now=now

@@ -140,18 +140,56 @@ async def get_jwt_payload(
         raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
 
     payload = decode_access_token(credentials.credentials)
-    await ensure_user_active(db, payload.sub)
+    await ensure_user_active(db, payload.sub, payload.auth_time)
     return payload
 
 
-async def ensure_user_active(db: AsyncSession, user_id: str) -> None:
-    """帳號存在、未停用、未鎖定；`get_jwt_payload` 每請求都查，耗時長的請求可在寫入前再查一次。
+def token_issued_before_password_change(auth_time: datetime, pwd_changed_date: datetime) -> bool:
+    """本次登入是否早於最後一次密碼變更（#941）。
+
+    用於讓「密碼變更前簽發的 token」立即失效：帳號被他人登入時，主人改密碼即可踢掉對方。
+    比 `auth_time` 而非 `iat`——換發時 `auth_time` 沿用原值（見 `renew_access_token`），
+    比它才能讓**同一次登入衍生的所有 token** 一起失效，而不是只失效最後換發的那一張。
+
+    ⚠️ **`pwd_changed_date` 必須取整秒再比**：`auth_time` 由 epoch 整數秒還原
+    （`_epoch_to_dt`）、微秒恆為 0，而 `PWD_CHANGED_DATE` 是 `TIMESTAMPTZ`、帶微秒。
+    直接比的話，「同一秒內改完密碼又登入」的**新** token（如 08:00:01.000000）會小於
+    變更時間（08:00:01.500000）而被判成舊的——使用者剛登入就被登出，且重登一次還是一樣，
+    形成登出迴圈。取整秒後兩者相等、不成立。
+
+    ## 這道閘保證到哪裡（⛔ 不要讀成「所有 token 全數立刻失效」）
+
+    **① 與變更落在同一秒的登入**（窗口 < 1 秒）
+    floor 使「變更時間所在的那一整秒」內取得的 token 都算有效，包含變更**之後**才簽發的。
+    不改用上取整：本功能完成後會把使用者送回登入頁，上取整會讓他當下那次重登被彈回一次。
+
+    > 📌 `pwd_changed_date` **取在寫入前**（`profile_service` / `forgot_service` 的
+    > `pwd_changed_at`），不是 service 開頭的 `now`。沿用開頭的值會把窗口拉長到
+    > verify + 三次 DB 往返 + `is_reused`（`HISTORY_COUNT` 上限 24 ⇒ 最長約 4.4 秒）。
+    > ⛔ 不要為了「與稽核時間一致」把它改回 `now`——那不是一致性問題，是失效基準的正確性。
+
+    **② 已簽發的影片播放票**（窗口最長 5 分鐘）
+    票為獨立簽發、取檔時不查 DB（`et/learning/video_ticket.py`）。該檔已載明同一窗口
+    適用於「發票後帳號被停用」，密碼變更是同一個形狀，非本機制新增的缺口。
+
+    兩者都是**已知且已接受**的，寫在這裡是因為「密碼一改，所有 token 立刻失效」這句話
+    太容易被當成無條件成立，日後有人據此推導出錯的結論。
+    """
+    return auth_time < pwd_changed_date.replace(microsecond=0)
+
+
+async def ensure_user_active(db: AsyncSession, user_id: str, auth_time: datetime) -> None:
+    """帳號存在、未停用、未鎖定、token 不早於密碼變更；`get_jwt_payload` 每請求都查。
+
+    `auth_time` 為**必填**（不給預設值）：耗時長的請求會在寫入前再查一次
+    （見 `et/material/service.py::_reauthorize`），漏傳即型別檢查失敗，不會靜默少一道檢核。
 
     ⚠️ 查的是整個 `DpUser` 實體：同一個 session 先前已載入、且仍有人持有該實體時，重查只會拿回
     記憶體裡的舊值（`expire_on_commit=False`）。請求中途再查前，呼叫端要先 `db.expire_all()`。
 
     Raises:
-        AppError: 查無 / 已刪（401 `DP_AUTH_002`）、停用（403 `DP_AUTH_004`）、鎖定中（403 `DP_AUTH_005`）。
+        AppError: 查無 / 已刪 / token 早於密碼變更（401 `DP_AUTH_002`）、停用（403 `DP_AUTH_004`）、
+            鎖定中（403 `DP_AUTH_005`）。
     """
     result = await db.execute(select(DpUser).where(DpUser.user_id == user_id, DpUser.deleted == 0))
     user = result.scalar_one_or_none()
@@ -161,3 +199,7 @@ async def ensure_user_active(db: AsyncSession, user_id: str) -> None:
         raise AppError(status_code=403, detail="帳號已停用", error_code="DP_AUTH_004")
     if user.locked_until is not None and user.locked_until > utcnow():
         raise AppError(status_code=403, detail="帳號已鎖定", error_code="DP_AUTH_005")
+    # 與其他無效 token 回同一個 401 / DP_AUTH_002：不另設錯誤碼，免得替「拿著舊 token 的那一方」
+    # 指出「密碼剛被改過」——那一方可能正是盜用者（#941）。
+    if token_issued_before_password_change(auth_time, user.pwd_changed_date):
+        raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
