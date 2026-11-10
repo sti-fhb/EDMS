@@ -8,6 +8,16 @@ services:
     #    分流（見 TBMS 的 edge/README.md）。本機開發所需的 port 定義在
     #    docker-compose.override.yml——compose 的 ports 是**合併**不是覆寫，
     #    留在這裡就沒辦法在 prod 那側移除。
+    volumes:
+      # nginx access／error log（#944）：不掛載時只寫到 docker logs，每次部署換 image 即隨容器清空。
+      # nginx 以 uid 101 執行（nginx/Dockerfile 之 USER nginx），主機目錄 owner 須為 101:101。
+      # create_host_path: false —— 目錄未備妥時直接啟動失敗，而非讓 Docker 以 root 自動建出
+      # nginx 寫不進去的目錄。輪替由主機 logrotate 負責。主機前置見 docs/infra/deployment.md。
+      - type: bind
+        source: /opt/edms/nginx-logs
+        target: /var/log/nginx
+        bind:
+          create_host_path: false
     depends_on:
       - edms-backend
     networks:

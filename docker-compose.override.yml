@@ -11,6 +11,16 @@ services:
     # 用 8090 而非 80，避免與同機的 TBMS 本機環境搶 port。
     ports:
       - "8090:80"
+    # 覆寫 docker-compose.yml 的 /opt/edms/nginx-logs 掛載（#944；部署主機上的路徑，且帶
+    # create_host_path: false，不覆寫則本機 compose up 會失敗）。改用 tmpfs：容器重建即清空，
+    # 與掛載前的本機行為相同；不掛 ./nginx/logs —— 該目錄屬 root 或開發者，nginx（uid 101）
+    # 寫不進去，且會在 repo 內產生 log 檔。log 仍可由 docker logs 查看（nginx.conf 另寫一份到 stdout）。
+    # ⚠️ target 須與 docker-compose.yml 逐字一致（/var/log/nginx）：compose 的 volumes 依 target 合併。
+    volumes:
+      - type: tmpfs
+        target: /var/log/nginx
+        tmpfs:
+          size: 67108864
 
   edms-backend:
     build:

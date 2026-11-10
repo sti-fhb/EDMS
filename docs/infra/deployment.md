@@ -176,6 +176,58 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now edms-deploy.timer
 ```
 
+#### nginx log 目錄與輪替
+
+edms-nginx 的 access／error log 寫進 `/opt/edms/nginx-logs`（`docker-compose.yml` 掛為容器內
+`/var/log/nginx`），容器重建後仍在；同一份 log 另寫到 stdout，`docker logs edms-nginx` 照舊可看。
+nginx 不會自己換檔，由主機 logrotate 輪替。**須於含此掛載的版本部署前完成**——`docker-compose.yml`
+對此掛載設 `create_host_path: false`，目錄不存在時 edms-nginx 直接啟動失敗。
+
+```bash
+# owner 必須是 101（nginx/Dockerfile 之 USER nginx 的 uid），不是 backend 的 10001
+sudo mkdir -p /opt/edms/nginx-logs
+sudo chown 101:101 /opt/edms/nginx-logs
+sudo chmod 750 /opt/edms/nginx-logs
+
+# 輪替規則：每日換檔、保留 14 份、單檔超過 200 MB 提早換；換檔後送 USR1 讓 nginx 重開檔
+sudo tee /etc/logrotate.d/edms-nginx >/dev/null <<'EOF'
+/opt/edms/nginx-logs/*.log {
+    daily
+    rotate 14
+    maxsize 200M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 101 101
+    sharedscripts
+    postrotate
+        docker kill -s USR1 edms-nginx >/dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+# 每小時檢查一次：Ubuntu 內建的 logrotate 一天只跑一次，maxsize 只在執行時檢查
+sudo tee /etc/cron.hourly/edms-nginx-logrotate >/dev/null <<'EOF'
+#!/bin/sh
+/usr/sbin/logrotate /etc/logrotate.d/edms-nginx
+EOF
+sudo chmod 755 /etc/cron.hourly/edms-nginx-logrotate
+```
+
+確認：
+
+```bash
+ls -ldn /opt/edms/nginx-logs                    # 預期 drwxr-x--- 2 101 101
+systemctl is-active cron                        # 預期 active
+sudo logrotate -d /etc/logrotate.d/edms-nginx   # 試跑，不動檔案；輸出不可有 error: 行
+```
+
+- 主機的 `/etc/passwd` 中 uid 101 可能另有名稱（如 `systemd-resolve`），`ls -ld` 會顯示該名稱，數字仍是 101，屬正常；以 `ls -ldn` 看數字
+- `logrotate -d` 遇拼錯的指令只印 `error:` 行、仍以 0 結束，須看輸出而非結束碼
+- 不使用 `copytruncate`：複製與清空之間進來的請求會掉行
+- nginx log 含 client IP，不納入備份範圍
+
 `.env.prod` 必須包含（金鑰**不得與 TBMS 共用**——EDMS 認證獨立）：
 
 ```

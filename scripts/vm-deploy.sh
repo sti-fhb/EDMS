@@ -139,6 +139,15 @@ for f in /opt/edms/postgres/certs/server.crt /opt/edms/postgres/certs/server.key
   fi
 done
 
+# nginx log 目錄（docker-compose.yml 的 edms-nginx 掛載，#944）：設 create_host_path: false，
+# 缺少時 up -d 會把現行 edms-nginx 停掉、新容器卻因掛載失敗起不來；owner 不是 101（nginx/Dockerfile
+# 之 USER nginx）時 nginx 開不了 log 檔、同樣起不來。理由同上，在動到任何容器之前先擋下。
+NGINX_LOG_DIR=/opt/edms/nginx-logs
+if [ ! -d "${NGINX_LOG_DIR}" ] || [ "$(stat -c %u "${NGINX_LOG_DIR}")" != "101" ]; then
+  log "❌ ${NGINX_LOG_DIR} 不存在或 owner 不是 101（nginx log 前置未完成，見 docs/infra/deployment.md §2.4），中止；現行服務未受影響"
+  exit 1
+fi
+
 log "pull 映像..."
 "${COMPOSE[@]}" pull --quiet
 
