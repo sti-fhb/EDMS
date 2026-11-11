@@ -13,6 +13,8 @@
 import errno
 import logging
 import os
+import stat
+import sys
 
 import pytest
 
@@ -41,6 +43,25 @@ def _put(root: str, rel: str, content: bytes = b"video") -> str:
 
 def _enforce(root: str) -> None:
     storage.mark_ownership_fence_enforced(root)
+
+
+#: Windows 拒絕建立符號連結時的錯誤碼（未以管理者執行、也未開「開發人員模式」）。
+_ERROR_PRIVILEGE_NOT_HELD = 1314
+
+
+def _symlink_or_skip(src: str, dst: str) -> None:
+    """建立符號連結；只有「平台不給權限」時 skip，其他錯誤照常拋出（#937）。
+
+    這幾條測試在模擬「有人在影片目錄放了符號連結」的攻擊，必須真的建出連結才有意義。
+    Windows 預設只有管理者或開了開發人員模式才建得出來；Linux（正式環境、GitHub CI）一律照跑。
+    不寫成無差別的 `except OSError`：路徑寫錯之類的錯誤若也被當成 skip，測試會永遠不跑而沒人發現。
+    """
+    try:
+        os.symlink(src, dst)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == _ERROR_PRIVILEGE_NOT_HELD:
+            pytest.skip("此平台未授權建立符號連結（Windows 需管理者或開發人員模式）；Linux 與 GitHub CI 照常執行")
+        raise
 
 
 class TestDirName:
@@ -175,7 +196,7 @@ class TestLinkIntoMaterial:
         """連結指向的可能是他份教材的被引用檔——掛過去等於把那支複製給這份教材。"""
         _put(root, f"5/{_NAME}")
         os.makedirs(os.path.join(root, "s7"))
-        os.symlink(os.path.join(root, "5", _NAME), os.path.join(root, "s7", _NAME))
+        _symlink_or_skip(os.path.join(root, "5", _NAME), os.path.join(root, "s7", _NAME))
         with pytest.raises(ValueError):
             storage.link_into_material(f"s7/{_NAME}", 12)
 
@@ -194,6 +215,8 @@ class TestLinkIntoMaterial:
             raise OSError(errno.EXDEV, "cross-device link")
 
         monkeypatch.setattr(storage.os, "link", no_link)
+        # 替身不在能力集合裡的話，非 Windows 平台會把它當成「不支援 follow_symlinks」而拒絕掛檔（#937）
+        monkeypatch.setattr(os, "supports_follow_symlinks", os.supports_follow_symlinks | {no_link})
         rel = storage.link_into_material(f"s7/{_NAME}", 12)
 
         with open(os.path.join(root, *rel.split("/")), "rb") as f:
@@ -254,7 +277,7 @@ class TestRelocationPlan:
 def test_標記檔是連結時不算數(root, tmp_path_factory) -> None:
     real = tmp_path_factory.mktemp("elsewhere") / "marker"
     real.write_text("x")
-    os.symlink(str(real), os.path.join(root, storage.OWNERSHIP_FENCE_MARKER))
+    _symlink_or_skip(str(real), os.path.join(root, storage.OWNERSHIP_FENCE_MARKER))
     assert not storage.ownership_fence_enforced(root)
 
 
@@ -275,7 +298,7 @@ class TestSecurityHardening:
 
     def test_目標目錄是連結者拒絕(self, root, tmp_path_factory) -> None:
         elsewhere = tmp_path_factory.mktemp("elsewhere")
-        os.symlink(str(elsewhere), os.path.join(root, "12"))
+        _symlink_or_skip(str(elsewhere), os.path.join(root, "12"))
         _put(root, f"s7/{_NAME}")
         with pytest.raises(NotADirectoryError):
             storage.link_into_material(f"s7/{_NAME}", 12)
@@ -283,7 +306,7 @@ class TestSecurityHardening:
 
     def test_promote_目標目錄是連結者拒絕(self, root, tmp_path_factory) -> None:
         elsewhere = tmp_path_factory.mktemp("elsewhere")
-        os.symlink(str(elsewhere), os.path.join(root, "12"))
+        _symlink_or_skip(str(elsewhere), os.path.join(root, "12"))
         tmp = _put(root, f"{storage.TMP_DIRNAME}/{_NAME}")
         with pytest.raises(AppError):
             storage.promote(tmp, video_id_hint="12", ext="mp4")
@@ -292,7 +315,7 @@ class TestSecurityHardening:
     def test_標記檔位置預先放了連結時不寫穿(self, root, tmp_path_factory) -> None:
         victim = tmp_path_factory.mktemp("elsewhere") / "victim"
         victim.write_text("original")
-        os.symlink(str(victim), os.path.join(root, storage.OWNERSHIP_FENCE_MARKER))
+        _symlink_or_skip(str(victim), os.path.join(root, storage.OWNERSHIP_FENCE_MARKER))
         with pytest.raises(OSError):
             storage.mark_ownership_fence_enforced(root)
         assert victim.read_text() == "original"
@@ -313,7 +336,7 @@ class TestSecurityHardening:
         outside = tmp_path_factory.mktemp("elsewhere") / "secret.mp4"
         outside.write_bytes(b"x")
         os.makedirs(os.path.join(root, "12"))
-        os.symlink(str(outside), os.path.join(root, "12", _NAME))
+        _symlink_or_skip(str(outside), os.path.join(root, "12", _NAME))
         with pytest.raises(ValueError):
             storage.link_back(f"12/{_NAME}", f"7/{_NAME}")
         assert not os.path.exists(os.path.join(root, "7", _NAME))
@@ -326,3 +349,67 @@ class TestSecurityHardening:
             for _ in range(5):
                 storage.resolve_within_root(f"13/{_NAME}", not_found=_NF, expect_prefix="12")
         assert sum("遷移" in r.getMessage() for r in caplog.records) == 1
+
+
+class TestLinkEntryPlatformCapability:
+    """`_link_entry` 依平台能力選路徑（#937）。
+
+    Linux（正式環境、GitHub CI）支援 `follow_symlinks=False`，必須照舊走原路徑；Windows 不支援，
+    改為先以 `lstat` 拒絕連結再一般呼叫。以替身取代實際檔案操作，兩條路徑在任何平台上都測得到。
+    """
+
+    @pytest.fixture
+    def calls(self, monkeypatch) -> list[tuple[str, dict]]:
+        recorded: list[tuple[str, dict]] = []
+        monkeypatch.setattr(os, "utime", lambda path, *a, **kw: recorded.append(("utime", kw)))
+        monkeypatch.setattr(os, "link", lambda src, dst, *a, **kw: recorded.append(("link", kw)))
+        return recorded
+
+    def test_支援時一律不跟隨連結(self, root, monkeypatch, calls) -> None:
+        source = _put(root, f"s7/{_NAME}")
+        monkeypatch.setattr(os, "supports_follow_symlinks", {os.utime, os.link})
+        storage._link_entry(root, source, os.path.join(root, "12", _NAME))
+        assert calls == [("utime", {"follow_symlinks": False}), ("link", {"follow_symlinks": False})]
+
+    def test_不支援時改為一般呼叫(self, root, monkeypatch, calls) -> None:
+        source = _put(root, f"s7/{_NAME}")
+        monkeypatch.setattr(os, "supports_follow_symlinks", set())
+        monkeypatch.setattr(storage, "_WEAK_LINK_ALLOWED", True)
+        storage._link_entry(root, source, os.path.join(root, "12", _NAME))
+        assert calls == [("utime", {}), ("link", {})]
+
+    def test_不支援時遇到連結先拒絕_不刷新也不掛(self, root, monkeypatch, calls) -> None:
+        source = _put(root, f"s7/{_NAME}")
+        monkeypatch.setattr(os, "supports_follow_symlinks", set())
+        monkeypatch.setattr(storage, "_WEAK_LINK_ALLOWED", True)
+        real_lstat = os.lstat
+
+        def lstat_reports_link(path, *a, **kw):
+            st = real_lstat(path, *a, **kw)
+            if os.path.normcase(str(path)) != os.path.normcase(source):
+                return st
+            return os.stat_result((stat.S_IFLNK | 0o777, *tuple(st)[1:]))
+
+        monkeypatch.setattr(os, "lstat", lstat_reports_link)
+        with pytest.raises(ValueError):
+            storage._link_entry(root, source, os.path.join(root, "12", _NAME))
+        assert calls == []
+
+    def test_非_Windows_不支援時拒絕掛檔_不靜默降級(self, root, monkeypatch, calls) -> None:
+        """Linux 若因任何原因（替身、特殊建置）被判定為不支援，必須大聲失敗而非改走較弱路徑。"""
+        source = _put(root, f"s7/{_NAME}")
+        monkeypatch.setattr(os, "supports_follow_symlinks", set())
+        monkeypatch.setattr(storage, "_WEAK_LINK_ALLOWED", False)
+        with pytest.raises(RuntimeError):
+            storage._link_entry(root, source, os.path.join(root, "12", _NAME))
+        assert calls == []
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="守門 Linux 實際執行環境；Windows 本來就走較弱路徑")
+def test_Linux_實際環境支援不跟隨連結() -> None:
+    """正式環境與 GitHub CI 的 Python 必須支援這兩個呼叫的 follow_symlinks（#937）。
+
+    其他測試都以替身換掉能力集合，沒有一條碰到實際環境；這條在 CI 上直接檢查。
+    """
+    assert os.utime in os.supports_follow_symlinks
+    assert os.link in os.supports_follow_symlinks
