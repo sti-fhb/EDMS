@@ -45,6 +45,21 @@ export function setOnSessionEnded(handler: ((reason: SessionEndReason) => void) 
   onSessionEnded = handler
 }
 
+/**
+ * 後端要求先變更密碼的錯誤碼（#929）。
+ *
+ * ⛔ **不要把它加進 `ACCOUNT_BLOCKED_CODES`**：那張表的判準是「整個帳號失效」，成員會被
+ * 轉成登出。本碼相反——使用者仍在登入中，只是被擋在「先改密碼」這一步。
+ */
+const PWD_CHANGE_REQUIRED_CODE = "DP_AUTH_009"
+
+/** 須變更密碼的處置回呼：由 AuthProvider 註冊為「置起 mustChangePwd」（**不是登出**）。 */
+let onPasswordChangeRequired: (() => void) | null = null
+
+export function setOnPasswordChangeRequired(handler: (() => void) | null): void {
+  onPasswordChangeRequired = handler
+}
+
 http.interceptors.request.use((config) => {
   if (authToken) {
     config.headers.Authorization = `Bearer ${authToken}`
@@ -65,8 +80,14 @@ http.interceptors.response.use(
         // 使用中被管理者停用 / 鎖定：後端每請求查 DP_USER 狀態，下一次請求即回這兩碼（#741）。
         // 查表未命中（其他 403 = 權限不足）→ 不登出，只讓呼叫端自己顯示錯誤。
         const code = (error.response?.data as { error_code?: string } | undefined)?.error_code
-        const reason = code === undefined ? undefined : ACCOUNT_BLOCKED_CODES[code]
-        if (reason !== undefined) onSessionEnded(reason)
+        if (code === PWD_CHANGE_REQUIRED_CODE) {
+          // ⛔ 不走 onSessionEnded：使用者**仍在登入中**，只是被要求先改密碼。登出的話他連
+          // 改密碼所需的 session 都沒了，而改密碼端點正是白名單裡非放行不可的那一支（#929）。
+          onPasswordChangeRequired?.()
+        } else {
+          const reason = code === undefined ? undefined : ACCOUNT_BLOCKED_CODES[code]
+          if (reason !== undefined) onSessionEnded(reason)
+        }
       }
     }
     return Promise.reject(error)
