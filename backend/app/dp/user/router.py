@@ -5,14 +5,13 @@ import logging
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import JwtPayload, get_jwt_payload
+from app.core.auth import JwtPayload, get_jwt_payload, get_jwt_payload_pwd_exempt
 from app.core.cooldown import VerifySendCooldown
 from app.core.db import get_db
 from app.core.log_redaction import mask_email
 from app.core.module_admin import module_admin_gate
 from app.core.module_roles import module_role_gate
-from app.core.operator import OperatorInfo, get_operator
-from app.core.password_gate import require_password_current
+from app.core.operator import OperatorInfo, get_operator, get_operator_pwd_exempt
 from app.core.rate_limit import (
     LOGIN_RATE_MAX,
     RATE_WINDOW_SECONDS,
@@ -518,7 +517,7 @@ async def activate_account(
 
 @router.post("/dp/user/renew", response_model=TokenResponse)
 async def renew(
-    payload: JwtPayload = Depends(get_jwt_payload),
+    payload: JwtPayload = Depends(get_jwt_payload_pwd_exempt),
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """活動換發：需現行有效 token。get_jwt_payload 先過 DP_USER 狀態閘，再驗單日換發上限重簽。"""
@@ -527,7 +526,7 @@ async def renew(
 
 @router.post("/dp/user/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    payload: JwtPayload = Depends(get_jwt_payload),
+    payload: JwtPayload = Depends(get_jwt_payload_pwd_exempt),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """登出：需認證。寫 LOGOUT 稽核後回 204（無狀態 JWT，前端自行丟棄 token）。"""
@@ -536,10 +535,13 @@ async def logout(
 
 @router.get("/dp/user/module-summary", response_model=ModuleSummary)
 async def module_summary(
-    payload: JwtPayload = Depends(require_password_current),
+    payload: JwtPayload = Depends(get_jwt_payload),
     db: AsyncSession = Depends(get_db),
 ) -> ModuleSummary:
     """入口頁 / 側欄模組摘要：需認證且密碼現行有效（強制變更者擋於閘）。
+
+    #929 起密碼閘已內建於 `get_jwt_payload`（原先只有本端點掛 `require_password_current`，
+    其餘 API 完全沒擋），故此處改用預設閘即可，行為不變。
 
     ET / DM 皆經 `has_any_role` 判定閘聚合（contracts §4）；未註冊模組 fail-closed
     回 False＝未開通。
@@ -562,12 +564,17 @@ async def module_summary(
     )
 
 
-# --- 個人資料維護（US8 /me；需認證，不套 require_password_current 逃生門） ---
+# --- 個人資料維護（US8 /me）---
+#
+# ⚠️ 本段的端點**不是整段豁免密碼閘**：讀個資、取密碼門檻、改密碼三支走豁免版（逃生門），
+# 改姓名與改 Email 走預設閘、在「須變更密碼」狀態下會被擋（403 DP_AUTH_009）——
+# `spec_us8` FR-DP-US8-08 要求完成變更前不得離開至其他功能。清單見
+# `core/auth.py::get_jwt_payload_pwd_exempt`。
 
 
 @router.get("/dp/user/me", response_model=MeResponse)
 async def get_me(
-    payload: JwtPayload = Depends(get_jwt_payload),
+    payload: JwtPayload = Depends(get_jwt_payload_pwd_exempt),
     db: AsyncSession = Depends(get_db),
 ) -> MeResponse:
     """本人個人資料：姓名 / 帳號（Email）/ 待驗證新信箱。"""
@@ -576,14 +583,14 @@ async def get_me(
 
 @router.get("/dp/user/me/password-policy", response_model=ApplicablePasswordPolicyResponse)
 async def get_my_password_policy(
-    payload: JwtPayload = Depends(get_jwt_payload),
+    payload: JwtPayload = Depends(get_jwt_payload_pwd_exempt),
     db: AsyncSession = Depends(get_db),
 ) -> ApplicablePasswordPolicyResponse:
     """本人設定新密碼時適用之門檻（#623）：管理者 12、其餘 8。
 
-    ⚠️ 刻意用 `get_jwt_payload` 而非 `require_password_current`：密碼逾期者被導到強制變更密碼頁，
-    該頁正需要本端點顯示正確門檻；掛密碼閘會讓它在最需要的時候拿不到。回應只有兩個門檻數字、
-    不含個資，與 `/dp/user/me` 不受密碼閘的理由不同但結論一致。
+    ⚠️ 刻意用**豁免版**：密碼逾期者被導到強制變更密碼頁，該頁正需要本端點顯示正確門檻；
+    走預設閘會讓它在最需要的時候拿不到。回應只有兩個門檻數字、不含個資。
+    白名單的完整清單與理由見 `core/auth.py::get_jwt_payload_pwd_exempt`。
     """
     rules = await _profile_service.password_rules(db, user_id=payload.sub)
     return ApplicablePasswordPolicyResponse(min_len=rules.min_len, char_types=rules.char_types)
@@ -603,7 +610,7 @@ async def update_me(
 async def change_password(
     data: PasswordChange,
     db: AsyncSession = Depends(get_db),
-    operator: OperatorInfo = Depends(get_operator),
+    operator: OperatorInfo = Depends(get_operator_pwd_exempt),
     _ip_limit: None = Depends(rate_limit_by_ip(_pwd_change_limiter, "pwd-change")),
 ) -> None:
     """變更密碼（含強制變更收尾）：驗舊 + 兩次一致 + 複雜度（特權 12）+ 重複性。

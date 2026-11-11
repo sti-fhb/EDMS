@@ -20,10 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.exceptions import AppError
+from app.core.password_policy import is_password_expired
 from app.core.utils import utcnow
 
 # 認證閘天生綁定平台身分表 DP_USER；此為 core 對平台身分表之唯讀查詢（非跨業務模組耦合）。
 from app.dp.users.models import DpUser
+
+#: `PWD_POLICY.EXPIRY_DAYS` 查無 / 無法解析時的後備值；與 `dp/user/service.py` 的登入判定同值。
+_DEFAULT_PWD_EXPIRY_DAYS = 90
 
 
 @dataclass(frozen=True)
@@ -140,6 +144,41 @@ async def get_jwt_payload(
         raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
 
     payload = decode_access_token(credentials.credentials)
+    user = await ensure_user_active(db, payload.sub, payload.auth_time)
+    await ensure_password_current(db, user)
+    return payload
+
+
+async def get_jwt_payload_pwd_exempt(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> JwtPayload:
+    """**逃生門**：認證與帳號狀態照驗，但**不檢查密碼是否須變更**（#929）。
+
+    `get_jwt_payload` 會把「須變更密碼」的帳號一律擋成 403 `DP_AUTH_009`。若連
+    「改密碼」本身也被擋，使用者就再也出不來——這支給的就是那組非放行不可的端點。
+
+    ## 白名單（⛔ 逐一列舉，不以路徑前綴比對）
+
+    | 端點 | 非放行不可的理由 |
+    |---|---|
+    | `PUT /dp/user/me/password` | 改密碼本身；擋了即死鎖（經 `get_operator_pwd_exempt`）|
+    | `GET /dp/user/me` | 頂列顯示姓名，擋了畫面壞 |
+    | `GET /dp/user/me/password-policy` | 變更表單要顯示「至少 N 字元」 |
+    | `POST /dp/user/renew` | 填表期間 token 可能到期，不能換發會打到一半被登出 |
+    | `POST /dp/user/logout` | 強制變更頁的「返回登入」會呼叫它（`ForceChangePasswordShell`）|
+
+    ⛔ **不要改成 `/dp/user/me*` 之類的前綴比對**：前綴會讓日後新增的 `/me/xxx` 端點
+    **自動**落入白名單，而沒有任何人決定過它該不該進來。`PUT /dp/user/me`（改姓名）與
+    `PUT /dp/user/me/email` 即**刻意不在**此列——`spec_us8` FR-DP-US8-08 要求「完成變更前
+    MUST NOT 允許離開至其他功能」，而它們既非解決問題、也非離開所需。
+
+    ⚠️ 豁免的**只有密碼狀態**：停用 / 鎖定 / 已刪 / token 早於密碼變更仍照擋。
+    """
+    if credentials is None:
+        raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
+
+    payload = decode_access_token(credentials.credentials)
     await ensure_user_active(db, payload.sub, payload.auth_time)
     return payload
 
@@ -178,7 +217,41 @@ def token_issued_before_password_change(auth_time: datetime, pwd_changed_date: d
     return auth_time < pwd_changed_date.replace(microsecond=0)
 
 
-async def ensure_user_active(db: AsyncSession, user_id: str, auth_time: datetime) -> None:
+async def ensure_password_current(db: AsyncSession, user: DpUser) -> None:
+    """密碼須為現行有效，否則 403 `DP_AUTH_009`（#929）。
+
+    判定與登入端點**同一條算式**（`dp/user/service.py` 的 `login`）：
+    `MUST_CHANGE_PWD` 為真，或 `PWD_CHANGED_DATE` 逾 `PWD_POLICY.EXPIRY_DAYS`。
+    ⛔ 不要在兩處各寫一次——登入說「要改」而本閘說「不用改」（或反之）會讓使用者卡在
+    無法脫離或根本沒被擋的狀態。
+
+    ## 為什麼收 `user` 而不是 `user_id`
+
+    呼叫端（`get_jwt_payload`）剛剛才經 `ensure_user_active` 把整個 `DpUser` 查出來。
+    收已載入的實體可**沿用那一次查詢**；本閘的額外成本只剩 `EXPIRY_DAYS` 這一次參數查詢。
+    舊版 `password_gate.require_password_current` 是自己再查一次 `DpUser`，掛到全站等於
+    每請求多兩次查詢。
+
+    ⚠️ `ParamService` 目前**無快取**（每次打 DB）。單鍵查詢與既有的 `DpUser` 查詢同級，
+    故接受；若日後成為瓶頸再評估加參數快取——⛔ 不要順手加，新增快取＝新增失效窗。
+    """
+    # 延遲載入避免 core → app.services 匯入循環（app.services 匯入的 dp 服務會回頭依賴 core）
+    from app.services import ParamService
+
+    must_change = user.must_change_pwd
+    if not must_change:
+        raw = await ParamService().get_param_value(db, "PWD_POLICY", "EXPIRY_DAYS")
+        try:
+            expiry_days = int(raw) if raw is not None else _DEFAULT_PWD_EXPIRY_DAYS
+        except ValueError:
+            expiry_days = _DEFAULT_PWD_EXPIRY_DAYS
+        must_change = is_password_expired(user.pwd_changed_date, expiry_days)
+
+    if must_change:
+        raise AppError(status_code=403, detail="請先變更密碼後再繼續", error_code="DP_AUTH_009")
+
+
+async def ensure_user_active(db: AsyncSession, user_id: str, auth_time: datetime) -> DpUser:
     """帳號存在、未停用、未鎖定、token 不早於密碼變更；`get_jwt_payload` 每請求都查。
 
     `auth_time` 為**必填**（不給預設值）：耗時長的請求會在寫入前再查一次
@@ -186,6 +259,10 @@ async def ensure_user_active(db: AsyncSession, user_id: str, auth_time: datetime
 
     ⚠️ 查的是整個 `DpUser` 實體：同一個 session 先前已載入、且仍有人持有該實體時，重查只會拿回
     記憶體裡的舊值（`expire_on_commit=False`）。請求中途再查前，呼叫端要先 `db.expire_all()`。
+
+    Returns:
+        通過檢查的 `DpUser`——供呼叫端接著做密碼狀態判定（`ensure_password_current`）而
+        **不必再查一次**。現有的兩個呼叫端忽略回傳值即可。
 
     Raises:
         AppError: 查無 / 已刪 / token 早於密碼變更（401 `DP_AUTH_002`）、停用（403 `DP_AUTH_004`）、
@@ -203,3 +280,4 @@ async def ensure_user_active(db: AsyncSession, user_id: str, auth_time: datetime
     # 指出「密碼剛被改過」——那一方可能正是盜用者（#941）。
     if token_issued_before_password_change(auth_time, user.pwd_changed_date):
         raise AppError(status_code=401, detail="登入憑證無效或已逾時，請重新登入", error_code="DP_AUTH_002")
+    return user

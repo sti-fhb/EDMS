@@ -1,12 +1,21 @@
-"""強制變更密碼閘（T023）整合測試：MUST_CHANGE_PWD 旗標 / 密碼逾效期 → 403 DP_AUTH_009。"""
+"""強制變更密碼閘整合測試：MUST_CHANGE_PWD 旗標 / 密碼逾效期 → 403 DP_AUTH_009。
+
+#929 起本閘由 `get_jwt_payload` 內建（原先的 `require_password_current` 只掛在一支端點上，
+其餘 DP 後台 / DM / ET 的 API 完全沒擋）。白名單端點改用 `get_jwt_payload_pwd_exempt`。
+"""
 
 from datetime import timedelta
 
 import pytest
+from fastapi.security import HTTPAuthorizationCredentials
 
-from app.core.auth import JwtPayload
+from app.core.auth import (
+    create_access_token,
+    ensure_password_current,
+    get_jwt_payload,
+    get_jwt_payload_pwd_exempt,
+)
 from app.core.exceptions import AppError
-from app.core.password_gate import require_password_current
 from app.core.password_policy import hash_password
 from app.core.utils import utcnow
 from app.dp.users.models import DpUser
@@ -33,29 +42,79 @@ async def _make_user(db, *, user_id, must_change=False, pwd_changed_days_ago=1):
     return user
 
 
-def _payload(sub):
-    now = utcnow()
-    return JwtPayload(sub=sub, auth_time=now, iat=now, exp=now + timedelta(minutes=15))
+def _creds(token: str) -> HTTPAuthorizationCredentials:
+    return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
-async def test_gate_allows_current_password(db):
-    """密碼現行有效（旗標 False + 未逾效期）→ 放行、回原 payload。"""
-    await _make_user(db, user_id="cur", pwd_changed_days_ago=1)
-    result = await require_password_current(payload=_payload("cur"), db=db)
-    assert result.sub == "cur"
+# ── 判定本身（以已載入的 DpUser 判，不再自行查庫）────────────────────────
 
 
-async def test_gate_blocks_must_change_flag(db):
-    """MUST_CHANGE_PWD=true → 403 DP_AUTH_009。"""
-    await _make_user(db, user_id="mc", must_change=True)
+async def test_判定_密碼現行有效者放行(db):
+    """旗標 False + 未逾效期 → 不拋。"""
+    user = await _make_user(db, user_id="cur", pwd_changed_days_ago=1)
+    await ensure_password_current(db, user)  # 不拋即通過
+
+
+async def test_判定_MUST_CHANGE_PWD為真者擋下(db):
+    user = await _make_user(db, user_id="mc", must_change=True)
     with pytest.raises(AppError) as exc:
-        await require_password_current(payload=_payload("mc"), db=db)
-    assert exc.value.status_code == 403 and exc.value.error_code == "DP_AUTH_009"
-
-
-async def test_gate_blocks_expired_password(db):
-    """密碼逾效期（種子 EXPIRY_DAYS=90）→ 403 DP_AUTH_009。"""
-    await _make_user(db, user_id="exp", pwd_changed_days_ago=91)
-    with pytest.raises(AppError) as exc:
-        await require_password_current(payload=_payload("exp"), db=db)
+        await ensure_password_current(db, user)
+    assert exc.value.status_code == 403
     assert exc.value.error_code == "DP_AUTH_009"
+
+
+async def test_判定_密碼逾效期者擋下(db):
+    """種子 EXPIRY_DAYS=90。"""
+    user = await _make_user(db, user_id="exp", pwd_changed_days_ago=91)
+    with pytest.raises(AppError) as exc:
+        await ensure_password_current(db, user)
+    assert exc.value.error_code == "DP_AUTH_009"
+
+
+# ── 掛載：預設擋、豁免版放行（#929）─────────────────────────────────
+
+
+async def test_預設閘擋下須變更密碼者(db):
+    """`get_jwt_payload` 是全站必經之路，須變更密碼者在此即被擋。"""
+    await _make_user(db, user_id="gate1", must_change=True)
+    token = create_access_token(sub="gate1", ttl_minutes=15)
+    with pytest.raises(AppError) as exc:
+        await get_jwt_payload(credentials=_creds(token), db=db)
+    assert exc.value.status_code == 403
+    assert exc.value.error_code == "DP_AUTH_009"
+
+
+async def test_豁免版放行須變更密碼者(db):
+    """白名單端點（改密碼 / 讀個資 / 換發 / 登出）用豁免版——擋了就沒人出得來。
+
+    🔴 這條與上一條**必須成對**：只有上一條的話，把豁免版也寫成會擋的實作一樣全綠，
+    而那會讓須變更密碼的帳號連改密碼都做不到，整個帳號廢掉。
+    """
+    await _make_user(db, user_id="gate2", must_change=True)
+    token = create_access_token(sub="gate2", ttl_minutes=15)
+    payload = await get_jwt_payload_pwd_exempt(credentials=_creds(token), db=db)
+    assert payload.sub == "gate2"
+
+
+async def test_豁免版仍檢查帳號狀態(db):
+    """豁免的只有「密碼狀態」，停用 / 鎖定 / 已刪仍必須擋下。
+
+    ⚠️ 少了這條，把豁免版寫成「完全不查 DP_USER」也會讓上一條通過——那等於在白名單端點
+    上開了一個不驗帳號狀態的洞。
+    """
+    user = await _make_user(db, user_id="gate3", must_change=True)
+    user.status = "DISABLED"
+    await db.flush()
+    token = create_access_token(sub="gate3", ttl_minutes=15)
+    with pytest.raises(AppError) as exc:
+        await get_jwt_payload_pwd_exempt(credentials=_creds(token), db=db)
+    assert exc.value.status_code == 403
+    assert exc.value.error_code == "DP_AUTH_004"
+
+
+async def test_密碼現行有效者兩版皆放行(db):
+    """正向錨點：未處於須變更狀態者不受本次變更影響。"""
+    await _make_user(db, user_id="ok1", pwd_changed_days_ago=1)
+    token = create_access_token(sub="ok1", ttl_minutes=15)
+    assert (await get_jwt_payload(credentials=_creds(token), db=db)).sub == "ok1"
+    assert (await get_jwt_payload_pwd_exempt(credentials=_creds(token), db=db)).sub == "ok1"

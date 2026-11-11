@@ -18,7 +18,7 @@
 import pytest
 from fastapi.routing import APIRoute
 
-from app.core.auth import get_jwt_payload
+from app.core.auth import get_jwt_payload, get_jwt_payload_pwd_exempt
 from main import app
 
 pytestmark = pytest.mark.unit
@@ -76,27 +76,37 @@ def _walk(route, inherited: tuple, out: list) -> None:
         _walk(child, inherited + deps, out)
 
 
-def _requires_jwt(route: APIRoute, inherited: tuple) -> bool:
-    """依賴鏈（含 router-level dependencies）中是否有 `get_jwt_payload`。"""
+def _gated_by(route: APIRoute, inherited: tuple, targets: frozenset) -> bool:
+    """依賴鏈（含 router-level dependencies）中是否出現 `targets` 內的任一閘。"""
     # router-level 依賴以 `Depends(...)` 物件形式保存，取其 `.dependency` 比對
     for dep in inherited:
         call = getattr(dep, "dependency", None)
-        if call is get_jwt_payload:
+        if call in targets:
             return True
-        if call is not None and _calls_jwt(call):
+        if call is not None and _dep_tree_contains(call, targets):
             return True
-    if route.dependant.call is get_jwt_payload:
+    if route.dependant.call in targets:
         return True
     stack = list(route.dependant.dependencies)
     while stack:
         dep = stack.pop()
-        if dep.call is get_jwt_payload:
+        if dep.call in targets:
             return True
         stack.extend(dep.dependencies)
     return False
 
 
-def _calls_jwt(call) -> bool:
+def _requires_jwt(route: APIRoute, inherited: tuple) -> bool:
+    """是否需認證——`get_jwt_payload` 與其豁免版皆算（兩者都驗身分，差別在密碼狀態）。"""
+    return _gated_by(route, inherited, _AUTH_GATES)
+
+
+def _is_pwd_exempt(route: APIRoute, inherited: tuple) -> bool:
+    """是否走**密碼閘豁免版**（#929）。"""
+    return _gated_by(route, inherited, _PWD_EXEMPT_GATE)
+
+
+def _dep_tree_contains(call, targets: frozenset) -> bool:
     """router-level 依賴多為包裝過的 dependency（如 `get_et_context`）——
     以 FastAPI 解析其子依賴後再比對。"""
     from fastapi.dependencies.utils import get_dependant
@@ -104,10 +114,24 @@ def _calls_jwt(call) -> bool:
     stack = [get_dependant(path="", call=call)]
     while stack:
         dep = stack.pop()
-        if dep.call is get_jwt_payload:
+        if dep.call in targets:
             return True
         stack.extend(dep.dependencies)
     return False
+
+
+#: 兩支都是**認證**閘，差別只在是否一併檢查密碼狀態（#929）。判斷「這支端點需不需要登入」
+#: 時兩者等價；判斷「有沒有經過密碼閘」要用 `_PWD_GATE` 單獨比對。
+_AUTH_GATES = frozenset({get_jwt_payload, get_jwt_payload_pwd_exempt})
+_PWD_EXEMPT_GATE = frozenset({get_jwt_payload_pwd_exempt})
+
+
+def _calls_jwt(call) -> bool:
+    return _dep_tree_contains(call, _AUTH_GATES)
+
+
+def _calls_pwd_exempt(call) -> bool:
+    return _dep_tree_contains(call, _PWD_EXEMPT_GATE)
 
 
 class TestRouteAuthCoverage:
@@ -147,3 +171,61 @@ class TestRouteAuthCoverage:
         }
         stale = sorted(f"{m} {p}" for (m, p) in _NO_AUTH_ALLOWLIST if (m, p) not in actual)
         assert not stale, "allowlist 有過時項目（端點已需認證或已移除），請刪除：\n" + "\n".join(stale)
+
+
+#: 刻意**不**經密碼閘（`get_jwt_payload`）而走豁免版的端點。**新增前請確認它真的非放行不可。**
+#:
+#: 密碼閘把「須變更密碼 / 密碼逾期」的帳號一律擋成 403 `DP_AUTH_009`（#929）。若連改密碼
+#: 本身也被擋，使用者就再也出不來——這份清單是那組逃生門的**權威清單**，不是待辦事項。
+#:
+#: ⛔ 判準是「解決問題或離開所需」，不是「方便」。`PUT /api/dp/user/me`（改姓名）與
+#: `PUT /api/dp/user/me/email` **刻意不在此列**：`spec_us8` FR-DP-US8-08 要求完成變更前
+#: 不得離開至其他功能，而它們兩者皆非必需。
+_PWD_GATE_EXEMPT_ALLOWLIST: dict[tuple[str, str], str] = {
+    ("PUT", "/api/dp/user/me/password"): "改密碼本身——擋了即死鎖",
+    ("GET", "/api/dp/user/me"): "頂列顯示姓名，擋了畫面壞",
+    ("GET", "/api/dp/user/me/password-policy"): "變更表單要顯示「至少 N 字元」",
+    ("POST", "/api/dp/user/renew"): "填表期間 token 可能到期，不能換發會打到一半被登出",
+    ("POST", "/api/dp/user/logout"): "強制變更頁的「返回登入」會呼叫它",
+}
+
+
+
+class TestPasswordGateCoverage:
+    """密碼閘（#929）的涵蓋面守門。
+
+    🔴 AC 1 說的是「DP 後台、DM、ET 的 API」——逐一為 32 個 router 各寫一條測試不現實，
+    而「只測一支」等於沒驗涵蓋面。改由本測試承擔。
+
+    判準是**反過來寫**的：不去證明「每支都有閘」（那等同重寫一次 FastAPI 的依賴解析），
+    而是證明「**走豁免版的，恰好就是清單上那幾支**」。密碼閘已內建於 `get_jwt_payload`，
+    所以任何需認證、又不在清單上的端點必然經過它。
+    """
+
+    def test_走豁免版的端點恰好等於豁免清單(self) -> None:
+        actual = {
+            (method, route.path)
+            for route, inherited in _iter_api_routes()
+            if route.path.startswith("/api/")
+            if _is_pwd_exempt(route, inherited)
+            for method in route.methods - {"HEAD", "OPTIONS"}
+        }
+        expected = set(_PWD_GATE_EXEMPT_ALLOWLIST)
+        extra = sorted(f"{m} {p}" for (m, p) in actual - expected)
+        missing = sorted(f"{m} {p}" for (m, p) in expected - actual)
+        assert not extra, (
+            "下列端點走了密碼閘豁免版但不在清單內——若確實非放行不可，"
+            "請連同理由加進 _PWD_GATE_EXEMPT_ALLOWLIST：\n" + "\n".join(extra)
+        )
+        assert not missing, (
+            "豁免清單有過時項目（端點已改走預設閘或已移除），請刪除：\n" + "\n".join(missing)
+        )
+
+    def test_掃描到的需認證端點數量合理(self) -> None:
+        """防呆：依賴解析若壞掉（全判成未認證），上面那條會**假綠**。"""
+        authed = [
+            route
+            for route, inherited in _iter_api_routes()
+            if route.path.startswith("/api/") and _requires_jwt(route, inherited)
+        ]
+        assert len(authed) > 50, f"只掃到 {len(authed)} 個需認證端點，依賴解析可能失效"
