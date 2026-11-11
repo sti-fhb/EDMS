@@ -18,9 +18,12 @@ import { getFieldErrors } from "../utils/zodUtils"
 
 /**
  * 強制變更密碼頁殼（US1 §11 建閘 + 頁殼；US8 填實提交）。
- * 逾效期 / 初始密碼首登者被 password_gate（DP_AUTH_009）擋下並導向此頁，未完成變更不得離開。
- * 沿用同一 `PUT /me/password` 端點、仍需舊密碼（逾效期密碼仍有效可作舊密碼）；成功後清強制變更
- * 旗標放行至一般功能（不需重登）。提示數字依 PWD_POLICY 動態渲染（併 #77）。
+ * 逾效期 / 初始密碼首登者被 `get_jwt_payload` 內建的密碼閘擋下（403 `DP_AUTH_009`，#929），
+ * 由 `services/http.ts` 攔截後置起 `mustChangePwd`，`RootLayout` 據此顯示本頁；未完成變更不得
+ * 離開。登入回應帶 `must_change_pwd=true` 時亦同。
+ * 沿用同一 `PUT /me/password` 端點、仍需舊密碼（逾效期密碼仍有效可作舊密碼）；成功後**回到
+ * 登入頁**以新密碼重新登入（#941：變更前簽發的 token 一律失效，沿用舊 token 會 401）。
+ * 提示數字依 PWD_POLICY 動態渲染（併 #77）。
  */
 export function ForceChangePasswordShell() {
   const { logout, endSessionAfterPasswordChange } = useAuth()

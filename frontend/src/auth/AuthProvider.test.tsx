@@ -31,11 +31,12 @@ const EXPIRY_CHECK_MS = 15 * 1000
 const RENEW_INTERVAL_MS = 4 * 60 * 1000
 
 function Harness() {
-  const { isAuthenticated, sessionEndedReason, endSessionAfterPasswordChange } = useAuth()
+  const { isAuthenticated, sessionEndedReason, endSessionAfterPasswordChange, mustChangePwd } = useAuth()
   return (
     <>
       <div data-testid="status">{isAuthenticated ? "authed" : "anon"}</div>
       <div data-testid="reason">{sessionEndedReason ?? "none"}</div>
+      <div data-testid="mustChange">{mustChangePwd ? "yes" : "no"}</div>
       {/* 代替 ChangePasswordDialog / ForceChangePasswordShell 的觸發點（#941） */}
       <button onClick={endSessionAfterPasswordChange}>模擬密碼變更完成</button>
       {!isAuthenticated && <LoginOverlay />}
@@ -182,6 +183,33 @@ describe("AuthProvider 自動登出", () => {
 
     expect(screen.getByTestId("status")).toHaveTextContent("anon")
     expect(screen.getByTestId("reason")).toHaveTextContent("PWD_CHANGED")
+  })
+
+  it("須變更密碼（403 DP_AUTH_009）→ 置起旗標顯示強制變更頁，⛔ 不得登出（#929）", async () => {
+    // #929 之前後端只有一支端點擋這個碼，前端**完全沒有處理**——
+    // `ForceChangePasswordShell` 的註解寫「被 password_gate 擋下並導向此頁」，但沒有任何
+    // 程式碼實作，403 會變成某個畫面上的一般錯誤訊息。
+    renderAuth()
+    await login()
+
+    await expect(respond403("DP_AUTH_009", "請先變更密碼後再繼續")).rejects.toThrow()
+
+    await waitFor(() => expect(screen.getByTestId("mustChange")).toHaveTextContent("yes"))
+    // 🔴 仍在登入中：被要求改密碼不是「帳號失效」，登出會讓使用者連改密碼的 session 都沒了
+    expect(screen.getByTestId("status")).toHaveTextContent("authed")
+    expect(screen.getByTestId("reason")).toHaveTextContent("none")
+  })
+
+  it("⛔ 其他 403（權限不足）不得置起須變更旗標（#929 反向錨點）", async () => {
+    // 少了這條，把 403 一律當成「須變更密碼」也會讓上一條通過——
+    // 而那會讓任何權限不足的操作都把使用者丟進強制變更頁。
+    renderAuth()
+    await login()
+
+    await expect(respond403("DP_AUTH_006", "需要模組管理者權限")).rejects.toThrow()
+
+    expect(screen.getByTestId("mustChange")).toHaveTextContent("no")
+    expect(screen.getByTestId("status")).toHaveTextContent("authed")
   })
 
   it("使用中被管理者停用（403 DP_AUTH_004）→ 下一次請求即回登入畫面並提示已停用", async () => {

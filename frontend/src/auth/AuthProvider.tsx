@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 
 import { authApi } from "./authService"
 import { AuthContext } from "./authContext"
-import { setAuthToken, setOnSessionEnded } from "../services/http"
+import { setAuthToken, setOnPasswordChangeRequired, setOnSessionEnded } from "../services/http"
 import type { SessionEndReason } from "../services/http"
 
 // 閒置換發（spec_us1 §12）：使用者於到期前仍有操作即靜默換發；持續閒置則讓 token 自然逾時。
@@ -101,6 +101,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOnSessionEnded(endSession)
     return () => setOnSessionEnded(null)
   }, [endSession])
+
+  // #929：後端回 403 DP_AUTH_009（須變更密碼 / 密碼逾期）→ 置起旗標，RootLayout 即顯示
+  // 強制變更頁。⛔ 不登出：使用者仍在登入中，登出會連改密碼所需的 session 都沒了。
+  // 旗標不在此處清除——改完密碼走 endSessionAfterPasswordChange 回登入頁（#941）。
+  useEffect(() => {
+    const markMustChange = () => setMustChangePwd(true)
+    setOnPasswordChangeRequired(markMustChange)
+    return () => setOnPasswordChangeRequired(null)
+  }, [])
 
   // 記錄使用者操作時間，供換發計時器判斷「活躍中」。
   useEffect(() => {

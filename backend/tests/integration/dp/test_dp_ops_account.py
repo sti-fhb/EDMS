@@ -174,7 +174,16 @@ async def test_unlock_ops_account_allowed(db):
 
 
 async def test_ops_account_can_rename_self_via_profile(db, client):
-    """本人經個人資料維護（US8）改自己的姓名照常——保護只針對管理者路徑。"""
+    """本人經個人資料維護（US8）改自己的姓名照常——保護只針對管理者路徑。
+
+    ⚠️ **前置要先清 `MUST_CHANGE_PWD`**（#929）：seed 把本帳號種成「須變更密碼」，作為
+    「初始密碼雜湊公開在 repo」的補償控制（#927 Security Review M-2）。#929 把密碼閘掛上
+    全站之後，未輪替密碼的 `edmsops` 打任何端點都是 403 `DP_AUTH_009`——**那是本意**，
+    所以這裡不是繞過檢查，是把起點移到「已完成部署後的首次輪替」。
+    本條驗的是維運帳號保護規則，密碼閘本身由 `test_password_gate.py` 負責。
+    """
+    await db.execute(update(DpUser).where(DpUser.user_id == OPS_USER_ID).values(must_change_pwd=False))
+    db.expire_all()
     token = create_access_token(sub=OPS_USER_ID, ttl_minutes=15)
 
     resp = await client.put(
@@ -183,6 +192,26 @@ async def test_ops_account_can_rename_self_via_profile(db, client):
 
     assert resp.status_code == 204
     assert await db.scalar(select(DpUser.user_name).where(DpUser.user_id == OPS_USER_ID)) == "廠商維運"
+
+
+async def test_ops_account_未輪替初始密碼時全站被擋(db, client):
+    """#927 的補償控制在 #929 之後**真的生效**：未輪替初始密碼的維運帳號打不了任何端點。
+
+    🔴 這條是 #929 之於 #927 的全部價值所在。`edmsops` 的 bcrypt 雜湊公開在 public repo，
+    seed 以 `MUST_CHANGE_PWD` 當補償控制——但在 #929 之前，該旗標**只有一支端點會看**，
+    拿著雜湊破出來的密碼登入後照樣能打遍全站。少了這條測試，日後有人把 seed 的旗標拿掉
+    （或把本帳號加進豁免清單），補償控制會靜默消失而沒有任何東西變紅。
+
+    📌 也是部署前的提醒：本行為對「已部署但從未輪替初始密碼」的環境同樣成立。
+    """
+    await db.execute(update(DpUser).where(DpUser.user_id == OPS_USER_ID).values(must_change_pwd=True))
+    db.expire_all()
+    token = create_access_token(sub=OPS_USER_ID, ttl_minutes=15)
+
+    resp = await client.get("/api/dp/users", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 403
+    assert resp.json()["error_code"] == "DP_AUTH_009"
 
 
 # ── 權限管理：DM ─────────────────────────────────────────────────────

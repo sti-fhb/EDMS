@@ -12,12 +12,11 @@ from typing import NoReturn
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import JwtPayload, create_access_token
+from app.core.auth import JwtPayload, create_access_token, must_change_password
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.log_redaction import mask_email
 from app.core.password_hashing import verify_password_async
-from app.core.password_policy import is_password_expired
 from app.core.request_context import get_client_ip
 from app.core.utils import utcnow
 from app.dp.user.repository import AuthRepository
@@ -31,7 +30,6 @@ _SYSTEM_USER = "SYSTEM"
 _DEFAULT_FAIL_LOCK_COUNT = 5
 _DEFAULT_LOCK_MINUTES = 30
 _DEFAULT_ACCESS_TTL_MIN = 15
-_DEFAULT_EXPIRY_DAYS = 90
 _DEFAULT_RENEW_MAX_HOURS = 8
 
 # 查無有效 DP_USER 列時的**唯一**對外訊息（#208 防帳號列舉）。
@@ -179,8 +177,9 @@ class AuthService:
         user.updated_date = now
         ttl = await self._access_ttl_minutes(db)
         token = create_access_token(sub=user.user_id, ttl_minutes=ttl)
-        expiry_days = await self._params.get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_EXPIRY_DAYS)
-        must_change = user.must_change_pwd or is_password_expired(user.pwd_changed_date, expiry_days, now=now)
+        # 與每請求密碼閘共用同一支判定（#929）——⛔ 不要改回在此地內嵌算式，兩邊漂移會讓
+        # 「登入說要改、閘說不用改」或反向的狀況發生，而那兩種都讓使用者卡住。
+        must_change = await must_change_password(db, user, now=now)
         await db.flush()
         await self._audit_auth(db, user.user_id, "LOGIN", "SUCCESS", ip, None)
         # `expires_in` 讓前端算得出到期時間，據以主動登出（#741）。刻意回**相對秒數**而非
