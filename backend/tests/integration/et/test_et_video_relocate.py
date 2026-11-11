@@ -12,6 +12,7 @@
 
 import json
 import os
+import tempfile
 import uuid
 
 import pytest
@@ -28,6 +29,26 @@ from tests.integration.et.test_et_staged_write_paths import _bearer, _course_wit
 pytestmark = pytest.mark.integration
 
 _CONTENT = b"legacy-video"
+
+
+def _posix_file_modes_supported() -> bool:
+    """此平台能否設定並讀回 POSIX 的擁有者／群組／其他權限位元（#937）。
+
+    以實際設一次 0600 再讀回判定，而非看平台名稱。Windows 的 `chmod` 只控制唯讀旗標，
+    `stat` 一律回報 0666 或 0444，紀錄檔權限的安全性質在該平台上本來就不存在。
+    """
+    with tempfile.TemporaryDirectory() as d:
+        probe = os.path.join(d, "probe")
+        open(probe, "w").close()
+        os.chmod(probe, 0o600)
+        return os.stat(probe).st_mode & 0o777 == 0o600
+
+
+#: 紀錄檔權限相關測試：遷移腳本只在正式機（Linux）執行，GitHub CI 照常驗證這兩條。
+_requires_posix_file_modes = pytest.mark.skipif(
+    not _posix_file_modes_supported(),
+    reason="此平台沒有 POSIX 檔案權限位元（Windows），0600 無從設定與驗證；正式機 Linux 與 GitHub CI 照常執行",
+)
 
 
 @pytest.fixture
@@ -363,6 +384,7 @@ class TestSecurityHardening:
         assert await relocate_videos.run(db, apply=True, allow_shared=True, log_path=log) == 0
         assert await _path_of(db, v["video_id"]) == v["new"]
 
+    @_requires_posix_file_modes
     async def test_他人可寫的紀錄拒絕回復(self, client, db, root, scoped) -> None:
         uid = await _user(db, "ZT_RL18")
         v = await _legacy_video(client, db, uid, root)
@@ -447,6 +469,7 @@ class TestStagedSnapshotAfterRelocation:
 
 
 class TestLogFileHandling:
+    @_requires_posix_file_modes
     async def test_既有的寬權限紀錄檔會被收緊(self, client, db, root, scoped) -> None:
         uid = await _user(db, "ZT_RL21")
         v = await _legacy_video(client, db, uid, root)

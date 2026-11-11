@@ -66,6 +66,10 @@ OWNERSHIP_FENCE_MARKER = ".ownership-fence-enforced"
 #: Windows 沒有 `O_NOFOLLOW`；該平台的檔名層級連結需管理者權限才建得出來，退化為 0。
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
+#: `_link_entry` 只在 Windows 允許改走較弱路徑（#937）。其他平台判定為不支援時一律拒絕：
+#: 能力偵測比的是函式物件本身，`os.link` 被任何工具包一層就會「看起來不支援」，不能因此靜默降級。
+_WEAK_LINK_ALLOWED = os.name == "nt"
+
 _TOO_LARGE_OR_BAD_FORMAT = AppError(
     status_code=422,
     detail="影片格式或大小不符",
@@ -449,12 +453,36 @@ def _link_entry(root: str, source: str, target: str) -> None:
     時間；不刷新的話，剛掛上、交易還沒 commit 的新名字可能被當成舊孤兒刪掉。刷新放在 link 之前
     （刷的是同一個 inode），新名字出現的那一刻 mtime 就已是新的，不留空窗。
 
-    link / utime 一律不跟隨連結：`_regular_entry` 檢查之後 source 若被換成連結，掛上的是連結本身，
-    之後的讀取端圍籬會以解析後位置判定，不會把連結指向的檔當成本教材的。
+    Linux 上 link / utime 一律不跟隨連結：`_regular_entry` 檢查之後 source 若被換成連結，掛上的是連結
+    本身，之後的讀取端圍籬會以解析後位置判定，不會把連結指向的檔當成本教材的。
+
+    ## 平台差異（#937）
+
+    - **Linux（正式環境、GitHub CI）**：`utime` / `link` 帶 `follow_symlinks=False`，強度同上、無空窗。
+    - **Windows（開發機）**：先 `lstat` 確認 source 不是連結、是就拒絕，再一般呼叫。**強度較弱**：
+      `lstat` 與 `utime` / `link` 之間有 TOCTOU 空窗，期間 source 若被換成連結即被跟隨。
+
+    Windows 不支援這兩個呼叫的 `follow_symlinks`（呼叫即拋 `NotImplementedError`，按「更新」會 500）。
+    空窗要被利用，須在影片目錄建立符號連結，而 Windows 建立符號連結需管理者權限或開發人員模式——
+    在開發機上不構成實際威脅；正式環境不跑在 Windows 上。比照本檔 `_O_NOFOLLOW` 在 Windows 退化為 0 的處理。
+    能力偵測決定「能不能走強路徑」，平台名稱只決定「可以接受降級」的範圍（`_WEAK_LINK_ALLOWED`）：
+    非 Windows 平台判定為不支援時直接拋錯，不靜默改走較弱路徑。
+
+    Raises:
+        ValueError: Windows 路徑上 source 是連結。
+        RuntimeError: 非 Windows 平台不支援 `follow_symlinks`——部署異常，刻意不讓呼叫端吞掉。
     """
-    os.utime(source, follow_symlinks=False)
+    if os.utime in os.supports_follow_symlinks and os.link in os.supports_follow_symlinks:
+        no_follow: dict[str, bool] = {"follow_symlinks": False}
+    elif not _WEAK_LINK_ALLOWED:
+        raise RuntimeError("此平台的 os.utime / os.link 不支援 follow_symlinks，拒絕以較弱方式掛檔")
+    else:
+        if stat.S_ISLNK(os.lstat(source).st_mode):
+            raise ValueError("影片來源是連結")
+        no_follow = {}
+    os.utime(source, **no_follow)
     try:
-        os.link(source, target, follow_symlinks=False)
+        os.link(source, target, **no_follow)
     except FileExistsError:
         if not os.path.samefile(source, target):
             raise
