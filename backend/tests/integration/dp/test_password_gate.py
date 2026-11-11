@@ -199,9 +199,7 @@ async def test_端到端_密碼正常者不會收到009(client, db, url):
 # ── AC 3：改完密碼後閘門立即放行 ─────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    ("must_change", "days_ago"), [(True, 1), (False, 91)], ids=["旗標為真", "逾效期"]
-)
+@pytest.mark.parametrize(("must_change", "days_ago"), [(True, 1), (False, 91)], ids=["旗標為真", "逾效期"])
 async def test_改完密碼後閘門立即放行(client, db, must_change, days_ago):
     """AC 3 的**合成**驗證：擋下 → 改密碼 → 放行，一條測試走完整條因果鏈。
 
