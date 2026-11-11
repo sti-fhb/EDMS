@@ -155,6 +155,34 @@ async def test_密碼現行有效者兩版皆放行(db):
     assert (await get_jwt_payload_pwd_exempt(credentials=_creds(token), db=db)).sub == "ok1"
 
 
+async def test_讀個資端點不在逃生門內(client, db):
+    """`GET /dp/user/me` 走**預設閘**——須變更密碼者讀不到個資（#929 Security Review MEDIUM-1）。
+
+    🔴 它曾以「頂列顯示姓名，擋了畫面壞」的理由被放進豁免清單，而那個理由是假的：
+    `AppHeader` 與 `WelcomePage` 的 me query 都帶 `enabled: !mustChangePwd`，頁殼本身也
+    從不呼叫它。它又是該組端點中唯一回傳 PII（登入 Email / 姓名）的一支。
+
+    ⚠️ 這條與 `test_route_auth_coverage.py` 的豁免清單**不重複**：那邊證明的是「清單裡沒有
+    這一支」，這邊證明的是「因此真的擋得下來」。只改清單不改 `router.py` 的話，那邊會紅、
+    這邊也會紅；只改 `router.py` 不改清單則兩邊都紅——兩個方向都有人看著。
+    """
+    await _make_user(db, user_id="me403", must_change=True)
+    token = create_access_token(sub="me403", ttl_minutes=15)
+    r = await client.get("/api/dp/user/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 403, f"讀個資未被擋下：{r.status_code} {r.text}"
+    assert r.json()["error_code"] == "DP_AUTH_009"
+
+
+async def test_取密碼門檻仍在逃生門內(client, db):
+    """正向錨點：少了這條，把整段 /me 都改走預設閘也會讓上一條綠——而那會讓強制變更頁
+    拿不到「至少 N 字元」的門檻，使用者看不到規則、只會一直被擋。"""
+    await _make_user(db, user_id="pol2", must_change=True)
+    token = create_access_token(sub="pol2", ttl_minutes=15)
+    r = await client.get("/api/dp/user/me/password-policy", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, f"密碼門檻被擋下，強制變更頁會失去規則提示：{r.text}"
+    assert "min_len" in r.json()
+
+
 # ── 端到端：真的打 DM / ET 端點（驗「涵蓋面推導」的前提）──────────────────
 
 

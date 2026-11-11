@@ -170,12 +170,13 @@ class TestRouteAuthCoverage:
 #: 密碼閘把「須變更密碼 / 密碼逾期」的帳號一律擋成 403 `DP_AUTH_009`（#929）。若連改密碼
 #: 本身也被擋，使用者就再也出不來——這份清單是那組逃生門的**權威清單**，不是待辦事項。
 #:
-#: ⛔ 判準是「解決問題或離開所需」，不是「方便」。`PUT /api/dp/user/me`（改姓名）與
-#: `PUT /api/dp/user/me/email` **刻意不在此列**：`spec_us8` FR-DP-US8-08 要求完成變更前
-#: 不得離開至其他功能，而它們兩者皆非必需。
+#: ⛔ 判準是「解決問題或離開所需」，不是「方便」。`PUT /api/dp/user/me`（改姓名）、
+#: `PUT /api/dp/user/me/email` 與 `GET /api/dp/user/me`（讀個資）**刻意不在此列**：
+#: 前兩者受 `spec_us8` FR-DP-US8-08「完成變更前不得離開至其他功能」拘束；`GET /me` 則是
+#: 前端在該狀態下本就不發（`AppHeader` / `WelcomePage` 的 me query 皆帶 `!mustChangePwd`），
+#: 且它是這組端點中唯一回傳 PII 的一支。完整理由見 `core/auth.py::get_jwt_payload_pwd_exempt`。
 _PWD_GATE_EXEMPT_ALLOWLIST: dict[tuple[str, str], str] = {
     ("PUT", "/api/dp/user/me/password"): "改密碼本身——擋了即死鎖",
-    ("GET", "/api/dp/user/me"): "頂列顯示姓名，擋了畫面壞",
     ("GET", "/api/dp/user/me/password-policy"): "變更表單要顯示「至少 N 字元」",
     ("POST", "/api/dp/user/renew"): "填表期間 token 可能到期，不能換發會打到一半被登出",
     ("POST", "/api/dp/user/logout"): "強制變更頁的「返回登入」會呼叫它",

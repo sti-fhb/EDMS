@@ -566,18 +566,23 @@ async def module_summary(
 
 # --- 個人資料維護（US8 /me）---
 #
-# ⚠️ 本段的端點**不是整段豁免密碼閘**：讀個資、取密碼門檻、改密碼三支走豁免版（逃生門），
-# 改姓名與改 Email 走預設閘、在「須變更密碼」狀態下會被擋（403 DP_AUTH_009）——
-# `spec_us8` FR-DP-US8-08 要求完成變更前不得離開至其他功能。清單見
+# ⚠️ 本段的端點**不是整段豁免密碼閘**：只有取密碼門檻與改密碼兩支走豁免版（逃生門）。
+# 讀個資、改姓名、改 Email 走預設閘，在「須變更密碼」狀態下會被擋（403 DP_AUTH_009）——
+# `spec_us8` FR-DP-US8-08 要求完成變更前不得離開至其他功能。清單與各自的理由見
 # `core/auth.py::get_jwt_payload_pwd_exempt`。
 
 
 @router.get("/dp/user/me", response_model=MeResponse)
 async def get_me(
-    payload: JwtPayload = Depends(get_jwt_payload_pwd_exempt),
+    payload: JwtPayload = Depends(get_jwt_payload),
     db: AsyncSession = Depends(get_db),
 ) -> MeResponse:
-    """本人個人資料：姓名 / 帳號（Email）/ 待驗證新信箱。"""
+    """本人個人資料：姓名 / 帳號（Email）/ 待驗證新信箱。
+
+    ⚠️ 走**預設閘**（須變更密碼者會被擋）。前端在該狀態下刻意不發這支查詢，理由見
+    `core/auth.py::get_jwt_payload_pwd_exempt` 的白名單說明——⛔ 不要因為「個資頁拿不到資料」
+    就把它改回豁免版，該頁此時被強制變更頁殼整個蓋住。
+    """
     return await _profile_service.get_me(db, user_id=payload.sub)
 
 

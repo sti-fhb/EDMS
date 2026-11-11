@@ -163,15 +163,23 @@ async def get_jwt_payload_pwd_exempt(
     | 端點 | 非放行不可的理由 |
     |---|---|
     | `PUT /dp/user/me/password` | 改密碼本身；擋了即死鎖（經 `get_operator_pwd_exempt`）|
-    | `GET /dp/user/me` | 頂列顯示姓名，擋了畫面壞 |
     | `GET /dp/user/me/password-policy` | 變更表單要顯示「至少 N 字元」 |
     | `POST /dp/user/renew` | 填表期間 token 可能到期，不能換發會打到一半被登出 |
     | `POST /dp/user/logout` | 強制變更頁的「返回登入」會呼叫它（`ForceChangePasswordShell`）|
 
+    ⛔ **判準是「解決問題或離開所需」，不是「方便」**。本清單只有四條，刻意不在此列的有三支：
+
+    - `PUT /dp/user/me`（改姓名）、`PUT /dp/user/me/email`：`spec_us8` FR-DP-US8-08 要求
+      「完成變更前 MUST NOT 允許離開至其他功能」，兩者既非解決問題、也非離開所需。
+    - `GET /dp/user/me`（讀個資）：⚠️ **它曾以「頂列顯示姓名，擋了畫面壞」的理由進過本清單，
+      那個理由是假的**。前端在這個狀態下**刻意不發**這支查詢——`AppHeader.tsx` 與
+      `WelcomePage.tsx` 的 me query 都是 `enabled: isAuthenticated && !mustChangePwd`，
+      `ForceChangePasswordShell` 自己也從不呼叫它。還會發的只有 `ProfilePage` / `UsersPage`，
+      而那兩頁在此狀態下被全畫面頁殼蓋住、使用者看不到也點不到。它又是這組端點中唯一
+      回傳 PII（登入 Email、姓名、待驗證新信箱）的一支，故改走預設閘。
+
     ⛔ **不要改成 `/dp/user/me*` 之類的前綴比對**：前綴會讓日後新增的 `/me/xxx` 端點
-    **自動**落入白名單，而沒有任何人決定過它該不該進來。`PUT /dp/user/me`（改姓名）與
-    `PUT /dp/user/me/email` 即**刻意不在**此列——`spec_us8` FR-DP-US8-08 要求「完成變更前
-    MUST NOT 允許離開至其他功能」，而它們既非解決問題、也非離開所需。
+    **自動**落入白名單，而沒有任何人決定過它該不該進來——上面那三支正是會被前綴誤收的。
 
     ⚠️ 豁免的**只有密碼狀態**：停用 / 鎖定 / 已刪 / token 早於密碼變更仍照擋。
     """
