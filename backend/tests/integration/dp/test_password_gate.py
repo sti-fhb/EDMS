@@ -112,6 +112,41 @@ async def test_豁免版仍檢查帳號狀態(db):
     assert exc.value.error_code == "DP_AUTH_004"
 
 
+@pytest.mark.parametrize(
+    ("must_change", "days_ago", "expect_blocked"),
+    [(True, 1, True), (False, 91, True), (False, 1, False), (False, 90, True), (False, 89, False)],
+    ids=["旗標為真", "逾效期", "正常", "剛好滿90天", "89天"],
+)
+async def test_登入回應與閘門判定一致(client, db, must_change, days_ago, expect_blocked):
+    """登入回的 `must_change_pwd` 必須與閘門是否擋下**完全一致**（#929）。
+
+    🔴 兩者共用 `must_change_password` 之後算式必然相同，但**接線**可能漂移——例如日後有人
+    在登入端補了額外條件、或閘門改成只看旗標。那時使用者會卡在兩種狀態之一：
+    登入說要改但閘不擋（看到強制變更頁卻能繞過），或登入說不用改但閘一直擋（改完仍進不去）。
+    本條以同一個帳號同時走兩條路，兩邊不一致即紅。
+    """
+    uid = f"sync{days_ago}{int(must_change)}"
+    user = await _make_user(db, user_id=uid, must_change=must_change, pwd_changed_days_ago=days_ago)
+    user.pwd_hash = hash_password("Abcd1234")
+    await db.flush()
+
+    r = await client.post("/api/login", json={"email": f"{uid}@edms.local", "password": "Abcd1234"})
+    assert r.status_code == 200, r.text
+    login_says = r.json()["must_change_pwd"]
+
+    token = create_access_token(sub=uid, ttl_minutes=15)
+    try:
+        await get_jwt_payload(credentials=_creds(token), db=db)
+        gate_blocked = False
+    except AppError as exc:
+        assert exc.error_code == "DP_AUTH_009"
+        gate_blocked = True
+
+    assert login_says == gate_blocked == expect_blocked, (
+        f"登入回 {login_says}、閘門擋下 {gate_blocked}、預期 {expect_blocked}——兩條路已漂移"
+    )
+
+
 async def test_密碼現行有效者兩版皆放行(db):
     """正向錨點：未處於須變更狀態者不受本次變更影響。"""
     await _make_user(db, user_id="ok1", pwd_changed_days_ago=1)

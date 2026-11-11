@@ -126,14 +126,6 @@ _AUTH_GATES = frozenset({get_jwt_payload, get_jwt_payload_pwd_exempt})
 _PWD_EXEMPT_GATE = frozenset({get_jwt_payload_pwd_exempt})
 
 
-def _calls_jwt(call) -> bool:
-    return _dep_tree_contains(call, _AUTH_GATES)
-
-
-def _calls_pwd_exempt(call) -> bool:
-    return _dep_tree_contains(call, _PWD_EXEMPT_GATE)
-
-
 class TestRouteAuthCoverage:
     def test_掃描到的_api_端點數量合理(self) -> None:
         """防呆：若路由展開邏輯壞掉（回 0 條），下面那條測試會**假綠**。"""
@@ -190,7 +182,6 @@ _PWD_GATE_EXEMPT_ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 
-
 class TestPasswordGateCoverage:
     """密碼閘（#929）的涵蓋面守門。
 
@@ -217,9 +208,7 @@ class TestPasswordGateCoverage:
             "下列端點走了密碼閘豁免版但不在清單內——若確實非放行不可，"
             "請連同理由加進 _PWD_GATE_EXEMPT_ALLOWLIST：\n" + "\n".join(extra)
         )
-        assert not missing, (
-            "豁免清單有過時項目（端點已改走預設閘或已移除），請刪除：\n" + "\n".join(missing)
-        )
+        assert not missing, "豁免清單有過時項目（端點已改走預設閘或已移除），請刪除：\n" + "\n".join(missing)
 
     def test_掃描到的需認證端點數量合理(self) -> None:
         """防呆：依賴解析若壞掉（全判成未認證），上面那條會**假綠**。"""

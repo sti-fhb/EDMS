@@ -217,13 +217,29 @@ def token_issued_before_password_change(auth_time: datetime, pwd_changed_date: d
     return auth_time < pwd_changed_date.replace(microsecond=0)
 
 
+async def must_change_password(db: AsyncSession, user: DpUser, *, now: datetime | None = None) -> bool:
+    """使用者是否處於「須變更密碼」狀態——**登入端點與每請求閘共用的唯一判定**。
+
+    `MUST_CHANGE_PWD` 為真，或 `PWD_CHANGED_DATE` 逾 `PWD_POLICY.EXPIRY_DAYS`。
+
+    ⛔ **不要在呼叫端另寫一份**：登入（`dp/user/service.py::login`）據此決定回應的
+    `must_change_pwd`、本閘據此擋下請求。兩邊若各寫一次，一旦漂移就會出現「登入說要改、
+    閘說不用改」（使用者看到強制變更頁卻其實沒被擋）或反向的「登入說不用改、閘卻一直擋」
+    （改完密碼仍進不去）。後備值與參數解析一併收在這裡，避免兩份 90。
+
+    `now` 供登入端傳入該請求的統一時點；閘門不傳，取當下即可。
+    """
+    # 延遲載入避免 core → app.services 匯入循環（app.services 匯入的 dp 服務會回頭依賴 core）
+    from app.services import ParamService
+
+    if user.must_change_pwd:
+        return True
+    expiry_days = await ParamService().get_int_param(db, "PWD_POLICY", "EXPIRY_DAYS", _DEFAULT_PWD_EXPIRY_DAYS)
+    return is_password_expired(user.pwd_changed_date, expiry_days, now=now)
+
+
 async def ensure_password_current(db: AsyncSession, user: DpUser) -> None:
     """密碼須為現行有效，否則 403 `DP_AUTH_009`（#929）。
-
-    判定與登入端點**同一條算式**（`dp/user/service.py` 的 `login`）：
-    `MUST_CHANGE_PWD` 為真，或 `PWD_CHANGED_DATE` 逾 `PWD_POLICY.EXPIRY_DAYS`。
-    ⛔ 不要在兩處各寫一次——登入說「要改」而本閘說「不用改」（或反之）會讓使用者卡在
-    無法脫離或根本沒被擋的狀態。
 
     ## 為什麼收 `user` 而不是 `user_id`
 
@@ -235,19 +251,7 @@ async def ensure_password_current(db: AsyncSession, user: DpUser) -> None:
     ⚠️ `ParamService` 目前**無快取**（每次打 DB）。單鍵查詢與既有的 `DpUser` 查詢同級，
     故接受；若日後成為瓶頸再評估加參數快取——⛔ 不要順手加，新增快取＝新增失效窗。
     """
-    # 延遲載入避免 core → app.services 匯入循環（app.services 匯入的 dp 服務會回頭依賴 core）
-    from app.services import ParamService
-
-    must_change = user.must_change_pwd
-    if not must_change:
-        raw = await ParamService().get_param_value(db, "PWD_POLICY", "EXPIRY_DAYS")
-        try:
-            expiry_days = int(raw) if raw is not None else _DEFAULT_PWD_EXPIRY_DAYS
-        except ValueError:
-            expiry_days = _DEFAULT_PWD_EXPIRY_DAYS
-        must_change = is_password_expired(user.pwd_changed_date, expiry_days)
-
-    if must_change:
+    if await must_change_password(db, user):
         raise AppError(status_code=403, detail="請先變更密碼後再繼續", error_code="DP_AUTH_009")
 
 
