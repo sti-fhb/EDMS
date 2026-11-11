@@ -241,10 +241,10 @@ async def test_改完密碼後閘門立即放行(client, db, must_change, days_a
     「改完密碼後立即可正常使用」，實際語意是「以新密碼重登後立即可用」——同一工作階段
     延續的那個讀法在 #941 已經不成立。
 
-    📌 **兩種進入狀態都要走一次**：旗標為真只發生在 `edmsops`（全專案唯一把
-    `MUST_CHANGE_PWD` 設為 true 的地方是 vendor ops 的 seed migration），一般帳號走的是
-    逾效期。兩者的脫困條件不同——前者靠清旗標、後者靠更新 `PWD_CHANGED_DATE`，
-    只測旗標那一種，逾期帳號能不能出得來是沒驗過的。
+    📌 **兩種進入狀態都要走一次**：旗標為真只來自 migration（`36af0d3943bf` 的 `edmsops`、
+    `4c6a9a8595a4` 的 `DEMOADMIN` 等示範帳號），一般使用者走的是逾效期。兩者的脫困條件
+    不同——前者靠清旗標、後者靠更新 `PWD_CHANGED_DATE`，只測旗標那一種，逾期帳號能不能
+    出得來是沒驗過的。
     """
     uid = f"ac3{int(must_change)}"
     await _make_user(db, user_id=uid, must_change=must_change, pwd_changed_days_ago=days_ago)

@@ -248,9 +248,11 @@ async def must_change_password(db: AsyncSession, user: DpUser, *, now: datetime 
     ⛔ **不要在這裡夾回**：`is_password_expired` 把「≤ 0 ＝停用效期」寫成了支援的語意，
     在呼叫端悄悄推翻它，會變成「文件說可以關、實際關不掉」。要改就改那一側。
 
-    🔴 但要知道這條的份量**在 #929 之後變了**：`MUST_CHANGE_PWD` 全專案唯一會被設為 true
-    的地方是 vendor ops 帳號的 seed migration，一般帳號恆為 false。也就是說正式環境的這道
-    閘實際上**只由效期驅動**——把 `EXPIRY_DAYS` 設成 0 不是關掉其中一條判定，是關掉整道閘。
+    🔴 但要知道這條的份量**在 #929 之後變了**。`MUST_CHANGE_PWD` 不由任何應用程式路徑設為
+    true（`repository.create_user` 的該參數目前無呼叫端會傳 True），只由兩支 migration 設：
+    `36af0d3943bf`（`edmsops`，無條件）與 `4c6a9a8595a4`（`DEMOADMIN` 等示範帳號，**僅當
+    密碼仍為 seed 雜湊**）。也就是說**一般使用者恆為 false，這道閘對他們只由效期驅動**——
+    把 `EXPIRY_DAYS` 設成 0 對那群人不是關掉其中一條判定，是關掉整道閘。
     """
     # 延遲載入避免 core → app.services 匯入循環（app.services 匯入的 dp 服務會回頭依賴 core）
     from app.services import ParamService
