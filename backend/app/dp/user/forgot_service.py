@@ -5,7 +5,7 @@ token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（
 重設更新密碼 + 追加歷程 + 作廢 token + 稽核；**不解除鎖定**（FR-07）。
 門檻值（RESET_TOKEN_TTL_MIN / MIN_LEN / ADMIN_MIN_LEN / CHAR_TYPES / HISTORY_COUNT）讀平台級 DP_PARAM（SRVDP001）。
 
-## 停用帳號完全不走本流程（#953）
+## 停用帳號完全不走本流程（#953，`spec_us3` FR-DP-US3-09 / AC 7）
 
 `STATUS='DISABLED'` 的帳號：申請端比照「帳號不存在」早退，重設端與門檻查詢端一律回與 token
 失效相同的 `DP_PWD_005`。**兩端都要擋**——只擋申請端的話，停用當下還在外面、尚未過期的連結
