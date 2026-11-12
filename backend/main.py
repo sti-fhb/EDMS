@@ -20,6 +20,7 @@ from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
 from app.core.db import AsyncSessionLocal
 from app.core.exceptions import AppError
+from app.core.http_cache import DefaultNoStoreMiddleware
 from app.core.log_redaction import redact_lifespan_errors
 from app.core.log_sanitize import install_control_char_escape
 from app.core.password_hashing import shutdown as shutdown_password_executor
@@ -149,6 +150,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 未自行設定快取指示的回應預設 no-store（#959）。⚠️ 須在上傳預檢與 CORS **之後** add：
+# 位於兩者外層，預檢的 401 與 CORS preflight 回應才會一併帶上。
+app.add_middleware(DefaultNoStoreMiddleware)
 
 # 業務模組 router
 app.include_router(dp_user_router)
