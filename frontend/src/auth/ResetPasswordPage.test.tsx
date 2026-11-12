@@ -84,6 +84,29 @@ describe("ResetPasswordPage", () => {
     expect(screen.getByRole("link", { name: "返回登入" })).toBeInTheDocument()
   })
 
+  it("鎖定中重設成功 → 改顯示「帳號目前鎖定中」，不說可以登入（#958）", async () => {
+    // 重設不解除鎖定（FR-DP-US3-07），照「請以新密碼登入」操作會被 403 DP_AUTH_005 擋下
+    server.use(http.post("/api/reset-password", () => HttpResponse.json({ message: "ok", locked: true })))
+    renderReset("/reset-password?token=validtoken")
+    const user = userEvent.setup()
+    await fillReset(user)
+
+    expect(await screen.findByText("帳號目前鎖定中，請於解鎖後登入")).toBeInTheDocument()
+    expect(screen.queryByText("密碼已更新，請以新密碼登入")).not.toBeInTheDocument()
+    // 仍是成功狀態：密碼確實已更新，鎖定是另一件事
+    expect(screen.getByRole("link", { name: "返回登入" })).toBeInTheDocument()
+  })
+
+  it("未鎖定重設成功 → 維持原訊息（正向錨點）", async () => {
+    server.use(http.post("/api/reset-password", () => HttpResponse.json({ message: "ok", locked: false })))
+    renderReset("/reset-password?token=validtoken")
+    const user = userEvent.setup()
+    await fillReset(user)
+
+    expect(await screen.findByText("密碼已更新，請以新密碼登入")).toBeInTheDocument()
+    expect(screen.queryByText("帳號目前鎖定中，請於解鎖後登入")).not.toBeInTheDocument()
+  })
+
   it("部署於子路徑（/edms）時，「返回登入」指向 /edms 而非網域根目錄（#607）", async () => {
     renderReset("/reset-password?token=validtoken", "/edms")
     const user = userEvent.setup()

@@ -34,6 +34,9 @@ export function ResetPasswordPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [apiError, setApiError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  // 重設**不解除鎖定**（FR-DP-US3-07）。鎖定中仍顯示 success——密碼確實已更新，鎖定是另一件事；
+  // 但不能說「請以新密碼登入」，照做會被 403 DP_AUTH_005 擋下（#958）。
+  const [locked, setLocked] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）；`status` 讓失效連結於**點連結時**即可判定（#673）
   const { policy, hint, status } = usePasswordPolicy({ kind: "reset", token })
@@ -50,7 +53,7 @@ export function ResetPasswordPage() {
 
     setSubmitting(true)
     try {
-      await authApi.resetPassword({ token, ...parsed.data })
+      setLocked(await authApi.resetPassword({ token, ...parsed.data }))
       setDone(true)
     } catch (err) {
       setApiError(toApiError(err).errorMessage)
@@ -67,7 +70,9 @@ export function ResetPasswordPage() {
         </Typography>
         {done ? (
           <Stack spacing={2}>
-            <Alert severity="success">密碼已更新，請以新密碼登入</Alert>
+            <Alert severity="success">
+              {locked ? "帳號目前鎖定中，請於解鎖後登入" : "密碼已更新，請以新密碼登入"}
+            </Alert>
             {/* 經 router 才會帶上部署 base path；`href="/"` 會跳到網域根目錄（同 origin 的另一套系統，#607） */}
             <Link component={RouterLink} to="/" underline="hover">
               返回登入

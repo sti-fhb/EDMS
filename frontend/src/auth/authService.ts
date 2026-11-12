@@ -60,8 +60,10 @@ export const authApi = {
   async forgotPassword(email: string): Promise<void> {
     await http.post("/forgot-password", { email })
   },
-  async resetPassword(payload: ResetPasswordRequest): Promise<void> {
-    await http.post("/reset-password", payload)
+  /** 回傳該帳號**是否仍在鎖定中**（#958）：重設不解除鎖定，成功頁據此換一句提示。 */
+  async resetPassword(payload: ResetPasswordRequest): Promise<boolean> {
+    const { data } = await http.post<{ locked?: boolean }>("/reset-password", payload)
+    return data.locked === true
   },
   async activateAccount(payload: ActivateAccountRequest): Promise<void> {
     await http.post("/activate-account", payload)
