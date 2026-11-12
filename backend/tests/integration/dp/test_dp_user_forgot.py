@@ -318,21 +318,33 @@ async def test_forgot_request_allowed_while_locked(db):
     assert len(rows) == 1
 
 
-async def test_reset_blocked_for_disabled(db):
-    """**停用前**已寄出、尚未過期的連結，於重設時一律失效（#953 AC 3）。
+async def test_reset_blocked_for_disabled_identical_to_invalid_token(db):
+    """**停用前**已寄出、尚未過期的連結，於重設時一律失效，且回應與 token 失效**逐字相同**（#953 AC 3）。
 
     這是本案真正要堵的那條路：只擋申請端的話，停用當下還在使用者（或讀得到信的人）手上的
     連結仍然有效，TTL 預設 30 分鐘。
+
+    🔴 比到 `detail` 而不只是 `(status_code, error_code)`：`forgot_service` 的 docstring 宣稱
+    兩者「逐字相同」，而只比前兩項的話，日後有人把停用分支改成另一句訊息（例如「此帳號已停用」）
+    測試仍會全綠——那一句話就足以讓持有連結的人判斷出帳號狀態，防列舉在重設端破一個洞。
     """
+    svc = ResetPasswordService()
+    with pytest.raises(AppError) as unknown:
+        await svc.reset(db, token="no-such-token-at-all", new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+
     user = await _make_user(db, user_id="dr", email="dr@edms.local", status="ACTIVE")
     plaintext = await _make_token(db, user_id="dr")
     original_hash = user.pwd_hash
     user.status = "DISABLED"  # 申請之後、重設之前被停用
     await db.flush()
 
-    with pytest.raises(AppError) as exc:
-        await ResetPasswordService().reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
-    assert exc.value.status_code == 400 and exc.value.error_code == "DP_PWD_005"
+    with pytest.raises(AppError) as disabled:
+        await svc.reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+
+    got = (disabled.value.status_code, disabled.value.error_code, disabled.value.detail)
+    want = (unknown.value.status_code, unknown.value.error_code, unknown.value.detail)
+    assert got == want, f"停用={got} 失效token={want}——可據此區分帳號狀態"
+    assert got[0] == 400 and got[1] == "DP_PWD_005"
 
     fresh = (await db.execute(select(DpUser).where(DpUser.user_id == "dr"))).scalar_one()
     assert fresh.pwd_hash == original_hash, "密碼雜湊不得被改動"
