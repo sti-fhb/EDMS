@@ -21,11 +21,36 @@ token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（
 `is_account_usable()`，它把鎖定也算進去，會讓鎖定中的使用者連自助重設的出路都沒有。
 
 ⚠️ **本流程不保證「檢查狀態」與「寫入密碼」之間的原子性**：管理者若恰好在這兩步之間按下停用，
-密碼仍會被改掉。窗口是雜湊計算（約 185ms）加交易時間，需要精準時序才撞得到，且停用本身會讓
-該帳號既有的 JWT 立即失效（#941），所以**不是**可利用的提權路徑。寫在這裡是因為「停用後密碼
-就不可能再被改動」這句話太容易被當成無條件成立。要徹底關掉的話，做法是在
-`update_password` 的 UPDATE 補 `WHERE STATUS='ACTIVE'` 並檢查 rowcount——本案刻意不做，
-因為那會讓 `update_password` 對所有呼叫端（含變更密碼、管理者重設）都多一層隱含條件。
+密碼仍會被改掉。窗口自 `get_by_user_id` 到 `update_password`，含 `rules_for_user` 的數次查詢、
+`is_reused_async`（**逐筆 bcrypt**，`PWD_POLICY.HISTORY_COUNT` 預設 3、上限 24 ⇒ 最壞約 4.4 秒）
+與一次 `hash_password_async`，**預設組態下約 0.7 秒**。需要精準時序才撞得到，且停用後
+`ensure_user_active`（`core/auth.py` 的每請求狀態閘）會讓該帳號的既有 JWT 與新登入一律
+403 `DP_AUTH_004`，被改掉的密碼當下兌現不了，所以**不是**可利用的提權路徑。
+
+> 📌 讓既有 JWT 失效的是上述**每請求狀態閘**，⛔ 不是 #941——#941 比的是「token 簽發時點 vs
+> 密碼變更時點」，與帳號停用無關。兩者在同一支 `ensure_user_active` 裡相鄰，很容易記混。
+
+寫在這裡是因為「停用後密碼就不可能再被改動」這句話太容易被當成無條件成立。要徹底關掉的話，
+做法是在 `update_password` 的 UPDATE 補 `WHERE STATUS='ACTIVE'` 並檢查 rowcount；本案刻意不做，
+因為那是把一個隱含條件塞進共用的寫入方法，而真正的根治是**停用當下就作廢該帳號所有未使用的
+token**（見下）。
+
+## 🔴 本修法擋不到的兩種情形（已知殘留，見 #953 的 follow-up）
+
+本案採「**使用時才擋**」而非「停用時作廢」，因此停用帳號名下未使用、未逾期的 token 仍留在
+`DP_PWD_RESET`。兩個後果：
+
+1. **停用後在 TTL 內重新啟用**：誤停用、隨後很快復原（相當常見的維運動作），停用前寄出的
+   連結在 TTL（`LOGIN.RESET_TOKEN_TTL_MIN`，預設 30 分、可設至 120 分）內**仍然有效**。
+   本修法在這個區間不生效——這不需要精準時序。
+2. **`EMAIL_CHANGE` 型 token 完全不在本案範圍**：`DP_PWD_RESET` 同表還存 Email 變更 token，
+   而 `email_change_service.verify()` **不檢查 `STATUS`**。在 ACTIVE 時申請把帳號 Email 改成
+   自己的、停用後才點連結，即可換走帳號的識別資訊，日後重新啟用再走忘記密碼——與本案同形
+   而更隱蔽。
+
+兩者的根治是同一個：**停用動作當下作廢該帳號所有未使用的 token 並清 `PENDING_EMAIL`**
+（管理者已認證，不會重開「匿名作廢他人連結」的問題）。⛔ 不要在本檔逐條補判定去追它——
+那會變成「每個讀 `DP_PWD_RESET` 的人都要記得檢查狀態」，而這正是 `EMAIL_CHANGE` 漏掉的原因。
 """
 
 import logging
@@ -83,8 +108,18 @@ class ForgotPasswordService:
             return  # 防帳號列舉：不產 token、不寄信，端點一律回相同訊息
         if is_account_disabled(user.status):
             # 「查無此人」是真的沒事發生，「停用帳號被申請重設」是有人試了——後者正是本功能的
-            # 威脅模型（#953），靜默丟掉會失去唯一的訊號。⛔ 只留 log，不寫稽核、不改回應內容。
-            logger.warning("停用帳號申請忘記密碼已擋下 email=%s", mask_email(email))
+            # 威脅模型（#953），靜默丟掉會失去唯一的訊號。⛔ 只留 log，不寫稽核、不改回應內容
+            # （本端點匿名可打，寫稽核等於開放任何人以他人 Email 灌 DP_AUDIT_LOG）。
+            #
+            # ⚠️ 既然這是**唯一**的訊號，`ip=` 與 `event=` 都不可省：少了 ip 只知道「有人試了」
+            # 分不出是離職者本人誤觸還是外部探測；少了 event 則接不上告警規則——`router.py` 的
+            # 同類 log 已載明「告警規則請抓 `event=` 字串而非整句」，而整句中文正是最容易被
+            # 後人順手改掉的部分。
+            logger.warning(
+                "停用帳號申請忘記密碼已擋下 ip=%s email=%s event=forgot_blocked_disabled_account",
+                get_client_ip(),
+                mask_email(email),
+            )
             return
 
         now = utcnow()
