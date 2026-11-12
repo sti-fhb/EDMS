@@ -17,19 +17,21 @@
 3. **Given** token 已逾時或已被使用，**When** 點連結，**Then** 拒絕並提示（DP-MSG-DP09-002）
 4. **Given** 使用者重複申請重設，**When** 新申請成立，**Then** 產生新 token 且舊 token 立即失效（一次性）
 5. **Given** 新密碼不符複雜度或與最近 N 次（預設 3）使用過之密碼相同，**When** 送出，**Then** 阻擋並提示（DP-MSG-DP09-003 / 004）
-6. **Given** 帳號處於鎖定 / 停用狀態，**When** 申請忘記密碼，**Then** 仍回覆相同訊息；重設成功亦不解除鎖定 / 停用（仍需管理者處理或逾時解鎖）
-7. **Given** 同一來源 IP + 帳號對忘記密碼端點高頻嘗試，**When** 超過速率限制，**Then** 暫時拒絕（DP-MSG-DP09-006）
+6. **Given** 帳號處於鎖定狀態，**When** 申請忘記密碼，**Then** 照常寄送重設信；重設成功亦不解除鎖定（仍需逾時解鎖或管理者處理）
+7. **Given** 帳號處於停用狀態，**When** 申請忘記密碼，**Then** 回覆與其他情況相同之訊息，但**不產生重設 token、不寄信**；停用前已寄出之未過期連結，於重設時一律視為失效（DP-MSG-DP09-002）
+8. **Given** 同一來源 IP + 帳號對忘記密碼端點高頻嘗試，**When** 超過速率限制，**Then** 暫時拒絕（DP-MSG-DP09-006）
 
 ## Functional Requirements
 
 - **FR-DP-US3-01**: 登入頁 MUST 提供「忘記密碼」入口；申請僅需輸入帳號（Email）
 - **FR-DP-US3-02**: 系統 MUST 對重新身分確認後之申請產生**一次性且具時效**之重設 token（TTL 為平台級參數，預設 30 分鐘），寫入 `DP_PWD_RESET`（TOKEN_TYPE=`PWD_RESET`）；同帳號重新申請時舊 token MUST 立即失效
-- **FR-DP-US3-03**: 系統 MUST 防帳號列舉——不論帳號是否存在皆回覆相同訊息；不存在之帳號不產 token、不寄信
+- **FR-DP-US3-03**: 系統 MUST 防帳號列舉——不論帳號是否存在、是否已停用皆回覆相同訊息；不存在或已停用之帳號不產 token、不寄信
 - **FR-DP-US3-04**: 重設信 MUST 經平台發信服務（US6）以 `DP_NOTIFY_TEMPLATE`（`MODULE=DP`、密碼重設範本）非同步寄送
 - **FR-DP-US3-05**: 重設頁 MUST 驗證 token 有效性與期限；新密碼 MUST 檢核複雜度與重複性（禁止與最近 N 次相同，查 `DP_PWD_HIST`）；檢核 MUST 於伺服器端執行
 - **FR-DP-US3-06**: 更新成功 MUST 以不可逆雜湊寫入 `DP_USER`、追加 `DP_PWD_HIST`、作廢 token、寫入 `DP_AUDIT_LOG`（密碼重置）
-- **FR-DP-US3-07**: 密碼重設 MUST NOT 解除帳號之鎖定 / 停用狀態
+- **FR-DP-US3-07**: 密碼重設 MUST NOT 解除帳號之鎖定狀態
 - **FR-DP-US3-08**: 忘記密碼端點 MUST 實施伺服器端速率限制（來源 IP + 帳號）
+- **FR-DP-US3-09**: 停用帳號 MUST NOT 產生重設 token、MUST NOT 寄送重設信；停用前已寄出之連結，於重設與取得密碼門檻時 MUST 視為失效，且回應 MUST 與 token 失效完全相同（不得據以判別帳號狀態）
 
 ## Clarifications
 
