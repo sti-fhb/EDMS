@@ -485,6 +485,74 @@ async def test_reset_policy_allowed_for_active(db):
     assert rules.min_len > 0
 
 
+# --- T029 重設端稽核（#958）---
+
+
+async def test_reset_audit_失效token的FAIL稽核確實落地(client, db):
+    """🔴 本案最容易靜默失效的一點：失敗稽核必須**先 commit 再 raise**（#958 AC 5）。
+
+    `get_db` 對 `AppError` 會 rollback，所以「寫稽核 → raise」的順序會把稽核列一併抹除。
+    既有範式在 `dp/user/service.py::_fail`，其 docstring 已說明此理由。
+
+    ⚠️ **本條刻意走端點而非 service**：service 層直接呼叫時 `AppError` 不經過 `get_db`，
+    漏掉 commit 也照樣看得到稽核列——那樣的測試會全綠，而 DP05 上一列都沒有。
+    """
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": "no-such-token-at-all", "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 400 and r.json()["error_code"] == "DP_PWD_005"
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"失敗稽核未落地（rollback 抹除），實得 {len(rows)} 筆"
+    assert (rows[0].action_type, rows[0].result) == ("UPDATE", "FAIL")
+    assert rows[0].created_user == "SYSTEM"
+
+
+async def test_reset_audit_成功只寫一筆(client, db):
+    """正向錨點：成功路徑維持一筆 `UPDATE` / `SUCCESS`，不因本案重複寫（#958 AC 6）。"""
+    await _make_user(db, user_id="rok", email="rok@edms.local")
+    plaintext = await _make_token(db, user_id="rok")
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"成功應恰好一筆，實得 {len(rows)}"
+    assert (rows[0].action_type, rows[0].result) == ("UPDATE", "SUCCESS")
+
+
+async def test_reset_audit_打錯字不寫稽核(client, db):
+    """使用者打錯字（兩次不一致）**不**寫稽核（#958 規劃 §10）。
+
+    ⛔ 把 5 個失敗出口全記，會讓 DP05 變成「使用者打錯字的流水帳」，稀釋掉真正要看的事件，
+    而稽核表 append-only、清不掉。只記 token 失效與帳號停用兩種安全相關的。
+    """
+    await _make_user(db, user_id="typ", email="typ@edms.local")
+    plaintext = await _make_token(db, user_id="typ")
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": "Different9!"},
+    )
+    assert r.status_code == 422 and r.json()["error_code"] == "DP_USER_002"
+    assert await _forgot_audits(db) == [], "密碼打錯字不應寫稽核"
+
+
+async def test_reset_policy_不產生稽核(client, db):
+    """取門檻端點不寫稽核（#958 AC 7、規劃 §11）。
+
+    它與 `reset` 成對觸發（重設頁載入取門檻、送出才重設），兩邊都記會讓同一次重設在 DP05
+    出現兩筆，而前一筆沒有任何實質操作。
+    """
+    await _make_user(db, user_id="pol", email="pol@edms.local")
+    plaintext = await _make_token(db, user_id="pol")
+    r = await client.post("/api/reset-password/policy", json={"token": plaintext})
+    assert r.status_code == 200, r.text
+    assert await _forgot_audits(db) == [], "門檻查詢不應寫稽核"
+
+
 async def test_shed_503_does_not_consume_reset_token(db, monkeypatch):
     """併發閘卸除（503）不得燒掉使用者的一次性重設連結（#214）。
 

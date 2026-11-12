@@ -217,6 +217,43 @@ class ResetPasswordService:
         self._params = params or ParamService()
         self._audit = audit or AuditLogService()
 
+    async def _audit_reset_fail(
+        self,
+        db: AsyncSession,
+        ip: str | None,
+        *,
+        operator_id: str,
+        target_id: str | None,
+        reason: str,
+    ) -> None:
+        """重設被擋下的稽核（#958）——**寫完立即 commit**，再由呼叫端拋 `AppError`。
+
+        🔴 **commit 不可省**：`get_db` 對 `AppError` 會 rollback，稽核列會被一併抹除，
+        結果是「程式有寫、DP05 查不到」。這個缺陷是靜默的——測試若在 service 層直接呼叫、
+        或只驗「`log_action` 有被呼叫」，兩種寫法都會全綠。
+        `test_reset_audit_失效token的FAIL稽核確實落地` **刻意走端點**來釘住它。
+
+        同一理由與既有範式見 `dp/user/service.py::_fail`（登入失敗的鎖定計數與 FAIL 稽核）。
+
+        ⚠️ 測試環境以 savepoint 隔離（`conftest` 的 `db` fixture），此處 commit 只釋放
+        savepoint、不破壞隔離。
+
+        ⛔ **只記安全相關的兩種**（token 失效、帳號停用）。密碼不一致 / 複雜度不足 /
+        與近期重複是使用者打錯字，記了會把 DP05 變成流水帳，而稽核表 append-only、清不掉。
+        """
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="UPDATE",
+            result="FAIL",
+            operator_id=operator_id,
+            target_id=target_id,
+            description=reason,
+            source_ip=ip,
+        )
+        await db.commit()
+
     async def password_rules_for_token(self, db: AsyncSession, *, token: str) -> PasswordRules:
         """重設頁適用之門檻（#623）：依 token 對應帳號判定；token 失效則拒絕（#673）。
 
@@ -263,12 +300,18 @@ class ResetPasswordService:
         token_hash = hash_token(token)
         row = await self._repo.get_reset_token_by_hash(db, token_hash, _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= now:
+            await self._audit_reset_fail(
+                db, ip, operator_id=_SYSTEM_USER, target_id=None, reason="連結已失效，拒絕重設"
+            )
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         # 停用帳號與「查無此人」回同一個失效錯誤（#953）。位置在**消費 token 之前**，比照
         # 下方複雜度 / 重複性的處理——擋下時不白白作廢 token，且與 token 失效的拋出時點一致，
         # 使兩者連「先報哪個錯」都相同（密碼不一致仍先於兩者）。
         user = await self._repo.get_by_user_id(db, row.user_id)
         if user is None or is_account_disabled(user.status):
+            await self._audit_reset_fail(
+                db, ip, operator_id=row.user_id, target_id=row.user_id, reason="帳號已停用，拒絕重設"
+            )
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
         # 複雜度 + 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
