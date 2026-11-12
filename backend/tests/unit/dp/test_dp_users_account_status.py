@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.dp.users.account_status import is_account_usable
+from app.dp.users.account_status import is_account_locked, is_account_usable
 
 pytestmark = pytest.mark.unit
 
@@ -52,3 +52,36 @@ def test_disabled_and_locked_is_not_usable():
 def test_unknown_status_fails_closed():
     """非 ACTIVE 的未知狀態值 → 不可用（fail-closed，不因值域擴充而誤放行）。"""
     assert is_account_usable(status="PENDING", locked_until=None, now=_NOW) is False
+
+
+# --- is_account_locked：只看鎖定維度（#958）---
+
+
+def test_locked_未曾鎖定回False():
+    """`LOCKED_UNTIL` 為空 → 未鎖定。"""
+    assert is_account_locked(locked_until=None, now=_NOW) is False
+
+
+def test_locked_鎖定中回True():
+    assert is_account_locked(locked_until=_NOW + timedelta(hours=1), now=_NOW) is True
+
+
+def test_locked_已逾時回False():
+    """過期的 `LOCKED_UNTIL` 會留在欄位裡（登入時才清）——以 `IS NOT NULL` 判定會讓早已
+    自動解鎖的帳號永遠被當成鎖定中。界線與 `is_account_usable` 同：`<= now` 視為已解鎖。"""
+    assert is_account_locked(locked_until=_NOW - timedelta(seconds=1), now=_NOW) is False
+
+
+def test_locked_恰等於當下回False():
+    assert is_account_locked(locked_until=_NOW, now=_NOW) is False
+
+
+def test_locked_不看STATUS():
+    """🔴 本述詞**只判鎖定**，與 `STATUS` 無關——這正是它與 `is_account_usable` 的差別。
+
+    停用但未鎖定的帳號在此回 False。誤用 `is_account_usable` 來判「是否鎖定中」會把停用
+    也算進去，於 #958 的情境下會讓停用帳號的重設成功頁顯示「帳號目前鎖定中」——而它根本
+    沒鎖定，且停用帳號在 #953 之後連重設都走不到。
+    """
+    assert is_account_locked(locked_until=None, now=_NOW) is False
+    assert is_account_usable(status="DISABLED", locked_until=None, now=_NOW) is False

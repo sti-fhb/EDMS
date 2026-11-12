@@ -475,12 +475,14 @@ async def reset_password(
     data: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db),
     _ip_limit: None = Depends(rate_limit_by_ip(_reset_limiter, "reset")),
-) -> dict[str, str]:
+) -> dict[str, object]:
     """以 token 重設密碼（匿名，持信中連結 token）。驗 token + 複雜度 + 重複性 → 更新 + 作廢 + 稽核。"""
-    await _reset_service.reset(
+    locked = await _reset_service.reset(
         db, token=data.token, new_password=data.new_password, confirm_password=data.confirm_password
     )
-    return {"message": "密碼已更新，請以新密碼登入"}
+    # `locked` 供前端換一句提示（#958）：重設不解除鎖定，鎖定中者照「請以新密碼登入」操作
+    # 會被 403 DP_AUTH_005 擋下。⛔ 訊息本身仍由前端決定，後端只回事實。
+    return {"message": "密碼已更新，請以新密碼登入", "locked": locked}
 
 
 @router.post("/reset-password/policy", response_model=ApplicablePasswordPolicyResponse)

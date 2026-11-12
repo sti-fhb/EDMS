@@ -45,6 +45,35 @@ def is_account_usable(*, status: str, locked_until: Optional[datetime], now: dat
     return locked_until is None or locked_until <= now
 
 
+def is_account_locked(*, locked_until: Optional[datetime], now: datetime) -> bool:
+    """帳號是否**鎖定中**——⚠️ 與 `STATUS` 無關，只看 `LOCKED_UNTIL`（#958）。
+
+    ## 本模組三支述詞的分工（選錯不會有任何東西報錯）
+
+    | 述詞 | 停用 | 鎖定 |
+    |---|---|---|
+    | `is_account_usable` | ✓ | ✓ |
+    | `is_account_disabled` | ✓ | — |
+    | **`is_account_locked`** | — | ✓ |
+
+    需要「只判鎖定」的場合不可用 `is_account_usable` 代替：它把停用也算進去。#958 的用途是
+    讓重設密碼成功頁顯示「帳號目前鎖定中，請於解鎖後登入」——用 `is_account_usable` 會讓
+    停用帳號也顯示那句話，而停用帳號在 #953 之後根本走不到重設成功。
+
+    ⚠️ **必須比對當下時間**：逾時的 `LOCKED_UNTIL` 會留在欄位裡（登入時才清），以
+    `IS NOT NULL` 判定會讓早已自動解鎖的帳號永遠被當成鎖定中。界線與 `is_account_usable`
+    一致：`<= now` 視為已解鎖。
+
+    Args:
+        locked_until: 鎖定截止時間；None 表未曾鎖定。
+        now: 判定基準時間（aware），由呼叫端以 `utcnow()` 取得。
+
+    Returns:
+        鎖定中回 True。
+    """
+    return locked_until is not None and locked_until > now
+
+
 def is_account_disabled(status: str) -> bool:
     """帳號是否已停用（`STATUS` 非 `ACTIVE`）。
 

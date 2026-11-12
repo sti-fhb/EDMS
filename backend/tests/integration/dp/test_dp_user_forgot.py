@@ -509,6 +509,63 @@ async def test_reset_policy_allowed_for_active(db):
     assert rules.min_len > 0
 
 
+# --- 重設成功的鎖定旗標（#958 AC 9）---
+
+
+async def test_reset_成功回應帶鎖定旗標_鎖定中為真(client, db):
+    """鎖定中的帳號重設成功 → 回應指出仍鎖定，且 `LOCKED_UNTIL` **不變**（#958 AC 9）。
+
+    🔴 問題來源：重設不會解鎖（FR-DP-US3-07），但成功畫面固定顯示「請以新密碼登入」，
+    使用者照做會被 403 `DP_AUTH_005` 擋下——他剛剛才被告知可以登入。
+    """
+    locked_until = utcnow() + timedelta(minutes=30)
+    await _make_user(db, user_id="lf1", email="lf1@edms.local", status="ACTIVE", locked_until=locked_until)
+    plaintext = await _make_token(db, user_id="lf1")
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is True, f"鎖定中卻未告知：{r.json()}"
+
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "lf1"))).scalar_one()
+    assert user.locked_until == locked_until, "重設不得解除鎖定（FR-DP-US3-07）"
+    assert verify_password(_NEW_PWD, user.pwd_hash), "密碼仍須真的被更新"
+
+
+async def test_reset_成功回應帶鎖定旗標_未鎖定為假(client, db):
+    """正向錨點：未鎖定者維持原訊息（否則所有人都會看到「鎖定中」）。"""
+    await _make_user(db, user_id="lf2", email="lf2@edms.local", status="ACTIVE")
+    plaintext = await _make_token(db, user_id="lf2")
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is False
+
+
+async def test_reset_成功回應_鎖定已逾時視為未鎖定(client, db):
+    """逾時的 `LOCKED_UNTIL` 留在欄位裡（登入時才清）——不得據此誤報「鎖定中」。
+
+    ⚠️ 少了這條，把判定寫成 `locked_until is not None` 也會讓上面兩條全綠，而早已自動解鎖的
+    使用者會被告知「請於解鎖後登入」，然後發現其實登得進去。
+    """
+    await _make_user(
+        db, user_id="lf3", email="lf3@edms.local", status="ACTIVE", locked_until=utcnow() - timedelta(minutes=1)
+    )
+    plaintext = await _make_token(db, user_id="lf3")
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is False, "鎖定已逾時應視為未鎖定"
+
+
 # --- T029 重設端稽核（#958）---
 
 

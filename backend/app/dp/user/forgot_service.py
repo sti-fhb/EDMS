@@ -72,7 +72,7 @@ from app.core.utils import utcnow
 from app.dp.user.password_rules import PasswordRules, rules_for_user
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
-from app.dp.users.account_status import is_account_disabled
+from app.dp.users.account_status import is_account_disabled, is_account_locked
 from app.services import AuditLogService, NotifyService, ParamService
 
 logger = logging.getLogger(__name__)
@@ -293,8 +293,8 @@ class ResetPasswordService:
             raise AppError(status_code=400, detail=_ACCOUNT_DISABLED_MSG, error_code="DP_PWD_007")
         return await rules_for_user(db, row.user_id, params=self._params)
 
-    async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> None:
-        """重設密碼。
+    async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> bool:
+        """重設密碼；回傳該帳號**是否仍在鎖定中**（#958，供前端換提示文案）。
 
         Raises:
             AppError: 兩次不一致（422 DP_USER_002）、token 失效 / 已用 / 逾時（400 DP_PWD_005）、
@@ -366,3 +366,8 @@ class ResetPasswordService:
             description="密碼重設",
             source_ip=ip,
         )
+        # 重設**不解除鎖定**（FR-DP-US3-07）。回傳鎖定狀態供前端換一句提示——否則鎖定中的
+        # 使用者會看到「請以新密碼登入」，照做卻被 403 `DP_AUTH_005` 擋下（#958）。
+        # ⚠️ 判定取 `user.locked_until` 的**當下值**：`update_password` 不碰該欄位（其 docstring
+        # 明載「不動鎖定 / 停用狀態」），所以這裡讀到的仍是重設前的鎖定時間，正是要回報的。
+        return is_account_locked(locked_until=user.locked_until, now=utcnow())
