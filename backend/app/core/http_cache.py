@@ -45,10 +45,24 @@
 
 > 實測經過、DevTools 證據與 #441（同類缺陷的第一次）的關聯見 issue #587——那些是**當時的
 > 狀態**，寫進程式碼會過期。
+
+## 其餘回應的預設：`DefaultNoStoreMiddleware`（#959）
+
+未自行設定 `Cache-Control` 的回應一律補 `no-store`；已設者（含本常數）原樣保留。
+送檔端點仍須自帶本常數，**不得因有預設就拿掉**：本常數多了 `private`，且上面的 AST 守門
+以本常數為準。
+
+⚠️ 未涵蓋：未預期例外的 500 / 503（`main.py` 的 `unhandled_exception_handler`）由 Starlette
+最外層的 `ServerErrorMiddleware` 直接送出，不經使用者 middleware，因此不帶本預設。內容為
+通用錯誤訊息，且 500 / 503 不在啟發式快取的 status code 清單內。nginx 自產、不經後端的
+413 / 415 / 502 / 503 / 504（body 超限、格式不符、限流、上游不通）同理不帶本預設。
 """
 
 from types import MappingProxyType
 from typing import Final, Mapping
+
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 #: 權限相依回應的快取指示。`private` 擋中介快取、`no-store` 擋瀏覽器自身儲存。
 #:
@@ -58,3 +72,28 @@ from typing import Final, Mapping
 #: ⚠️ 以 `MappingProxyType` 包裝：`Final` 只鎖綁定、不鎖內容，而這是全站共用的單一物件——
 #: 任何一處 `NO_STORE_HEADERS["x"] = ...` 都會改到所有端點。
 NO_STORE_HEADERS: Final[Mapping[str, str]] = MappingProxyType({"Cache-Control": "private, no-store"})
+
+
+class DefaultNoStoreMiddleware:
+    """回應未自行設定 `Cache-Control` 時補上 `no-store`（#959）。
+
+    以 pure ASGI 實作、只改 `http.response.start` 的標頭，不緩衝 body——送檔端點的
+    `FileResponse` / `StreamingResponse` 照常串流。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_default(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if "cache-control" not in headers:
+                    headers.append("Cache-Control", "no-store")
+            await send(message)
+
+        await self.app(scope, receive, send_with_default)

@@ -282,6 +282,11 @@ class TestCSP設定契約:
     def test_設定檔存在(self) -> None:
         assert self._CONF.is_file(), f"路徑推導錯誤：{self._CONF}"
 
+    def test_hsts_有效期為一年(self) -> None:
+        """HSTS `max-age` 採一般建議值一年（#959）。"""
+        text = self._CONF.read_text(encoding="utf-8")
+        assert 'add_header Strict-Transport-Security "max-age=31536000" always;' in text
+
     @pytest.mark.parametrize(
         ("directive", "用途"),
         [
