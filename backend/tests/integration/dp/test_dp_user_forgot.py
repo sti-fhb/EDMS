@@ -218,6 +218,30 @@ async def test_forgot_audit_帳號不存在記未寄出且Email已遮罩(db):
     assert "g" in blob and "*" in blob, f"遮罩後應仍可辨識來源，實得：{blob}"
 
 
+async def test_forgot_audit_長網域Email不得讓端點回500(client, db):
+    """🔴 防列舉的實際破口：遮罩後的 Email 長度可超過 `TARGET_ID` 的 `String(100)`（#958 CR HIGH-1）。
+
+    `NormalizedEmailStr` 允許 255 字元，而 `mask_email` **完整保留網域**（`x***@{domain}`），
+    所以網域長一點的未知帳號會讓 INSERT 爆欄位長度 → 500；存在的帳號（`target_id` 是
+    20 字元以內的 `user_id`）照樣 200。**匿名端點上 500 與 200 可區分**，等於用例外訊息
+    洩漏「這個 Email 不存在」。
+
+    ⚠️ 我原本的三條稽核測試全用短 Email，結構性碰不到這條路徑——長度上限只有拿邊界值打
+    才看得見。
+    """
+    domain = "a" * 90 + ".example.com"  # 遮罩後 ≈ 107 字元 > TARGET_ID 的 100
+    long_email = f"nobody@{domain}"
+    assert len(long_email) <= 255, "前置：仍在 NormalizedEmailStr 允許範圍內"
+
+    r = await client.post("/api/forgot-password", json={"email": long_email})
+    assert r.status_code == 200, f"長網域未知帳號不得回 {r.status_code}（防列舉破口）"
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1 and rows[0].result == "FAIL"
+    blob = f"{rows[0].target_id or ''} {rows[0].description or ''}"
+    assert long_email not in blob, "完整 Email 不得寫進稽核"
+
+
 async def test_forgot_audit_停用帳號記未寄出(db):
     """停用帳號 → `FAIL`，且**仍不產 token、不寄信**（#953 行為不得退化；#958 AC 1）。"""
     await _make_user(db, user_id="au3", email="au3@edms.local", status="DISABLED")
@@ -588,6 +612,29 @@ async def test_reset_audit_失效token的FAIL稽核確實落地(client, db):
     assert len(rows) == 1, f"失敗稽核未落地（rollback 抹除），實得 {len(rows)} 筆"
     assert (rows[0].action_type, rows[0].result) == ("UPDATE", "FAIL")
     assert rows[0].created_user == "SYSTEM"
+
+
+async def test_reset_audit_停用帳號的FAIL稽核確實落地(client, db):
+    """停用分支的稽核也要**走端點**驗落地（#958 CR LOW-5）。
+
+    ⚠️ 原本只有 token 失效那條走端點。三個失敗分支共用 `_audit_reset_fail`，但「共用同一支
+    函式」不等於「每條路徑都真的走到它」——漏接某個分支的 commit 不會被既有測試看見。
+    """
+    user = await _make_user(db, user_id="rdz", email="rdz@edms.local", status="ACTIVE")
+    plaintext = await _make_token(db, user_id="rdz")
+    user.status = "DISABLED"
+    await db.flush()
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 400 and r.json()["error_code"] == "DP_PWD_007"
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"停用分支的失敗稽核未落地，實得 {len(rows)} 筆"
+    assert (rows[0].action_type, rows[0].result) == ("UPDATE", "FAIL")
+    assert rows[0].created_user == "rdz"
 
 
 async def test_reset_audit_成功只寫一筆(client, db):

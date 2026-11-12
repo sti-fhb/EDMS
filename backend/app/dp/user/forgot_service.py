@@ -85,6 +85,15 @@ _DEFAULT_HISTORY_COUNT = 3
 _TOKEN_INVALID_MSG = "連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
 #: 停用帳號持有效連結時的訊息（#958 裁示 1）。⛔ 兩支端點（`reset` / `password_rules_for_token`）
 #: 必須共用本常數——各寫一句的話，同一個連結在載入頁與送出時會得到不同說法。
+#:
+#: ⛔ **本碼必須維持 400，且不得加入前端的 `ACCOUNT_BLOCKED_CODES`**（`services/http.ts`）。
+#: 那張表的成員會被攔成「整個帳號失效」而**自動登出**，但攔截只在 403 分支生效。兩個條件
+#: 缺一不可——改成 403 而仍在表外是安全的，兩者都改才會壞：已登入的 A 點到 B 的停用重設連結，
+#: 會被判成「**A** 的帳號被停用」而把 A 登出。這也是本案不重用既有 `DP_AUTH_004`（403，
+#: 且在該表內）的原因。
+#:
+#: ⚠️ `is_account_disabled` 是 `status != 'ACTIVE'`（fail-closed），所以日後若 `STATUS` 新增
+#: 第三種值，這句話會把它也說成「已停用」。目前值域只有 ACTIVE / DISABLED，尚未失準。
 _ACCOUNT_DISABLED_MSG = "帳號已停用，請洽管理者"
 #: 匿名路徑的稽核操作者：申請 / 重設端皆無登入身分，比照登入失敗對未知帳號的既有做法
 #: （`dp/user/service.py`）。⚠️ `CREATED_USER` 為 VARCHAR(20)，本來就塞不下 Email。
@@ -122,8 +131,18 @@ class ForgotPasswordService:
             # ⚠️ 稽核**記遮罩後的 Email**：此路徑沒有 user_id 可填（operator 為 SYSTEM），
             # 不記就只剩計數——問不出「哪些帳號被探測過」。遮罩規則沿用 `mask_email`
             # （規範禁記個資完整值），且稽核表 append-only、寫進去拿不掉。
+            # ⛔ 遮罩後的 Email 放 `description`、**不要放 `target_id`**：後者是 `String(100)`，
+            # 而 `NormalizedEmailStr` 允許 255 字元、`mask_email` **完整保留網域**，長網域會讓
+            # INSERT 爆欄位長度 → 500；而存在的帳號（`target_id` 是 20 字元內的 `user_id`）
+            # 照樣 200——**匿名端點上「500 vs 200」本身就是可區分的列舉訊號**。
+            # `description` 為 `String(500)` 放得下，做法亦與登入失敗對未知帳號一致。
             await self._audit_request(
-                db, ip, operator_id=_SYSTEM_USER, target_id=mask_email(email), sent=False, reason="帳號不存在"
+                db,
+                ip,
+                operator_id=_SYSTEM_USER,
+                target_id=None,
+                sent=False,
+                reason=f"帳號不存在（{mask_email(email)}）",
             )
             return
         if is_account_disabled(user.status):
@@ -132,7 +151,12 @@ class ForgotPasswordService:
             #
             # 📌 #958 之前這裡**刻意不寫稽核**，理由是「匿名端點寫稽核＝開放任何人灌
             # DP_AUDIT_LOG」。#958 推翻該決定：申請端三種情況一律寫稽核，因為「看不到有人
-            # 申請過重設」本身就是缺口。灌量有上限——IP 維度與帳號維度都是 10 次／60 秒。
+            # 申請過重設」本身就是缺口。
+            #
+            # ⚠️ 灌量上限**兩個端點不同**，不要混為一談：**申請端**有 IP 與帳號雙維度
+            # （`router.py` 的 `rate_limit_by_ip` + `_forgot_limiter.hit("forgot:acct:…")`），
+            # **重設端只有 IP 維度**（token 失效那筆甚至不知道是哪個帳號）。故重設端的
+            # 失敗稽核上限是「每 IP 10 次／60 秒」，而非「每帳號」。
             #
             # ⚠️ log 仍保留且 `ip=` / `event=` 不可省：稽核是給稽核查詢用的，log 是給告警規則
             # 接的，兩者讀者不同。`router.py` 的同類 log 已載明「告警規則請抓 `event=` 字串
@@ -180,7 +204,7 @@ class ForgotPasswordService:
         ip: str | None,
         *,
         operator_id: str,
-        target_id: str,
+        target_id: str | None,
         sent: bool,
         reason: str,
     ) -> None:

@@ -84,6 +84,23 @@ describe("ResetPasswordPage", () => {
     expect(screen.getByRole("link", { name: "返回登入" })).toBeInTheDocument()
   })
 
+  it("停用帳號點連結 → 載入時即顯示「帳號已停用」，不渲染密碼表單（#958 CR MEDIUM-2）", async () => {
+    // 後端 password_rules_for_token 對停用帳號回 DP_PWD_007（#958 裁示 1）。
+    // 🔴 若前端把它歸為 `unavailable`，畫面會照常出表單並提示「目前無法取得密碼規則，仍可
+    // 送出」——使用者打完兩次密碼才被擋，而那正是 #673 修掉的情境。
+    server.use(
+      http.post("/api/reset-password/policy", () =>
+        HttpResponse.json({ error_code: "DP_PWD_007", error_message: "帳號已停用，請洽管理者" }, { status: 400 }),
+      ),
+    )
+    renderReset("/reset-password?token=validtoken")
+
+    expect(await screen.findByText("帳號已停用，請洽管理者")).toBeInTheDocument()
+    expect(screen.queryByLabelText("新密碼")).not.toBeInTheDocument()
+    // ⛔ 不得誤報成連結失效：連結是好的，是帳號不能用
+    expect(screen.queryByText("連結已失效，請重新申請")).not.toBeInTheDocument()
+  })
+
   it("鎖定中重設成功 → 改顯示「帳號目前鎖定中」，不說可以登入（#958）", async () => {
     // 重設不解除鎖定（FR-DP-US3-07），照「請以新密碼登入」操作會被 403 DP_AUTH_005 擋下
     server.use(http.post("/api/reset-password", () => HttpResponse.json({ message: "ok", locked: true })))

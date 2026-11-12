@@ -81,6 +81,10 @@ export function ResetPasswordPage() {
         ) : token === "" ? (
           // 網址根本沒帶 token——與「連結失效」是不同情況，訊息分開
           <Alert severity="error">連結無效，請重新申請忘記密碼</Alert>
+        ) : status === "account-disabled" ? (
+          // 連結有效但帳號已停用（#958 裁示 1）。⛔ 不可說「連結已失效」——重新申請也不會寄信；
+          // 也不可照常出表單，否則使用者打完兩次密碼才被擋（#673 修掉的情境）。
+          <Alert severity="error">帳號已停用，請洽管理者</Alert>
         ) : status === "token-invalid" ? (
           // 連結查無 / 已用 / 逾期（#673）。spec_us3 AC 3 要求於**點連結時**即拒絕——
           // 原本會照常渲染表單，使用者得照著錯的門檻打完一組密碼、按下送出才被擋。

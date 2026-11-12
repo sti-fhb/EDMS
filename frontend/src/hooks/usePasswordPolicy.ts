@@ -22,10 +22,13 @@ export type PasswordPolicySource = { kind: "public" } | { kind: "self" } | { kin
  * - `loading`：還在取
  * - `ready`：取到了，`policy` 有值
  * - `token-invalid`：**僅 `reset`** —— 信中連結已失效（後端 `DP_PWD_005`），該頁應改顯示失效提示
+ * - `account-disabled`：**僅 `reset`** —— 連結是好的，但帳號已停用（後端 `DP_PWD_007`，#958）。
+ *   ⛔ 不可歸入 `unavailable`：那會讓畫面照常出表單並提示「仍可送出」，使用者打完兩次密碼
+ *   才被擋——正是 #673 修掉的情境。也不可歸入 `token-invalid`：連結沒壞，重新申請也沒用。
  * - `unavailable`：取不到（限流 / 連線異常 / 伺服器錯誤）。⚠️ 連結**可能是好的**，
  *   不得據此說「連結已失效」
  */
-export type PasswordPolicyStatus = "loading" | "ready" | "token-invalid" | "unavailable"
+export type PasswordPolicyStatus = "loading" | "ready" | "token-invalid" | "account-disabled" | "unavailable"
 
 const PUBLIC: PasswordPolicySource = { kind: "public" }
 
@@ -91,15 +94,18 @@ export function usePasswordPolicy(source: PasswordPolicySource = PUBLIC): {
 function resolveStatus(args: { policy: PasswordRules | undefined; error: unknown }): PasswordPolicyStatus {
   if (args.policy !== undefined) return "ready"
   if (args.error === null || args.error === undefined) return "loading"
-  // DP_PWD_005＝信中連結查無 / 已用 / 逾期（後端 `password_rules_for_token`）。
+  // DP_PWD_005＝信中連結查無 / 已用 / 逾期；DP_PWD_007＝連結有效但帳號已停用（#958）。
   // 其餘一律 `unavailable`——429 / 連線異常不代表連結壞了。
-  return toApiError(args.error).errorCode === "DP_PWD_005" ? "token-invalid" : "unavailable"
+  const code = toApiError(args.error).errorCode
+  if (code === "DP_PWD_005") return "token-invalid"
+  if (code === "DP_PWD_007") return "account-disabled"
+  return "unavailable"
 }
 
 function buildHint(status: PasswordPolicyStatus, policy: PasswordRules | undefined): string {
   if (status === "ready" && policy !== undefined) return buildPasswordHint(policy)
   if (status === "loading") return HINT_LOADING
-  // `token-invalid` 的頁面不會渲染表單，提示給空字串即可
+  // `token-invalid` / `account-disabled` 的頁面不會渲染表單，提示給空字串即可
   return status === "unavailable" ? HINT_UNAVAILABLE : ""
 }
 
