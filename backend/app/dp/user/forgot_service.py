@@ -185,6 +185,13 @@ class ForgotPasswordService:
             operator_id=user.user_id,
             now=now,
         )
+        # ⚠️ 稽核寫在 `send_email` **之前**（#958 Security Review）：範本列缺漏時 `send_email`
+        # 會拋 404 `DP_MAIL_001`，寫在後面的話連「有人申請過重設」都不會留下任何紀錄——
+        # 發信系統故障會連帶把申請的軌跡一起吃掉。故此處記的是**系統實際做到的事**
+        # （已產生 token），寄信成敗由 outbox（`DP_EMAIL_LOG.STATUS`）自己的狀態承擔。
+        await self._audit_request(
+            db, ip, operator_id=user.user_id, target_id=user.user_id, sent=True, reason="已產生重設 token"
+        )
         reset_link = f"{settings.FRONTEND_BASE_URL}/reset-password?token={plaintext}"
         await self._notify.send_email(
             db,
@@ -193,9 +200,6 @@ class ForgotPasswordService:
             module="DP",
             params={"user_name": user.user_name, "reset_link": reset_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
-        )
-        await self._audit_request(
-            db, ip, operator_id=user.user_id, target_id=user.user_id, sent=True, reason="已寄出重設信"
         )
 
     async def _audit_request(
@@ -332,9 +336,18 @@ class ResetPasswordService:
         token_hash = hash_token(token)
         row = await self._repo.get_reset_token_by_hash(db, token_hash, _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= now:
-            await self._audit_reset_fail(
-                db, ip, operator_id=_SYSTEM_USER, target_id=None, reason="連結已失效，拒絕重設"
-            )
+            # ⛔ **這條刻意不寫稽核**（#958 Security Review MEDIUM-1）。它是三個失敗分支中唯一
+            # **零知識即可觸發**的——匿名者亂填一個 token 就寫一筆，而該筆內容零資訊量
+            # （operator=SYSTEM、target 無、description 固定字串），彼此完全無法分辨。
+            #
+            # 代價不只是噪音：每筆稽核都要搶全平台單一的鏈結 advisory lock（等鎖逾時 10 秒
+            # → 503），而 `DP_AUDIT_LOG` append-only、清不掉；DP05 匯出上限 10,000 筆，超過
+            # 直接 422——等於提供一個「做完真正的動作後灌一波，讓該時段的稽核匯出整個失敗」
+            # 的反鑑識手法。
+            #
+            # 這筆記得到的東西，web server 的存取日誌已經有而且更好用；它唯一獨有的性質是
+            # 「不可刪」，而那正是缺點。另兩個失敗分支（帳號不存在 / 已停用）都指名了真實
+            # 帳號、有調查價值，故保留。
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         # 停用帳號與「查無此人」回同一個失效錯誤（#953）。位置在**消費 token 之前**，比照
         # 下方複雜度 / 重複性的處理——擋下時不白白作廢 token，且與 token 失效的拋出時點一致，

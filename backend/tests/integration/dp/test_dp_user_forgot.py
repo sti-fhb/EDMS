@@ -593,25 +593,23 @@ async def test_reset_成功回應_鎖定已逾時視為未鎖定(client, db):
 # --- T029 重設端稽核（#958）---
 
 
-async def test_reset_audit_失效token的FAIL稽核確實落地(client, db):
-    """🔴 本案最容易靜默失效的一點：失敗稽核必須**先 commit 再 raise**（#958 AC 5）。
+async def test_reset_audit_失效token刻意不寫稽核(client, db):
+    """⛔ token 失效**不寫稽核**（#958 Security Review MEDIUM-1 裁示 A）。
 
-    `get_db` 對 `AppError` 會 rollback，所以「寫稽核 → raise」的順序會把稽核列一併抹除。
-    既有範式在 `dp/user/service.py::_fail`，其 docstring 已說明此理由。
+    它是三個失敗分支中唯一**零知識即可觸發**的：匿名者亂填 token 就寫一筆，而該筆內容零
+    資訊量（operator=SYSTEM、target 無、description 固定），彼此無法分辨。每筆要搶全平台
+    的稽核鏈鎖，而 `DP_AUDIT_LOG` 不可刪、DP05 匯出上限 10,000 筆——等於提供一個
+    「灌一波讓該時段匯出整個失敗」的反鑑識手法。
 
-    ⚠️ **本條刻意走端點而非 service**：service 層直接呼叫時 `AppError` 不經過 `get_db`，
-    漏掉 commit 也照樣看得到稽核列——那樣的測試會全綠，而 DP05 上一列都沒有。
+    ⚠️ 本條是**守門斷言**（不該出現的沒出現），正向錨點由
+    `test_reset_audit_停用帳號的FAIL稽核確實落地` 承擔——那裡才驗 commit 真的落地。
     """
     r = await client.post(
         "/api/reset-password",
         json={"token": "no-such-token-at-all", "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
     )
     assert r.status_code == 400 and r.json()["error_code"] == "DP_PWD_005"
-
-    rows = await _forgot_audits(db)
-    assert len(rows) == 1, f"失敗稽核未落地（rollback 抹除），實得 {len(rows)} 筆"
-    assert (rows[0].action_type, rows[0].result) == ("UPDATE", "FAIL")
-    assert rows[0].created_user == "SYSTEM"
+    assert await _forgot_audits(db) == [], "失效 token 不應寫稽核"
 
 
 async def test_reset_audit_停用帳號的FAIL稽核確實落地(client, db):
