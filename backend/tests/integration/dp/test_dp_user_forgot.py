@@ -112,12 +112,53 @@ async def test_forgot_invalidates_old_token(db):
 
 
 async def test_forgot_request_endpoint_uniform_message(client, db):
-    """端點：不論帳號存在與否皆回 200 + 相同訊息（防列舉）。"""
+    """端點：正常 / 不存在 / **停用**三者皆回 200 + **逐字相同**的完整 body（防列舉，#953）。
+
+    🔴 比的是整個 `r.json()` 而不是 `["message"]`：#953 讓停用帳號走與「不存在」相同的早退路徑，
+    若日後有人為了可觀測性在回應裡加個欄位（如 `sent: true`），只比 message 的版本會全綠，
+    而那個欄位正好把三者切成兩組——防列舉就退化了。
+    """
     await _make_user(db, user_id="uni", email="uni@edms.local")
-    r1 = await client.post("/api/forgot-password", json={"email": "uni@edms.local"})
-    r2 = await client.post("/api/forgot-password", json={"email": "nobody@edms.local"})
-    assert r1.status_code == 200 and r2.status_code == 200
-    assert r1.json()["message"] == r2.json()["message"]
+    await _make_user(db, user_id="unid", email="unid@edms.local", status="DISABLED")
+    r_active = await client.post("/api/forgot-password", json={"email": "uni@edms.local"})
+    r_unknown = await client.post("/api/forgot-password", json={"email": "nobody@edms.local"})
+    r_disabled = await client.post("/api/forgot-password", json={"email": "unid@edms.local"})
+
+    codes = {r_active.status_code, r_unknown.status_code, r_disabled.status_code}
+    assert codes == {200}, f"三者 HTTP 狀態不一致：{codes}"
+    assert r_disabled.json() == r_active.json() == r_unknown.json(), (
+        f"停用={r_disabled.json()} 正常={r_active.json()} 不存在={r_unknown.json()}——可據此區分帳號狀態"
+    )
+
+
+async def test_forgot_disabled_creates_no_token_and_no_mail(db):
+    """停用帳號申請 → 不產 token、不寄信（#953）。
+
+    ⚠️ 與 `test_forgot_nonexistent_silent` 不重複：那條驗的是「查無此人」，本條驗的是
+    **查得到但不該服務**。兩者走同一條早退，但只有本條會因為「漏判 STATUS」而紅。
+    """
+    await _make_user(db, user_id="dis", email="dis@edms.local", status="DISABLED")
+    notify = _NotifyStub()
+    await ForgotPasswordService(notify=notify).request(db, email="dis@edms.local")
+
+    assert notify.calls == [], "停用帳號不應寄出重設信"
+    rows = (await db.execute(select(DpPwdReset).where(DpPwdReset.user_id == "dis"))).scalars().all()
+    assert rows == [], "停用帳號不應產生重設 token"
+
+
+async def test_forgot_disabled_does_not_invalidate_existing_token(db):
+    """停用帳號申請 → **連舊 token 都不動**（#953）。
+
+    🔴 正向錨點的反面用途：若實作把狀態檢查放在 `invalidate_active_reset_tokens` **之後**，
+    上面兩條仍會全綠（沒產新 token、沒寄信），但停用帳號的申請會變成一個「可以作廢別人
+    既有連結」的無認證操作。本條把早退的**位置**釘住，不只釘住結果。
+    """
+    await _make_user(db, user_id="dis2", email="dis2@edms.local", status="DISABLED")
+    await _make_token(db, user_id="dis2", plaintext="still-valid")
+    await ForgotPasswordService(notify=_NotifyStub()).request(db, email="dis2@edms.local")
+
+    row = (await db.execute(select(DpPwdReset).where(DpPwdReset.token_hash == hash_token("still-valid")))).scalar_one()
+    assert row.used_date is None, "停用帳號的申請不應作廢既有 token"
 
 
 # --- T029 重設 ---
@@ -237,16 +278,93 @@ async def test_reset_reused_password(db):
     assert exc.value.error_code == "DP_PWD_003"
 
 
-async def test_reset_keeps_locked_and_status(db):
-    """鎖定 / 停用帳號重設成功，但 LOCKED_UNTIL / STATUS 不變（FR-07）。"""
+async def test_reset_keeps_locked(db):
+    """**鎖定中**（但 STATUS=ACTIVE）的帳號重設成功，且 LOCKED_UNTIL 不變（FR-DP-US3-07）。
+
+    🔴 #953 之前本條叫 `test_reset_keeps_locked_and_status`，用的是一個**同時**鎖定又停用的
+    帳號，等於拿同一個帳號驗兩個維度。#953 把「停用」改成擋下，那個寫法就不再成立——但
+    FR-07 的**鎖定**半邊完全沒變，所以改用鎖定中的 ACTIVE 帳號續守，不是刪掉它。
+
+    ⛔ 不要為了「省一個帳號」把 status 改回 DISABLED：鎖定是暫時的、規格的用意就是讓使用者
+    自己重設後等待解鎖；停用是管理者的決定。兩者混在一條測試裡，`is_account_usable()`（把兩個
+    維度綁在一起的那支述詞）被誤用時不會有任何東西變紅。
+    """
     locked_until = utcnow() + timedelta(minutes=30)
-    await _make_user(db, user_id="lk", email="lk@edms.local", status="DISABLED", locked_until=locked_until)
+    await _make_user(db, user_id="lk", email="lk@edms.local", status="ACTIVE", locked_until=locked_until)
     plaintext = await _make_token(db, user_id="lk")
     await ResetPasswordService().reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
 
     user = (await db.execute(select(DpUser).where(DpUser.user_id == "lk"))).scalar_one()
     assert verify_password(_NEW_PWD, user.pwd_hash)  # 密碼已更新
-    assert user.status == "DISABLED" and user.locked_until == locked_until  # 狀態不變
+    assert user.locked_until == locked_until, "重設不得解除鎖定（FR-DP-US3-07）"
+    assert user.status == "ACTIVE"
+
+
+async def test_forgot_request_allowed_while_locked(db):
+    """鎖定中的 ACTIVE 帳號**照常**可申請重設信（#953 AC 6）。
+
+    ⚠️ 這條與上一條成對：少了它，把 `request` 的判定寫成 `is_account_usable()`（含鎖定）
+    一樣會讓「停用被擋」的測試全綠，而鎖定中的使用者從此收不到重設信——那正是規格要給他的
+    自助出路。
+    """
+    await _make_user(
+        db, user_id="lkq", email="lkq@edms.local", status="ACTIVE", locked_until=utcnow() + timedelta(minutes=30)
+    )
+    notify = _NotifyStub()
+    await ForgotPasswordService(notify=notify).request(db, email="lkq@edms.local")
+
+    assert len(notify.calls) == 1, "鎖定中的帳號仍須收得到重設信"
+    rows = (await db.execute(select(DpPwdReset).where(DpPwdReset.user_id == "lkq"))).scalars().all()
+    assert len(rows) == 1
+
+
+async def test_reset_blocked_for_disabled(db):
+    """**停用前**已寄出、尚未過期的連結，於重設時一律失效（#953 AC 3）。
+
+    這是本案真正要堵的那條路：只擋申請端的話，停用當下還在使用者（或讀得到信的人）手上的
+    連結仍然有效，TTL 預設 30 分鐘。
+    """
+    user = await _make_user(db, user_id="dr", email="dr@edms.local", status="ACTIVE")
+    plaintext = await _make_token(db, user_id="dr")
+    original_hash = user.pwd_hash
+    user.status = "DISABLED"  # 申請之後、重設之前被停用
+    await db.flush()
+
+    with pytest.raises(AppError) as exc:
+        await ResetPasswordService().reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+    assert exc.value.status_code == 400 and exc.value.error_code == "DP_PWD_005"
+
+    fresh = (await db.execute(select(DpUser).where(DpUser.user_id == "dr"))).scalar_one()
+    assert fresh.pwd_hash == original_hash, "密碼雜湊不得被改動"
+
+
+async def test_reset_policy_blocked_for_disabled_identical_to_invalid_token(db):
+    """`password_rules_for_token` 對停用帳號的回應，與 token 失效**逐字相同**（#953 AC 4）。
+
+    🔴 若兩者分歧（例如停用回一個新的 error_code，或回了門檻數字），持有連結的人就能據此
+    判斷「這個帳號被停用了」——防列舉在重設端出現缺口。本條以同一個斷言同時比 status_code、
+    error_code 與 detail 文字。
+    """
+    svc = ResetPasswordService()
+    with pytest.raises(AppError) as unknown:
+        await svc.password_rules_for_token(db, token="no-such-token-at-all")
+
+    await _make_user(db, user_id="dp2", email="dp2@edms.local", status="DISABLED")
+    plaintext = await _make_token(db, user_id="dp2", plaintext="disabled-user-token")
+    with pytest.raises(AppError) as disabled:
+        await svc.password_rules_for_token(db, token=plaintext)
+
+    got = (disabled.value.status_code, disabled.value.error_code, disabled.value.detail)
+    want = (unknown.value.status_code, unknown.value.error_code, unknown.value.detail)
+    assert got == want, f"停用={got} 失效token={want}——可據此區分帳號狀態"
+
+
+async def test_reset_policy_allowed_for_active(db):
+    """正向錨點：ACTIVE 帳號的有效 token 仍取得門檻（否則重設頁顯示不出規則提示）。"""
+    await _make_user(db, user_id="ap", email="ap@edms.local", status="ACTIVE")
+    plaintext = await _make_token(db, user_id="ap", plaintext="active-user-token")
+    rules = await ResetPasswordService().password_rules_for_token(db, token=plaintext)
+    assert rules.min_len > 0
 
 
 async def test_shed_503_does_not_consume_reset_token(db, monkeypatch):

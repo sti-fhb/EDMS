@@ -2,16 +2,33 @@
 
 token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（USED_DATE）+ 時效（EXPIRES_DATE），
 同帳號重新申請作廢舊 token。防帳號列舉：申請一律成功語氣、帳號不存在不產 token / 不寄信。
-重設更新密碼 + 追加歷程 + 作廢 token + 稽核；**不解除鎖定 / 停用**（FR-07）。
+重設更新密碼 + 追加歷程 + 作廢 token + 稽核；**不解除鎖定**（FR-07）。
 門檻值（RESET_TOKEN_TTL_MIN / MIN_LEN / ADMIN_MIN_LEN / CHAR_TYPES / HISTORY_COUNT）讀平台級 DP_PARAM（SRVDP001）。
+
+## 停用帳號完全不走本流程（#953）
+
+`STATUS='DISABLED'` 的帳號：申請端比照「帳號不存在」早退，重設端與門檻查詢端一律回與 token
+失效相同的 `DP_PWD_005`。**兩端都要擋**——只擋申請端的話，停用當下還在外面、尚未過期的連結
+（TTL 預設 30 分鐘）仍然有效。
+
+為什麼不是「反正停用帳號登不進去，改了也沒用」：重設連結的明文會留在寄出的信、寄件備份與
+退信裡。讀得到那些信的人可以先把停用帳號的密碼改成自己知道的值（當下看起來無害，稽核只留
+一筆 DP-FORGOT 成功），等日後管理者在 DP02 重新啟用該帳號——**重新啟用只改 `STATUS`、不動
+密碼**——先前設定的密碼就直接生效。這是延遲生效的後門，不是當下可用的權限。
+
+⛔ **鎖定（`LOCKED_UNTIL`）不在此列**：鎖定是暫時的，`spec_us3` 的用意就是讓使用者自己重設
+密碼後等待解鎖。判定一律用 `is_account_disabled(status)`——⛔ 不要改用
+`is_account_usable()`，它把鎖定也算進去，會讓鎖定中的使用者連自助重設的出路都沒有。
 """
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.log_redaction import mask_email
 from app.core.password_hashing import hash_password_async, is_reused_async
 from app.core.password_policy import validate_password_strength
 from app.core.request_context import get_client_ip
@@ -19,7 +36,10 @@ from app.core.utils import utcnow
 from app.dp.user.password_rules import PasswordRules, rules_for_user
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
+from app.dp.users.account_status import is_account_disabled
 from app.services import AuditLogService, NotifyService, ParamService
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_TYPE = "PWD_RESET"  # noqa: S105 — DP_PWD_RESET.TOKEN_TYPE 值，非密碼
 _TEMPLATE_CODE = "PWD_RESET"
@@ -43,13 +63,22 @@ class ForgotPasswordService:
         self._notify = notify or NotifyService()
 
     async def request(self, db: AsyncSession, *, email: str) -> None:
-        """申請重設：帳號存在才作廢舊 token、產新 token 並寄信；不存在則靜默（防列舉）。
+        """申請重設：帳號存在**且未停用**才作廢舊 token、產新 token 並寄信；否則靜默（防列舉）。
 
         token 建立與 outbox 寫入於呼叫方交易內（flush），由 get_db 於請求成功時一併 commit（原子）。
+
+        ⚠️ 停用的早退**必須排在 `invalidate_active_reset_tokens` 之前**：排在後面的話，對停用帳號
+        連打本端點就成了一個無認證的「作廢他人既有連結」操作，而「沒產新 token、沒寄信」的測試
+        仍會全綠（`test_forgot_disabled_does_not_invalidate_existing_token` 釘住此位置）。
         """
         user = await self._repo.get_by_email(db, email)
         if user is None:
             return  # 防帳號列舉：不產 token、不寄信，端點一律回相同訊息
+        if is_account_disabled(user.status):
+            # 「查無此人」是真的沒事發生，「停用帳號被申請重設」是有人試了——後者正是本功能的
+            # 威脅模型（#953），靜默丟掉會失去唯一的訊號。⛔ 只留 log，不寫稽核、不改回應內容。
+            logger.warning("停用帳號申請忘記密碼已擋下 email=%s", mask_email(email))
+            return
 
         now = utcnow()
         ttl_min = await self._params.get_int_param(db, "LOGIN", "RESET_TOKEN_TTL_MIN", _DEFAULT_TTL_MIN)
@@ -113,6 +142,11 @@ class ResetPasswordService:
         row = await self._repo.get_reset_token_by_hash(db, hash_token(token), _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= utcnow():
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+        # 帳號於發信後被停用：回**完全相同**的失效錯誤（#953）。分歧的話，持有連結者即可
+        # 據此判斷「這個帳號被停用了」——防列舉會在重設端破一個洞。
+        user = await self._repo.get_by_user_id(db, row.user_id)
+        if user is None or is_account_disabled(user.status):
+            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         return await rules_for_user(db, row.user_id, params=self._params)
 
     async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> None:
@@ -131,8 +165,11 @@ class ResetPasswordService:
         row = await self._repo.get_reset_token_by_hash(db, token_hash, _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= now:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+        # 停用帳號與「查無此人」回同一個失效錯誤（#953）。位置在**消費 token 之前**，比照
+        # 下方複雜度 / 重複性的處理——擋下時不白白作廢 token，且與 token 失效的拋出時點一致，
+        # 使兩者連「先報哪個錯」都相同（密碼不一致仍先於兩者）。
         user = await self._repo.get_by_user_id(db, row.user_id)
-        if user is None:
+        if user is None or is_account_disabled(user.status):
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
 
         # 複雜度 + 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
