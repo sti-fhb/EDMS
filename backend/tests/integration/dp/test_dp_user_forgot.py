@@ -424,15 +424,21 @@ async def test_forgot_request_allowed_while_locked(db):
     assert len(rows) == 1
 
 
-async def test_reset_blocked_for_disabled_identical_to_invalid_token(db):
-    """**停用前**已寄出、尚未過期的連結，於重設時一律失效，且回應與 token 失效**逐字相同**（#953 AC 3）。
+async def test_reset_blocked_for_disabled_says_account_disabled(db):
+    """**停用前**已寄出、尚未過期的連結，於重設時一律失效，且**明說**帳號已停用（#958 裁示 1）。
 
-    這是本案真正要堵的那條路：只擋申請端的話，停用當下還在使用者（或讀得到信的人）手上的
-    連結仍然有效，TTL 預設 30 分鐘。
+    這是 #953 要堵的那條路：只擋申請端的話，停用當下還在使用者（或讀得到信的人）手上的
+    連結仍然有效，TTL 預設 30 分鐘。**行為（擋下）不變，改的是說什麼。**
 
-    🔴 比到 `detail` 而不只是 `(status_code, error_code)`：`forgot_service` 的 docstring 宣稱
-    兩者「逐字相同」，而只比前兩項的話，日後有人把停用分支改成另一句訊息（例如「此帳號已停用」）
-    測試仍會全綠——那一句話就足以讓持有連結的人判斷出帳號狀態，防列舉在重設端破一個洞。
+    ## 🔴 #953 原本刻意與 token 失效「逐字相同」，#958 裁示 1 推翻
+
+    原理由是防列舉。但**能持有有效重設連結的人，幾乎必然讀得到該帳號的登記信箱**——告訴他
+    「這個帳號停用了」洩漏的是他自己帳號的狀態，不構成帳號列舉。而等價的代價是被停用者陷入
+    迴圈：點連結看到「連結已失效，請重新申請」→ 去重新申請 → 畫面說「已寄出」→ 永遠收不到信。
+
+    ⛔ **本裁示只動重設端**：申請端（`POST /api/forgot-password`）三種情況的回應仍必須逐字
+    相同，由 `test_forgot_request_endpoint_uniform_message` 釘住——那裡的請求者**不需要**持有
+    任何憑證，才是真正的列舉面。
     """
     svc = ResetPasswordService()
     with pytest.raises(AppError) as unknown:
@@ -447,21 +453,19 @@ async def test_reset_blocked_for_disabled_identical_to_invalid_token(db):
     with pytest.raises(AppError) as disabled:
         await svc.reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
 
-    got = (disabled.value.status_code, disabled.value.error_code, disabled.value.detail)
-    want = (unknown.value.status_code, unknown.value.error_code, unknown.value.detail)
-    assert got == want, f"停用={got} 失效token={want}——可據此區分帳號狀態"
-    assert got[0] == 400 and got[1] == "DP_PWD_005"
+    assert (disabled.value.status_code, disabled.value.error_code) == (400, "DP_PWD_007")
+    assert "停用" in disabled.value.detail
+    assert disabled.value.error_code != unknown.value.error_code, "停用與 token 失效必須可區分"
 
     fresh = (await db.execute(select(DpUser).where(DpUser.user_id == "dr"))).scalar_one()
     assert fresh.pwd_hash == original_hash, "密碼雜湊不得被改動"
 
 
-async def test_reset_policy_blocked_for_disabled_identical_to_invalid_token(db):
-    """`password_rules_for_token` 對停用帳號的回應，與 token 失效**逐字相同**（#953 AC 4）。
+async def test_reset_policy_blocked_for_disabled_says_account_disabled(db):
+    """`password_rules_for_token` 對停用帳號同樣明說（#958 裁示 1）。
 
-    🔴 若兩者分歧（例如停用回一個新的 error_code，或回了門檻數字），持有連結的人就能據此
-    判斷「這個帳號被停用了」——防列舉在重設端出現缺口。本條以同一個斷言同時比 status_code、
-    error_code 與 detail 文字。
+    ⚠️ 與 `reset` 必須**同碼同訊息**：重設頁載入時先打本端點、送出時才打 `reset`，兩者對同一
+    個連結給出不同說法的話，使用者會先看到一種、按下送出又看到另一種。
     """
     svc = ResetPasswordService()
     with pytest.raises(AppError) as unknown:
@@ -472,9 +476,29 @@ async def test_reset_policy_blocked_for_disabled_identical_to_invalid_token(db):
     with pytest.raises(AppError) as disabled:
         await svc.password_rules_for_token(db, token=plaintext)
 
-    got = (disabled.value.status_code, disabled.value.error_code, disabled.value.detail)
-    want = (unknown.value.status_code, unknown.value.error_code, unknown.value.detail)
-    assert got == want, f"停用={got} 失效token={want}——可據此區分帳號狀態"
+    assert (disabled.value.status_code, disabled.value.error_code) == (400, "DP_PWD_007")
+    assert "停用" in disabled.value.detail
+    assert disabled.value.error_code != unknown.value.error_code
+
+
+async def test_reset_停用訊息與門檻端一致(db):
+    """兩支端點對停用帳號的回應**必須逐字相同**（#958 裁示 1 的內部一致性）。
+
+    🔴 上面兩條各自斷言 `DP_PWD_007` 與「含『停用』」，但那樣兩邊各寫一句不同的中文也會全綠。
+    本條把兩個回應擺在一起比，釘住「同一個常數」而非「各自碰巧合格」。
+    """
+    svc = ResetPasswordService()
+    await _make_user(db, user_id="cs", email="cs@edms.local", status="DISABLED")
+    plaintext = await _make_token(db, user_id="cs", plaintext="consistency-token")
+
+    with pytest.raises(AppError) as from_reset:
+        await svc.reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+    with pytest.raises(AppError) as from_policy:
+        await svc.password_rules_for_token(db, token=plaintext)
+
+    a = (from_reset.value.status_code, from_reset.value.error_code, from_reset.value.detail)
+    b = (from_policy.value.status_code, from_policy.value.error_code, from_policy.value.detail)
+    assert a == b, f"reset={a} policy={b}——同一個連結在兩支端點得到不同說法"
 
 
 async def test_reset_policy_allowed_for_active(db):

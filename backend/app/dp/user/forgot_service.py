@@ -7,9 +7,15 @@ token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（
 
 ## 停用帳號完全不走本流程（#953，`spec_us3` FR-DP-US3-09 / AC 7）
 
-`STATUS='DISABLED'` 的帳號：申請端比照「帳號不存在」早退，重設端與門檻查詢端一律回與 token
-失效相同的 `DP_PWD_005`。**兩端都要擋**——只擋申請端的話，停用當下還在外面、尚未過期的連結
-（TTL 預設 30 分鐘）仍然有效。
+`STATUS='DISABLED'` 的帳號：申請端比照「帳號不存在」早退，重設端與門檻查詢端回
+`DP_PWD_007`「帳號已停用，請洽管理者」。**兩端都要擋**——只擋申請端的話，停用當下還在外面、
+尚未過期的連結（TTL 預設 30 分鐘）仍然有效。
+
+> 📌 #953 原本讓重設端回與 token 失效**逐字相同**的 `DP_PWD_005`，理由是防列舉；#958 裁示 1
+> 推翻：能持有有效重設連結的人幾乎必然讀得到該帳號的登記信箱，告訴他「這個帳號停用了」
+> 洩漏的是他自己帳號的狀態。等價的代價則是被停用者陷入「重新申請 → 收不到信 → 再申請」的
+> 迴圈。⛔ **本裁示只動重設端**：申請端三種情況的回應仍逐字相同（那裡的請求者不需要任何
+> 憑證，才是真正的列舉面），由 `test_forgot_request_endpoint_uniform_message` 釘住。
 
 為什麼不是「反正停用帳號登不進去，改了也沒用」：重設連結的明文會留在寄出的信、寄件備份與
 退信裡。讀得到那些信的人可以先把停用帳號的密碼改成自己知道的值（當下看起來無害，稽核只留
@@ -35,24 +41,20 @@ token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（
 因為那是把一個隱含條件塞進共用的寫入方法，而真正的根治是**停用當下就作廢該帳號所有未使用的
 token**（見下）。
 
-## 🔴 本修法擋不到的兩種情形（已知殘留，追蹤於 #956）
+## 採「使用時才擋」而非「停用時作廢」——這是刻意的
 
-本案採「**使用時才擋**」而非「停用時作廢」，因此停用帳號名下未使用、未逾期的 token 仍留在
-`DP_PWD_RESET`。兩個後果：
+停用不會去作廢該帳號名下未使用、未逾期的 token，它們仍留在 `DP_PWD_RESET`，由重設端每次
+檢查帳號狀態來擋。兩個後果：
 
-1. **停用後在 TTL 內重新啟用**：誤停用、隨後很快復原（相當常見的維運動作），停用前寄出的
-   連結在 TTL（`LOGIN.RESET_TOKEN_TTL_MIN`，預設 30 分、可設至 120 分）內**仍然有效**。
-   本修法在這個區間不生效——這不需要精準時序。
-2. **`EMAIL_CHANGE` 型 token 完全不在本案範圍**：`DP_PWD_RESET` 同表還存 Email 變更 token，
-   而 `email_change_service.verify()` **不檢查 `STATUS`**。在 ACTIVE 時申請把帳號 Email 改成
-   自己的、停用後才點連結，即可換走帳號的識別資訊，日後重新啟用再走忘記密碼——與本案同形
-   而更隱蔽。
+1. **停用後在 TTL 內重新啟用，舊連結可用**——⛔ 這是**預期行為**（#958 裁示 2），不是缺陷。
+   管理者按下「啟用」本身就是「已判定該帳號沒問題」的決定；誤停用、隨後很快復原是常見的
+   維運動作，讓使用者不必重新申請是合理的。
+2. **`EMAIL_CHANGE` 型 token 尚未比照辦理**（追蹤於 #956）：`DP_PWD_RESET` 同表還存 Email
+   變更 token，而 `email_change_service.verify()` **不檢查 `STATUS`**。在 ACTIVE 時申請把帳號
+   Email 改成自己的、停用後才點連結，即可換走帳號的識別資訊，日後重新啟用再走忘記密碼。
 
-兩者的根治是同一個：**停用動作當下作廢該帳號所有未使用的 token 並清 `PENDING_EMAIL`**
-（管理者已認證，不會重開「匿名作廢他人連結」的問題）。⛔ 不要在本檔逐條補判定去追它——
-那會變成「每個讀 `DP_PWD_RESET` 的人都要記得檢查狀態」，而這正是 `EMAIL_CHANGE` 漏掉的原因。
-
-> 📌 #956 完成後，本節即可整段移除——屆時這兩段就是過期的敘述。
+⛔ #956 的修法方向是**在 `verify()` 補狀態判定**（與本檔同形），**不是**「停用時作廢所有
+token」——後者會連帶把上面第 1 點的預期行為也關掉。
 """
 
 import logging
@@ -81,6 +83,9 @@ _FUNC_NAME = "DP-FORGOT"
 _DEFAULT_TTL_MIN = 30
 _DEFAULT_HISTORY_COUNT = 3
 _TOKEN_INVALID_MSG = "連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
+#: 停用帳號持有效連結時的訊息（#958 裁示 1）。⛔ 兩支端點（`reset` / `password_rules_for_token`）
+#: 必須共用本常數——各寫一句的話，同一個連結在載入頁與送出時會得到不同說法。
+_ACCOUNT_DISABLED_MSG = "帳號已停用，請洽管理者"
 #: 匿名路徑的稽核操作者：申請 / 重設端皆無登入身分，比照登入失敗對未知帳號的既有做法
 #: （`dp/user/service.py`）。⚠️ `CREATED_USER` 為 VARCHAR(20)，本來就塞不下 Email。
 _SYSTEM_USER = "SYSTEM"
@@ -278,11 +283,14 @@ class ResetPasswordService:
         row = await self._repo.get_reset_token_by_hash(db, hash_token(token), _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= utcnow():
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
-        # 帳號於發信後被停用：回**完全相同**的失效錯誤（#953）。分歧的話，持有連結者即可
-        # 據此判斷「這個帳號被停用了」——防列舉會在重設端破一個洞。
+        # 帳號於發信後被停用 → **明說**（#958 裁示 1，與 `reset` 共用同一常數與錯誤碼）。
+        # ⚠️ 「查無此人」仍回 token 失效：那表示帳號已被軟刪，連結本身就不該再有意義，
+        # 與「帳號還在、只是停用」是兩回事，不可合併成同一個分支。
         user = await self._repo.get_by_user_id(db, row.user_id)
-        if user is None or is_account_disabled(user.status):
+        if user is None:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+        if is_account_disabled(user.status):
+            raise AppError(status_code=400, detail=_ACCOUNT_DISABLED_MSG, error_code="DP_PWD_007")
         return await rules_for_user(db, row.user_id, params=self._params)
 
     async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> None:
@@ -308,11 +316,17 @@ class ResetPasswordService:
         # 下方複雜度 / 重複性的處理——擋下時不白白作廢 token，且與 token 失效的拋出時點一致，
         # 使兩者連「先報哪個錯」都相同（密碼不一致仍先於兩者）。
         user = await self._repo.get_by_user_id(db, row.user_id)
-        if user is None or is_account_disabled(user.status):
+        if user is None:
+            # 帳號已軟刪：連結本身不該再有意義，回 token 失效（與「帳號還在、只是停用」不同）
+            await self._audit_reset_fail(
+                db, ip, operator_id=_SYSTEM_USER, target_id=row.user_id, reason="帳號不存在，拒絕重設"
+            )
+            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+        if is_account_disabled(user.status):
             await self._audit_reset_fail(
                 db, ip, operator_id=row.user_id, target_id=row.user_id, reason="帳號已停用，拒絕重設"
             )
-            raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+            raise AppError(status_code=400, detail=_ACCOUNT_DISABLED_MSG, error_code="DP_PWD_007")
 
         # 複雜度 + 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
         # 使複雜度 / 重複失敗時不白白作廢 token（使用者可用同連結重試）。
