@@ -161,6 +161,112 @@ async def test_forgot_disabled_does_not_invalidate_existing_token(db):
     assert row.used_date is None, "停用帳號的申請不應作廢既有 token"
 
 
+# --- T028 申請端稽核（#958）---
+
+
+async def _forgot_audits(db):
+    """取本次測試寫入的 DP-FORGOT 稽核列（依寫入序）。"""
+    rows = await db.execute(select(DpAuditLog).where(DpAuditLog.func_name == "DP-FORGOT").order_by(DpAuditLog.log_id))
+    return rows.scalars().all()
+
+
+async def test_forgot_audit_正常帳號記已寄出(db):
+    """申請成功 → 一筆 `CREATE` / `SUCCESS`，操作者與對象皆為該帳號（#958 AC 1）。"""
+    await _make_user(db, user_id="au1", email="au1@edms.local")
+    await ForgotPasswordService(notify=_NotifyStub()).request(db, email="au1@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"應恰好一筆，實得 {len(rows)}"
+    row = rows[0]
+    assert (row.action_type, row.result) == ("CREATE", "SUCCESS")
+    assert row.created_user == "au1" and row.target_id == "au1"
+
+
+async def test_forgot_audit_經端點呼叫時記得到來源IP(client, db):
+    """稽核的 `SOURCE_IP` 必須落地（#958）。
+
+    🔴 本條**刻意走端點**而非 service：`get_client_ip()` 取的是請求情境，service 層直接呼叫時
+    恆為 `None`——把這條斷言寫在 service 層測試裡會永遠紅，寫成 `is None` 則是釘住了錯的契約。
+
+    ⚠️ 「稽核漏記來源 IP」在本專案是有前例的真缺陷（#790 即為此開立），所以這條不是裝飾：
+    少了 IP，事故調查只剩「有人試過」的計數，問不出是誰。
+    """
+    await _make_user(db, user_id="aip", email="aip@edms.local")
+    r = await client.post("/api/forgot-password", json={"email": "aip@edms.local"})
+    assert r.status_code == 200, r.text
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1
+    assert rows[0].source_ip, f"稽核未記來源 IP：{rows[0].source_ip!r}"
+
+
+async def test_forgot_audit_帳號不存在記未寄出且Email已遮罩(db):
+    """帳號不存在 → `FAIL`；操作者為 SYSTEM、Email **遮罩後**才入稽核（#958 AC 1/3）。
+
+    🔴 比的是「不含完整 Email」而非只看有沒有 `*`：`CREATED_USER` 是 VARCHAR(20)、本來就塞不下
+    Email，所以漏遮罩時 Email 會落在 `target_id` / `description`。稽核表不可刪，寫進去就拿不掉。
+    """
+    await ForgotPasswordService(notify=_NotifyStub()).request(db, email="ghost@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row.action_type, row.result) == ("CREATE", "FAIL")
+    assert row.created_user == "SYSTEM"
+    blob = f"{row.target_id or ''} {row.description or ''}"
+    assert "ghost@edms.local" not in blob, f"完整 Email 寫進稽核：{blob}"
+    assert "g" in blob and "*" in blob, f"遮罩後應仍可辨識來源，實得：{blob}"
+
+
+async def test_forgot_audit_停用帳號記未寄出(db):
+    """停用帳號 → `FAIL`，且**仍不產 token、不寄信**（#953 行為不得退化；#958 AC 1）。"""
+    await _make_user(db, user_id="au3", email="au3@edms.local", status="DISABLED")
+    notify = _NotifyStub()
+    await ForgotPasswordService(notify=notify).request(db, email="au3@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1
+    assert (rows[0].action_type, rows[0].result) == ("CREATE", "FAIL")
+    assert rows[0].created_user == "au3"
+    assert notify.calls == [] and (await db.execute(select(DpPwdReset))).first() is None
+
+
+async def test_forgot_audit_鎖定中帳號照常寄出(db):
+    """鎖定中（STATUS 仍 ACTIVE）→ 照常寄信且稽核記 `SUCCESS`（#958 AC 4）。
+
+    ⚠️ 與停用那條成對：把判定寫成 `is_account_usable()`（含鎖定）時，本條會紅而停用那條仍綠。
+    """
+    await _make_user(
+        db, user_id="au4", email="au4@edms.local", status="ACTIVE", locked_until=utcnow() + timedelta(minutes=30)
+    )
+    notify = _NotifyStub()
+    await ForgotPasswordService(notify=notify).request(db, email="au4@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1 and rows[0].result == "SUCCESS"
+    assert len(notify.calls) == 1, "鎖定中仍須收得到重設信"
+
+
+async def test_forgot_audit_三種情況的稽核互相可分辨(db):
+    """🔴 AC 1 的核心：三種情況**從稽核內容分得出來**。
+
+    前四條各自驗一種情況，但「三者可分辨」是它們**合起來**才成立的性質——
+    若三種都寫成同一句 description，前四條仍會全綠。本條把三者放在同一次測試裡比對。
+    """
+    await _make_user(db, user_id="d1", email="d1@edms.local")
+    await _make_user(db, user_id="d2", email="d2@edms.local", status="DISABLED")
+    svc = ForgotPasswordService(notify=_NotifyStub())
+    await svc.request(db, email="d1@edms.local")
+    await svc.request(db, email="nobody@edms.local")
+    await svc.request(db, email="d2@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 3
+    descs = [r.description for r in rows]
+    assert len(set(descs)) == 3, f"三種情況的 description 必須互異，實得：{descs}"
+    assert [r.result for r in rows] == ["SUCCESS", "FAIL", "FAIL"]
+
+
 # --- T029 重設 ---
 
 

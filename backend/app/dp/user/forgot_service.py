@@ -81,6 +81,9 @@ _FUNC_NAME = "DP-FORGOT"
 _DEFAULT_TTL_MIN = 30
 _DEFAULT_HISTORY_COUNT = 3
 _TOKEN_INVALID_MSG = "連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
+#: 匿名路徑的稽核操作者：申請 / 重設端皆無登入身分，比照登入失敗對未知帳號的既有做法
+#: （`dp/user/service.py`）。⚠️ `CREATED_USER` 為 VARCHAR(20)，本來就塞不下 Email。
+_SYSTEM_USER = "SYSTEM"
 
 
 class ForgotPasswordService:
@@ -91,10 +94,12 @@ class ForgotPasswordService:
         repository: AuthRepository | None = None,
         params: ParamService | None = None,
         notify: NotifyService | None = None,
+        audit: AuditLogService | None = None,
     ) -> None:
         self._repo = repository or AuthRepository()
         self._params = params or ParamService()
         self._notify = notify or NotifyService()
+        self._audit = audit or AuditLogService()
 
     async def request(self, db: AsyncSession, *, email: str) -> None:
         """申請重設：帳號存在**且未停用**才作廢舊 token、產新 token 並寄信；否則靜默（防列舉）。
@@ -105,22 +110,35 @@ class ForgotPasswordService:
         連打本端點就成了一個無認證的「作廢他人既有連結」操作，而「沒產新 token、沒寄信」的測試
         仍會全綠（`test_forgot_disabled_does_not_invalidate_existing_token` 釘住此位置）。
         """
+        ip = get_client_ip()
         user = await self._repo.get_by_email(db, email)
         if user is None:
-            return  # 防帳號列舉：不產 token、不寄信，端點一律回相同訊息
+            # 防帳號列舉：不產 token、不寄信，端點一律回相同訊息。
+            # ⚠️ 稽核**記遮罩後的 Email**：此路徑沒有 user_id 可填（operator 為 SYSTEM），
+            # 不記就只剩計數——問不出「哪些帳號被探測過」。遮罩規則沿用 `mask_email`
+            # （規範禁記個資完整值），且稽核表 append-only、寫進去拿不掉。
+            await self._audit_request(
+                db, ip, operator_id=_SYSTEM_USER, target_id=mask_email(email), sent=False, reason="帳號不存在"
+            )
+            return
         if is_account_disabled(user.status):
-            # 「查無此人」是真的沒事發生，「停用帳號被申請重設」是有人試了——後者正是本功能的
-            # 威脅模型（#953），靜默丟掉會失去唯一的訊號。⛔ 只留 log，不寫稽核、不改回應內容
-            # （本端點匿名可打，寫稽核等於開放任何人以他人 Email 灌 DP_AUDIT_LOG）。
+            # 「查無此人」是真的沒事發生，「停用帳號被申請重設」是有人試了——後者正是 #953 的
+            # 威脅模型，靜默丟掉會失去訊號。
             #
-            # ⚠️ 既然這是**唯一**的訊號，`ip=` 與 `event=` 都不可省：少了 ip 只知道「有人試了」
-            # 分不出是離職者本人誤觸還是外部探測；少了 event 則接不上告警規則——`router.py` 的
-            # 同類 log 已載明「告警規則請抓 `event=` 字串而非整句」，而整句中文正是最容易被
-            # 後人順手改掉的部分。
+            # 📌 #958 之前這裡**刻意不寫稽核**，理由是「匿名端點寫稽核＝開放任何人灌
+            # DP_AUDIT_LOG」。#958 推翻該決定：申請端三種情況一律寫稽核，因為「看不到有人
+            # 申請過重設」本身就是缺口。灌量有上限——IP 維度與帳號維度都是 10 次／60 秒。
+            #
+            # ⚠️ log 仍保留且 `ip=` / `event=` 不可省：稽核是給稽核查詢用的，log 是給告警規則
+            # 接的，兩者讀者不同。`router.py` 的同類 log 已載明「告警規則請抓 `event=` 字串
+            # 而非整句」，而整句中文正是最容易被後人順手改掉的部分。
             logger.warning(
                 "停用帳號申請忘記密碼已擋下 ip=%s email=%s event=forgot_blocked_disabled_account",
-                get_client_ip(),
+                ip,
                 mask_email(email),
+            )
+            await self._audit_request(
+                db, ip, operator_id=user.user_id, target_id=user.user_id, sent=False, reason="帳號已停用"
             )
             return
 
@@ -146,6 +164,43 @@ class ForgotPasswordService:
             module="DP",
             params={"user_name": user.user_name, "reset_link": reset_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
+        )
+        await self._audit_request(
+            db, ip, operator_id=user.user_id, target_id=user.user_id, sent=True, reason="已寄出重設信"
+        )
+
+    async def _audit_request(
+        self,
+        db: AsyncSession,
+        ip: str | None,
+        *,
+        operator_id: str,
+        target_id: str,
+        sent: bool,
+        reason: str,
+    ) -> None:
+        """申請端的稽核（#958）：三種情況各一筆，從 `result` 與 `description` 分得出是哪一種。
+
+        ⛔ `description` 不得放 token、完整 Email、密碼。帳號不存在時由呼叫端先經 `mask_email`。
+
+        `action_type` 用 `CREATE`：申請的實質是產生一枚重設 token。⛔ 不新增 `ACTION_TYPE` 值——
+        `dp/audit/router.py` 的 `_Action` 是封閉 `Literal`，新增要同時改三處且有
+        `test_dp_audit_action_type_coverage.py` 守門（#548）。
+
+        ⚠️ 本方法**不 commit**：申請端三種情況都以 200 正常回應收尾，稽核隨請求的交易一起
+        提交即可。重設端的失敗稽核不同——那裡會拋 `AppError`、交易會被 rollback，故需顯式
+        commit（見 `ResetPasswordService._audit_reset_fail`）。
+        """
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="CREATE",
+            result="SUCCESS" if sent else "FAIL",
+            operator_id=operator_id,
+            target_id=target_id,
+            description=reason,
+            source_ip=ip,
         )
 
 
