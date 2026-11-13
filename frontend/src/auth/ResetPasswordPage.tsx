@@ -34,6 +34,9 @@ export function ResetPasswordPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [apiError, setApiError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  // 重設**不解除鎖定**（FR-DP-US3-07）。鎖定中仍顯示 success——密碼確實已更新，鎖定是另一件事；
+  // 但不能說「請以新密碼登入」，照做會被 403 DP_AUTH_005 擋下（#958）。
+  const [locked, setLocked] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   // 密碼規則提示 / 驗證依 PWD_POLICY 動態（#77）；`status` 讓失效連結於**點連結時**即可判定（#673）
   const { policy, hint, status } = usePasswordPolicy({ kind: "reset", token })
@@ -50,7 +53,7 @@ export function ResetPasswordPage() {
 
     setSubmitting(true)
     try {
-      await authApi.resetPassword({ token, ...parsed.data })
+      setLocked(await authApi.resetPassword({ token, ...parsed.data }))
       setDone(true)
     } catch (err) {
       setApiError(toApiError(err).errorMessage)
@@ -67,7 +70,9 @@ export function ResetPasswordPage() {
         </Typography>
         {done ? (
           <Stack spacing={2}>
-            <Alert severity="success">密碼已更新，請以新密碼登入</Alert>
+            <Alert severity="success">
+              {locked ? "帳號目前鎖定中，請於解鎖後登入" : "密碼已更新，請以新密碼登入"}
+            </Alert>
             {/* 經 router 才會帶上部署 base path；`href="/"` 會跳到網域根目錄（同 origin 的另一套系統，#607） */}
             <Link component={RouterLink} to="/" underline="hover">
               返回登入
@@ -76,6 +81,10 @@ export function ResetPasswordPage() {
         ) : token === "" ? (
           // 網址根本沒帶 token——與「連結失效」是不同情況，訊息分開
           <Alert severity="error">連結無效，請重新申請忘記密碼</Alert>
+        ) : status === "account-disabled" ? (
+          // 連結有效但帳號已停用（#958 裁示 1）。⛔ 不可說「連結已失效」——重新申請也不會寄信；
+          // 也不可照常出表單，否則使用者打完兩次密碼才被擋（#673 修掉的情境）。
+          <Alert severity="error">帳號已停用，請洽管理者</Alert>
         ) : status === "token-invalid" ? (
           // 連結查無 / 已用 / 逾期（#673）。spec_us3 AC 3 要求於**點連結時**即拒絕——
           // 原本會照常渲染表單，使用者得照著錯的門檻打完一組密碼、按下送出才被擋。

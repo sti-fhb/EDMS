@@ -7,9 +7,15 @@ token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（
 
 ## 停用帳號完全不走本流程（#953，`spec_us3` FR-DP-US3-09 / AC 7）
 
-`STATUS='DISABLED'` 的帳號：申請端比照「帳號不存在」早退，重設端與門檻查詢端一律回與 token
-失效相同的 `DP_PWD_005`。**兩端都要擋**——只擋申請端的話，停用當下還在外面、尚未過期的連結
-（TTL 預設 30 分鐘）仍然有效。
+`STATUS='DISABLED'` 的帳號：申請端比照「帳號不存在」早退，重設端與門檻查詢端回
+`DP_PWD_007`「帳號已停用，請洽管理者」。**兩端都要擋**——只擋申請端的話，停用當下還在外面、
+尚未過期的連結（TTL 預設 30 分鐘）仍然有效。
+
+> 📌 #953 原本讓重設端回與 token 失效**逐字相同**的 `DP_PWD_005`，理由是防列舉；#958 裁示 1
+> 推翻：能持有有效重設連結的人幾乎必然讀得到該帳號的登記信箱，告訴他「這個帳號停用了」
+> 洩漏的是他自己帳號的狀態。等價的代價則是被停用者陷入「重新申請 → 收不到信 → 再申請」的
+> 迴圈。⛔ **本裁示只動重設端**：申請端三種情況的回應仍逐字相同（那裡的請求者不需要任何
+> 憑證，才是真正的列舉面），由 `test_forgot_request_endpoint_uniform_message` 釘住。
 
 為什麼不是「反正停用帳號登不進去，改了也沒用」：重設連結的明文會留在寄出的信、寄件備份與
 退信裡。讀得到那些信的人可以先把停用帳號的密碼改成自己知道的值（當下看起來無害，稽核只留
@@ -35,24 +41,20 @@ token 明文僅入信中連結、DB 存 SHA-256（research §5）；一次性（
 因為那是把一個隱含條件塞進共用的寫入方法，而真正的根治是**停用當下就作廢該帳號所有未使用的
 token**（見下）。
 
-## 🔴 本修法擋不到的兩種情形（已知殘留，追蹤於 #956）
+## 採「使用時才擋」而非「停用時作廢」——這是刻意的
 
-本案採「**使用時才擋**」而非「停用時作廢」，因此停用帳號名下未使用、未逾期的 token 仍留在
-`DP_PWD_RESET`。兩個後果：
+停用不會去作廢該帳號名下未使用、未逾期的 token，它們仍留在 `DP_PWD_RESET`，由重設端每次
+檢查帳號狀態來擋。兩個後果：
 
-1. **停用後在 TTL 內重新啟用**：誤停用、隨後很快復原（相當常見的維運動作），停用前寄出的
-   連結在 TTL（`LOGIN.RESET_TOKEN_TTL_MIN`，預設 30 分、可設至 120 分）內**仍然有效**。
-   本修法在這個區間不生效——這不需要精準時序。
-2. **`EMAIL_CHANGE` 型 token 完全不在本案範圍**：`DP_PWD_RESET` 同表還存 Email 變更 token，
-   而 `email_change_service.verify()` **不檢查 `STATUS`**。在 ACTIVE 時申請把帳號 Email 改成
-   自己的、停用後才點連結，即可換走帳號的識別資訊，日後重新啟用再走忘記密碼——與本案同形
-   而更隱蔽。
+1. **停用後在 TTL 內重新啟用，舊連結可用**——⛔ 這是**預期行為**（#958 裁示 2），不是缺陷。
+   管理者按下「啟用」本身就是「已判定該帳號沒問題」的決定；誤停用、隨後很快復原是常見的
+   維運動作，讓使用者不必重新申請是合理的。
+2. **`EMAIL_CHANGE` 型 token 尚未比照辦理**（追蹤於 #956）：`DP_PWD_RESET` 同表還存 Email
+   變更 token，而 `email_change_service.verify()` **不檢查 `STATUS`**。在 ACTIVE 時申請把帳號
+   Email 改成自己的、停用後才點連結，即可換走帳號的識別資訊，日後重新啟用再走忘記密碼。
 
-兩者的根治是同一個：**停用動作當下作廢該帳號所有未使用的 token 並清 `PENDING_EMAIL`**
-（管理者已認證，不會重開「匿名作廢他人連結」的問題）。⛔ 不要在本檔逐條補判定去追它——
-那會變成「每個讀 `DP_PWD_RESET` 的人都要記得檢查狀態」，而這正是 `EMAIL_CHANGE` 漏掉的原因。
-
-> 📌 #956 完成後，本節即可整段移除——屆時這兩段就是過期的敘述。
+⛔ #956 的修法方向是**在 `verify()` 補狀態判定**（與本檔同形），**不是**「停用時作廢所有
+token」——後者會連帶把上面第 1 點的預期行為也關掉。
 """
 
 import logging
@@ -70,7 +72,7 @@ from app.core.utils import utcnow
 from app.dp.user.password_rules import PasswordRules, rules_for_user
 from app.dp.user.repository import AuthRepository
 from app.dp.user.token import generate_reset_token, hash_token
-from app.dp.users.account_status import is_account_disabled
+from app.dp.users.account_status import is_account_disabled, is_account_locked
 from app.services import AuditLogService, NotifyService, ParamService
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,21 @@ _FUNC_NAME = "DP-FORGOT"
 _DEFAULT_TTL_MIN = 30
 _DEFAULT_HISTORY_COUNT = 3
 _TOKEN_INVALID_MSG = "連結已失效，請重新申請"  # noqa: S105 — 使用者訊息，非密碼
+#: 停用帳號持有效連結時的訊息（#958 裁示 1）。⛔ 兩支端點（`reset` / `password_rules_for_token`）
+#: 必須共用本常數——各寫一句的話，同一個連結在載入頁與送出時會得到不同說法。
+#:
+#: ⛔ **本碼必須維持 400，且不得加入前端的 `ACCOUNT_BLOCKED_CODES`**（`services/http.ts`）。
+#: 那張表的成員會被攔成「整個帳號失效」而**自動登出**，但攔截只在 403 分支生效。兩個條件
+#: 缺一不可——改成 403 而仍在表外是安全的，兩者都改才會壞：已登入的 A 點到 B 的停用重設連結，
+#: 會被判成「**A** 的帳號被停用」而把 A 登出。這也是本案不重用既有 `DP_AUTH_004`（403，
+#: 且在該表內）的原因。
+#:
+#: ⚠️ `is_account_disabled` 是 `status != 'ACTIVE'`（fail-closed），所以日後若 `STATUS` 新增
+#: 第三種值，這句話會把它也說成「已停用」。目前值域只有 ACTIVE / DISABLED，尚未失準。
+_ACCOUNT_DISABLED_MSG = "帳號已停用，請洽管理者"
+#: 匿名路徑的稽核操作者：申請 / 重設端皆無登入身分，比照登入失敗對未知帳號的既有做法
+#: （`dp/user/service.py`）。⚠️ `CREATED_USER` 為 VARCHAR(20)，本來就塞不下 Email。
+_SYSTEM_USER = "SYSTEM"
 
 
 class ForgotPasswordService:
@@ -91,10 +108,12 @@ class ForgotPasswordService:
         repository: AuthRepository | None = None,
         params: ParamService | None = None,
         notify: NotifyService | None = None,
+        audit: AuditLogService | None = None,
     ) -> None:
         self._repo = repository or AuthRepository()
         self._params = params or ParamService()
         self._notify = notify or NotifyService()
+        self._audit = audit or AuditLogService()
 
     async def request(self, db: AsyncSession, *, email: str) -> None:
         """申請重設：帳號存在**且未停用**才作廢舊 token、產新 token 並寄信；否則靜默（防列舉）。
@@ -105,22 +124,50 @@ class ForgotPasswordService:
         連打本端點就成了一個無認證的「作廢他人既有連結」操作，而「沒產新 token、沒寄信」的測試
         仍會全綠（`test_forgot_disabled_does_not_invalidate_existing_token` 釘住此位置）。
         """
+        ip = get_client_ip()
         user = await self._repo.get_by_email(db, email)
         if user is None:
-            return  # 防帳號列舉：不產 token、不寄信，端點一律回相同訊息
+            # 防帳號列舉：不產 token、不寄信，端點一律回相同訊息。
+            # ⚠️ 稽核**記遮罩後的 Email**：此路徑沒有 user_id 可填（operator 為 SYSTEM），
+            # 不記就只剩計數——問不出「哪些帳號被探測過」。遮罩規則沿用 `mask_email`
+            # （規範禁記個資完整值），且稽核表 append-only、寫進去拿不掉。
+            # ⛔ 遮罩後的 Email 放 `description`、**不要放 `target_id`**：後者是 `String(100)`，
+            # 而 `NormalizedEmailStr` 允許 255 字元、`mask_email` **完整保留網域**，長網域會讓
+            # INSERT 爆欄位長度 → 500；而存在的帳號（`target_id` 是 20 字元內的 `user_id`）
+            # 照樣 200——**匿名端點上「500 vs 200」本身就是可區分的列舉訊號**。
+            # `description` 為 `String(500)` 放得下，做法亦與登入失敗對未知帳號一致。
+            await self._audit_request(
+                db,
+                ip,
+                operator_id=_SYSTEM_USER,
+                target_id=None,
+                sent=False,
+                reason=f"帳號不存在（{mask_email(email)}）",
+            )
+            return
         if is_account_disabled(user.status):
-            # 「查無此人」是真的沒事發生，「停用帳號被申請重設」是有人試了——後者正是本功能的
-            # 威脅模型（#953），靜默丟掉會失去唯一的訊號。⛔ 只留 log，不寫稽核、不改回應內容
-            # （本端點匿名可打，寫稽核等於開放任何人以他人 Email 灌 DP_AUDIT_LOG）。
+            # 「查無此人」是真的沒事發生，「停用帳號被申請重設」是有人試了——後者正是 #953 的
+            # 威脅模型，靜默丟掉會失去訊號。
             #
-            # ⚠️ 既然這是**唯一**的訊號，`ip=` 與 `event=` 都不可省：少了 ip 只知道「有人試了」
-            # 分不出是離職者本人誤觸還是外部探測；少了 event 則接不上告警規則——`router.py` 的
-            # 同類 log 已載明「告警規則請抓 `event=` 字串而非整句」，而整句中文正是最容易被
-            # 後人順手改掉的部分。
+            # 📌 #958 之前這裡**刻意不寫稽核**，理由是「匿名端點寫稽核＝開放任何人灌
+            # DP_AUDIT_LOG」。#958 推翻該決定：申請端三種情況一律寫稽核，因為「看不到有人
+            # 申請過重設」本身就是缺口。
+            #
+            # ⚠️ 灌量上限**兩個端點不同**，不要混為一談：**申請端**有 IP 與帳號雙維度
+            # （`router.py` 的 `rate_limit_by_ip` + `_forgot_limiter.hit("forgot:acct:…")`），
+            # **重設端只有 IP 維度**（token 失效那筆甚至不知道是哪個帳號）。故重設端的
+            # 失敗稽核上限是「每 IP 10 次／60 秒」，而非「每帳號」。
+            #
+            # ⚠️ log 仍保留且 `ip=` / `event=` 不可省：稽核是給稽核查詢用的，log 是給告警規則
+            # 接的，兩者讀者不同。`router.py` 的同類 log 已載明「告警規則請抓 `event=` 字串
+            # 而非整句」，而整句中文正是最容易被後人順手改掉的部分。
             logger.warning(
                 "停用帳號申請忘記密碼已擋下 ip=%s email=%s event=forgot_blocked_disabled_account",
-                get_client_ip(),
+                ip,
                 mask_email(email),
+            )
+            await self._audit_request(
+                db, ip, operator_id=user.user_id, target_id=user.user_id, sent=False, reason="帳號已停用"
             )
             return
 
@@ -138,6 +185,13 @@ class ForgotPasswordService:
             operator_id=user.user_id,
             now=now,
         )
+        # ⚠️ 稽核寫在 `send_email` **之前**（#958 Security Review）：範本列缺漏時 `send_email`
+        # 會拋 404 `DP_MAIL_001`，寫在後面的話連「有人申請過重設」都不會留下任何紀錄——
+        # 發信系統故障會連帶把申請的軌跡一起吃掉。故此處記的是**系統實際做到的事**
+        # （已產生 token），寄信成敗由 outbox（`DP_EMAIL_LOG.STATUS`）自己的狀態承擔。
+        await self._audit_request(
+            db, ip, operator_id=user.user_id, target_id=user.user_id, sent=True, reason="已產生重設 token"
+        )
         reset_link = f"{settings.FRONTEND_BASE_URL}/reset-password?token={plaintext}"
         await self._notify.send_email(
             db,
@@ -146,6 +200,40 @@ class ForgotPasswordService:
             module="DP",
             params={"user_name": user.user_name, "reset_link": reset_link, "expiry_minutes": str(ttl_min)},
             caller_module="DP",
+        )
+
+    async def _audit_request(
+        self,
+        db: AsyncSession,
+        ip: str | None,
+        *,
+        operator_id: str,
+        target_id: str | None,
+        sent: bool,
+        reason: str,
+    ) -> None:
+        """申請端的稽核（#958）：三種情況各一筆，從 `result` 與 `description` 分得出是哪一種。
+
+        ⛔ `description` 不得放 token、完整 Email、密碼。帳號不存在時由呼叫端先經 `mask_email`。
+
+        `action_type` 用 `CREATE`：申請的實質是產生一枚重設 token。⛔ 不新增 `ACTION_TYPE` 值——
+        `dp/audit/router.py` 的 `_Action` 是封閉 `Literal`，新增要同時改三處且有
+        `test_dp_audit_action_type_coverage.py` 守門（#548）。
+
+        ⚠️ 本方法**不 commit**：申請端三種情況都以 200 正常回應收尾，稽核隨請求的交易一起
+        提交即可。重設端的失敗稽核不同——那裡會拋 `AppError`、交易會被 rollback，故需顯式
+        commit（見 `ResetPasswordService._audit_reset_fail`）。
+        """
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="CREATE",
+            result="SUCCESS" if sent else "FAIL",
+            operator_id=operator_id,
+            target_id=target_id,
+            description=reason,
+            source_ip=ip,
         )
 
 
@@ -161,6 +249,43 @@ class ResetPasswordService:
         self._repo = repository or AuthRepository()
         self._params = params or ParamService()
         self._audit = audit or AuditLogService()
+
+    async def _audit_reset_fail(
+        self,
+        db: AsyncSession,
+        ip: str | None,
+        *,
+        operator_id: str,
+        target_id: str | None,
+        reason: str,
+    ) -> None:
+        """重設被擋下的稽核（#958）——**寫完立即 commit**，再由呼叫端拋 `AppError`。
+
+        🔴 **commit 不可省**：`get_db` 對 `AppError` 會 rollback，稽核列會被一併抹除，
+        結果是「程式有寫、DP05 查不到」。這個缺陷是靜默的——測試若在 service 層直接呼叫、
+        或只驗「`log_action` 有被呼叫」，兩種寫法都會全綠。
+        `test_reset_audit_失效token的FAIL稽核確實落地` **刻意走端點**來釘住它。
+
+        同一理由與既有範式見 `dp/user/service.py::_fail`（登入失敗的鎖定計數與 FAIL 稽核）。
+
+        ⚠️ 測試環境以 savepoint 隔離（`conftest` 的 `db` fixture），此處 commit 只釋放
+        savepoint、不破壞隔離。
+
+        ⛔ **只記安全相關的兩種**（token 失效、帳號停用）。密碼不一致 / 複雜度不足 /
+        與近期重複是使用者打錯字，記了會把 DP05 變成流水帳，而稽核表 append-only、清不掉。
+        """
+        await self._audit.log_action(
+            db,
+            module="DP",
+            func_name=_FUNC_NAME,
+            action_type="UPDATE",
+            result="FAIL",
+            operator_id=operator_id,
+            target_id=target_id,
+            description=reason,
+            source_ip=ip,
+        )
+        await db.commit()
 
     async def password_rules_for_token(self, db: AsyncSession, *, token: str) -> PasswordRules:
         """重設頁適用之門檻（#623）：依 token 對應帳號判定；token 失效則拒絕（#673）。
@@ -186,15 +311,18 @@ class ResetPasswordService:
         row = await self._repo.get_reset_token_by_hash(db, hash_token(token), _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= utcnow():
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
-        # 帳號於發信後被停用：回**完全相同**的失效錯誤（#953）。分歧的話，持有連結者即可
-        # 據此判斷「這個帳號被停用了」——防列舉會在重設端破一個洞。
+        # 帳號於發信後被停用 → **明說**（#958 裁示 1，與 `reset` 共用同一常數與錯誤碼）。
+        # ⚠️ 「查無此人」仍回 token 失效：那表示帳號已被軟刪，連結本身就不該再有意義，
+        # 與「帳號還在、只是停用」是兩回事，不可合併成同一個分支。
         user = await self._repo.get_by_user_id(db, row.user_id)
-        if user is None or is_account_disabled(user.status):
+        if user is None:
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+        if is_account_disabled(user.status):
+            raise AppError(status_code=400, detail=_ACCOUNT_DISABLED_MSG, error_code="DP_PWD_007")
         return await rules_for_user(db, row.user_id, params=self._params)
 
-    async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> None:
-        """重設密碼。
+    async def reset(self, db: AsyncSession, *, token: str, new_password: str, confirm_password: str) -> bool:
+        """重設密碼；回傳該帳號**是否仍在鎖定中**（#958，供前端換提示文案）。
 
         Raises:
             AppError: 兩次不一致（422 DP_USER_002）、token 失效 / 已用 / 逾時（400 DP_PWD_005）、
@@ -208,13 +336,34 @@ class ResetPasswordService:
         token_hash = hash_token(token)
         row = await self._repo.get_reset_token_by_hash(db, token_hash, _TOKEN_TYPE)
         if row is None or row.used_date is not None or row.expires_date <= now:
+            # ⛔ **這條刻意不寫稽核**（#958 Security Review MEDIUM-1）。它是三個失敗分支中唯一
+            # **零知識即可觸發**的——匿名者亂填一個 token 就寫一筆，而該筆內容零資訊量
+            # （operator=SYSTEM、target 無、description 固定字串），彼此完全無法分辨。
+            #
+            # 代價不只是噪音：每筆稽核都要搶全平台單一的鏈結 advisory lock（等鎖逾時 10 秒
+            # → 503），而 `DP_AUDIT_LOG` append-only、清不掉；DP05 匯出上限 10,000 筆，超過
+            # 直接 422——等於提供一個「做完真正的動作後灌一波，讓該時段的稽核匯出整個失敗」
+            # 的反鑑識手法。
+            #
+            # 這筆記得到的東西，web server 的存取日誌已經有而且更好用；它唯一獨有的性質是
+            # 「不可刪」，而那正是缺點。另兩個失敗分支（帳號不存在 / 已停用）都指名了真實
+            # 帳號、有調查價值，故保留。
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
         # 停用帳號與「查無此人」回同一個失效錯誤（#953）。位置在**消費 token 之前**，比照
         # 下方複雜度 / 重複性的處理——擋下時不白白作廢 token，且與 token 失效的拋出時點一致，
         # 使兩者連「先報哪個錯」都相同（密碼不一致仍先於兩者）。
         user = await self._repo.get_by_user_id(db, row.user_id)
-        if user is None or is_account_disabled(user.status):
+        if user is None:
+            # 帳號已軟刪：連結本身不該再有意義，回 token 失效（與「帳號還在、只是停用」不同）
+            await self._audit_reset_fail(
+                db, ip, operator_id=_SYSTEM_USER, target_id=row.user_id, reason="帳號不存在，拒絕重設"
+            )
             raise AppError(status_code=400, detail=_TOKEN_INVALID_MSG, error_code="DP_PWD_005")
+        if is_account_disabled(user.status):
+            await self._audit_reset_fail(
+                db, ip, operator_id=row.user_id, target_id=row.user_id, reason="帳號已停用，拒絕重設"
+            )
+            raise AppError(status_code=400, detail=_ACCOUNT_DISABLED_MSG, error_code="DP_PWD_007")
 
         # 複雜度 + 重複性（禁最近 HISTORY_COUNT 次）——於消費 token 前檢核，
         # 使複雜度 / 重複失敗時不白白作廢 token（使用者可用同連結重試）。
@@ -254,3 +403,8 @@ class ResetPasswordService:
             description="密碼重設",
             source_ip=ip,
         )
+        # 重設**不解除鎖定**（FR-DP-US3-07）。回傳鎖定狀態供前端換一句提示——否則鎖定中的
+        # 使用者會看到「請以新密碼登入」，照做卻被 403 `DP_AUTH_005` 擋下（#958）。
+        # ⚠️ 判定取 `user.locked_until` 的**當下值**：`update_password` 不碰該欄位（其 docstring
+        # 明載「不動鎖定 / 停用狀態」），所以這裡讀到的仍是重設前的鎖定時間，正是要回報的。
+        return is_account_locked(locked_until=user.locked_until, now=utcnow())

@@ -161,6 +161,136 @@ async def test_forgot_disabled_does_not_invalidate_existing_token(db):
     assert row.used_date is None, "停用帳號的申請不應作廢既有 token"
 
 
+# --- T028 申請端稽核（#958）---
+
+
+async def _forgot_audits(db):
+    """取本次測試寫入的 DP-FORGOT 稽核列（依寫入序）。"""
+    rows = await db.execute(select(DpAuditLog).where(DpAuditLog.func_name == "DP-FORGOT").order_by(DpAuditLog.log_id))
+    return rows.scalars().all()
+
+
+async def test_forgot_audit_正常帳號記已寄出(db):
+    """申請成功 → 一筆 `CREATE` / `SUCCESS`，操作者與對象皆為該帳號（#958 AC 1）。"""
+    await _make_user(db, user_id="au1", email="au1@edms.local")
+    await ForgotPasswordService(notify=_NotifyStub()).request(db, email="au1@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"應恰好一筆，實得 {len(rows)}"
+    row = rows[0]
+    assert (row.action_type, row.result) == ("CREATE", "SUCCESS")
+    assert row.created_user == "au1" and row.target_id == "au1"
+
+
+async def test_forgot_audit_經端點呼叫時記得到來源IP(client, db):
+    """稽核的 `SOURCE_IP` 必須落地（#958）。
+
+    🔴 本條**刻意走端點**而非 service：`get_client_ip()` 取的是請求情境，service 層直接呼叫時
+    恆為 `None`——把這條斷言寫在 service 層測試裡會永遠紅，寫成 `is None` 則是釘住了錯的契約。
+
+    ⚠️ 「稽核漏記來源 IP」在本專案是有前例的真缺陷（#790 即為此開立），所以這條不是裝飾：
+    少了 IP，事故調查只剩「有人試過」的計數，問不出是誰。
+    """
+    await _make_user(db, user_id="aip", email="aip@edms.local")
+    r = await client.post("/api/forgot-password", json={"email": "aip@edms.local"})
+    assert r.status_code == 200, r.text
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1
+    assert rows[0].source_ip, f"稽核未記來源 IP：{rows[0].source_ip!r}"
+
+
+async def test_forgot_audit_帳號不存在記未寄出且Email已遮罩(db):
+    """帳號不存在 → `FAIL`；操作者為 SYSTEM、Email **遮罩後**才入稽核（#958 AC 1/3）。
+
+    🔴 比的是「不含完整 Email」而非只看有沒有 `*`：`CREATED_USER` 是 VARCHAR(20)、本來就塞不下
+    Email，所以漏遮罩時 Email 會落在 `target_id` / `description`。稽核表不可刪，寫進去就拿不掉。
+    """
+    await ForgotPasswordService(notify=_NotifyStub()).request(db, email="ghost@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row.action_type, row.result) == ("CREATE", "FAIL")
+    assert row.created_user == "SYSTEM"
+    blob = f"{row.target_id or ''} {row.description or ''}"
+    assert "ghost@edms.local" not in blob, f"完整 Email 寫進稽核：{blob}"
+    assert "g" in blob and "*" in blob, f"遮罩後應仍可辨識來源，實得：{blob}"
+
+
+async def test_forgot_audit_長網域Email不得讓端點回500(client, db):
+    """🔴 防列舉的實際破口：遮罩後的 Email 長度可超過 `TARGET_ID` 的 `String(100)`（#958 CR HIGH-1）。
+
+    `NormalizedEmailStr` 允許 255 字元，而 `mask_email` **完整保留網域**（`x***@{domain}`），
+    所以網域長一點的未知帳號會讓 INSERT 爆欄位長度 → 500；存在的帳號（`target_id` 是
+    20 字元以內的 `user_id`）照樣 200。**匿名端點上 500 與 200 可區分**，等於用例外訊息
+    洩漏「這個 Email 不存在」。
+
+    ⚠️ 我原本的三條稽核測試全用短 Email，結構性碰不到這條路徑——長度上限只有拿邊界值打
+    才看得見。
+    """
+    domain = "a" * 90 + ".example.com"  # 遮罩後 ≈ 107 字元 > TARGET_ID 的 100
+    long_email = f"nobody@{domain}"
+    assert len(long_email) <= 255, "前置：仍在 NormalizedEmailStr 允許範圍內"
+
+    r = await client.post("/api/forgot-password", json={"email": long_email})
+    assert r.status_code == 200, f"長網域未知帳號不得回 {r.status_code}（防列舉破口）"
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1 and rows[0].result == "FAIL"
+    blob = f"{rows[0].target_id or ''} {rows[0].description or ''}"
+    assert long_email not in blob, "完整 Email 不得寫進稽核"
+
+
+async def test_forgot_audit_停用帳號記未寄出(db):
+    """停用帳號 → `FAIL`，且**仍不產 token、不寄信**（#953 行為不得退化；#958 AC 1）。"""
+    await _make_user(db, user_id="au3", email="au3@edms.local", status="DISABLED")
+    notify = _NotifyStub()
+    await ForgotPasswordService(notify=notify).request(db, email="au3@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1
+    assert (rows[0].action_type, rows[0].result) == ("CREATE", "FAIL")
+    assert rows[0].created_user == "au3"
+    assert notify.calls == [] and (await db.execute(select(DpPwdReset))).first() is None
+
+
+async def test_forgot_audit_鎖定中帳號照常寄出(db):
+    """鎖定中（STATUS 仍 ACTIVE）→ 照常寄信且稽核記 `SUCCESS`（#958 AC 4）。
+
+    ⚠️ 與停用那條成對：把判定寫成 `is_account_usable()`（含鎖定）時，本條會紅而停用那條仍綠。
+    """
+    await _make_user(
+        db, user_id="au4", email="au4@edms.local", status="ACTIVE", locked_until=utcnow() + timedelta(minutes=30)
+    )
+    notify = _NotifyStub()
+    await ForgotPasswordService(notify=notify).request(db, email="au4@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1 and rows[0].result == "SUCCESS"
+    assert len(notify.calls) == 1, "鎖定中仍須收得到重設信"
+
+
+async def test_forgot_audit_三種情況的稽核互相可分辨(db):
+    """🔴 AC 1 的核心：三種情況**從稽核內容分得出來**。
+
+    前四條各自驗一種情況，但「三者可分辨」是它們**合起來**才成立的性質——
+    若三種都寫成同一句 description，前四條仍會全綠。本條把三者放在同一次測試裡比對。
+    """
+    await _make_user(db, user_id="d1", email="d1@edms.local")
+    await _make_user(db, user_id="d2", email="d2@edms.local", status="DISABLED")
+    svc = ForgotPasswordService(notify=_NotifyStub())
+    await svc.request(db, email="d1@edms.local")
+    await svc.request(db, email="nobody@edms.local")
+    await svc.request(db, email="d2@edms.local")
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 3
+    descs = [r.description for r in rows]
+    assert len(set(descs)) == 3, f"三種情況的 description 必須互異，實得：{descs}"
+    assert [r.result for r in rows] == ["SUCCESS", "FAIL", "FAIL"]
+
+
 # --- T029 重設 ---
 
 
@@ -318,15 +448,21 @@ async def test_forgot_request_allowed_while_locked(db):
     assert len(rows) == 1
 
 
-async def test_reset_blocked_for_disabled_identical_to_invalid_token(db):
-    """**停用前**已寄出、尚未過期的連結，於重設時一律失效，且回應與 token 失效**逐字相同**（#953 AC 3）。
+async def test_reset_blocked_for_disabled_says_account_disabled(db):
+    """**停用前**已寄出、尚未過期的連結，於重設時一律失效，且**明說**帳號已停用（#958 裁示 1）。
 
-    這是本案真正要堵的那條路：只擋申請端的話，停用當下還在使用者（或讀得到信的人）手上的
-    連結仍然有效，TTL 預設 30 分鐘。
+    這是 #953 要堵的那條路：只擋申請端的話，停用當下還在使用者（或讀得到信的人）手上的
+    連結仍然有效，TTL 預設 30 分鐘。**行為（擋下）不變，改的是說什麼。**
 
-    🔴 比到 `detail` 而不只是 `(status_code, error_code)`：`forgot_service` 的 docstring 宣稱
-    兩者「逐字相同」，而只比前兩項的話，日後有人把停用分支改成另一句訊息（例如「此帳號已停用」）
-    測試仍會全綠——那一句話就足以讓持有連結的人判斷出帳號狀態，防列舉在重設端破一個洞。
+    ## 🔴 #953 原本刻意與 token 失效「逐字相同」，#958 裁示 1 推翻
+
+    原理由是防列舉。但**能持有有效重設連結的人，幾乎必然讀得到該帳號的登記信箱**——告訴他
+    「這個帳號停用了」洩漏的是他自己帳號的狀態，不構成帳號列舉。而等價的代價是被停用者陷入
+    迴圈：點連結看到「連結已失效，請重新申請」→ 去重新申請 → 畫面說「已寄出」→ 永遠收不到信。
+
+    ⛔ **本裁示只動重設端**：申請端（`POST /api/forgot-password`）三種情況的回應仍必須逐字
+    相同，由 `test_forgot_request_endpoint_uniform_message` 釘住——那裡的請求者**不需要**持有
+    任何憑證，才是真正的列舉面。
     """
     svc = ResetPasswordService()
     with pytest.raises(AppError) as unknown:
@@ -341,21 +477,19 @@ async def test_reset_blocked_for_disabled_identical_to_invalid_token(db):
     with pytest.raises(AppError) as disabled:
         await svc.reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
 
-    got = (disabled.value.status_code, disabled.value.error_code, disabled.value.detail)
-    want = (unknown.value.status_code, unknown.value.error_code, unknown.value.detail)
-    assert got == want, f"停用={got} 失效token={want}——可據此區分帳號狀態"
-    assert got[0] == 400 and got[1] == "DP_PWD_005"
+    assert (disabled.value.status_code, disabled.value.error_code) == (400, "DP_PWD_007")
+    assert "停用" in disabled.value.detail
+    assert disabled.value.error_code != unknown.value.error_code, "停用與 token 失效必須可區分"
 
     fresh = (await db.execute(select(DpUser).where(DpUser.user_id == "dr"))).scalar_one()
     assert fresh.pwd_hash == original_hash, "密碼雜湊不得被改動"
 
 
-async def test_reset_policy_blocked_for_disabled_identical_to_invalid_token(db):
-    """`password_rules_for_token` 對停用帳號的回應，與 token 失效**逐字相同**（#953 AC 4）。
+async def test_reset_policy_blocked_for_disabled_says_account_disabled(db):
+    """`password_rules_for_token` 對停用帳號同樣明說（#958 裁示 1）。
 
-    🔴 若兩者分歧（例如停用回一個新的 error_code，或回了門檻數字），持有連結的人就能據此
-    判斷「這個帳號被停用了」——防列舉在重設端出現缺口。本條以同一個斷言同時比 status_code、
-    error_code 與 detail 文字。
+    ⚠️ 與 `reset` 必須**同碼同訊息**：重設頁載入時先打本端點、送出時才打 `reset`，兩者對同一
+    個連結給出不同說法的話，使用者會先看到一種、按下送出又看到另一種。
     """
     svc = ResetPasswordService()
     with pytest.raises(AppError) as unknown:
@@ -366,9 +500,29 @@ async def test_reset_policy_blocked_for_disabled_identical_to_invalid_token(db):
     with pytest.raises(AppError) as disabled:
         await svc.password_rules_for_token(db, token=plaintext)
 
-    got = (disabled.value.status_code, disabled.value.error_code, disabled.value.detail)
-    want = (unknown.value.status_code, unknown.value.error_code, unknown.value.detail)
-    assert got == want, f"停用={got} 失效token={want}——可據此區分帳號狀態"
+    assert (disabled.value.status_code, disabled.value.error_code) == (400, "DP_PWD_007")
+    assert "停用" in disabled.value.detail
+    assert disabled.value.error_code != unknown.value.error_code
+
+
+async def test_reset_停用訊息與門檻端一致(db):
+    """兩支端點對停用帳號的回應**必須逐字相同**（#958 裁示 1 的內部一致性）。
+
+    🔴 上面兩條各自斷言 `DP_PWD_007` 與「含『停用』」，但那樣兩邊各寫一句不同的中文也會全綠。
+    本條把兩個回應擺在一起比，釘住「同一個常數」而非「各自碰巧合格」。
+    """
+    svc = ResetPasswordService()
+    await _make_user(db, user_id="cs", email="cs@edms.local", status="DISABLED")
+    plaintext = await _make_token(db, user_id="cs", plaintext="consistency-token")
+
+    with pytest.raises(AppError) as from_reset:
+        await svc.reset(db, token=plaintext, new_password=_NEW_PWD, confirm_password=_NEW_PWD)
+    with pytest.raises(AppError) as from_policy:
+        await svc.password_rules_for_token(db, token=plaintext)
+
+    a = (from_reset.value.status_code, from_reset.value.error_code, from_reset.value.detail)
+    b = (from_policy.value.status_code, from_policy.value.error_code, from_policy.value.detail)
+    assert a == b, f"reset={a} policy={b}——同一個連結在兩支端點得到不同說法"
 
 
 async def test_reset_policy_allowed_for_active(db):
@@ -377,6 +531,152 @@ async def test_reset_policy_allowed_for_active(db):
     plaintext = await _make_token(db, user_id="ap", plaintext="active-user-token")
     rules = await ResetPasswordService().password_rules_for_token(db, token=plaintext)
     assert rules.min_len > 0
+
+
+# --- 重設成功的鎖定旗標（#958 AC 9）---
+
+
+async def test_reset_成功回應帶鎖定旗標_鎖定中為真(client, db):
+    """鎖定中的帳號重設成功 → 回應指出仍鎖定，且 `LOCKED_UNTIL` **不變**（#958 AC 9）。
+
+    🔴 問題來源：重設不會解鎖（FR-DP-US3-07），但成功畫面固定顯示「請以新密碼登入」，
+    使用者照做會被 403 `DP_AUTH_005` 擋下——他剛剛才被告知可以登入。
+    """
+    locked_until = utcnow() + timedelta(minutes=30)
+    await _make_user(db, user_id="lf1", email="lf1@edms.local", status="ACTIVE", locked_until=locked_until)
+    plaintext = await _make_token(db, user_id="lf1")
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is True, f"鎖定中卻未告知：{r.json()}"
+
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "lf1"))).scalar_one()
+    assert user.locked_until == locked_until, "重設不得解除鎖定（FR-DP-US3-07）"
+    assert verify_password(_NEW_PWD, user.pwd_hash), "密碼仍須真的被更新"
+
+
+async def test_reset_成功回應帶鎖定旗標_未鎖定為假(client, db):
+    """正向錨點：未鎖定者維持原訊息（否則所有人都會看到「鎖定中」）。"""
+    await _make_user(db, user_id="lf2", email="lf2@edms.local", status="ACTIVE")
+    plaintext = await _make_token(db, user_id="lf2")
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is False
+
+
+async def test_reset_成功回應_鎖定已逾時視為未鎖定(client, db):
+    """逾時的 `LOCKED_UNTIL` 留在欄位裡（登入時才清）——不得據此誤報「鎖定中」。
+
+    ⚠️ 少了這條，把判定寫成 `locked_until is not None` 也會讓上面兩條全綠，而早已自動解鎖的
+    使用者會被告知「請於解鎖後登入」，然後發現其實登得進去。
+    """
+    await _make_user(
+        db, user_id="lf3", email="lf3@edms.local", status="ACTIVE", locked_until=utcnow() - timedelta(minutes=1)
+    )
+    plaintext = await _make_token(db, user_id="lf3")
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is False, "鎖定已逾時應視為未鎖定"
+
+
+# --- T029 重設端稽核（#958）---
+
+
+async def test_reset_audit_失效token刻意不寫稽核(client, db):
+    """⛔ token 失效**不寫稽核**（#958 Security Review MEDIUM-1 裁示 A）。
+
+    它是三個失敗分支中唯一**零知識即可觸發**的：匿名者亂填 token 就寫一筆，而該筆內容零
+    資訊量（operator=SYSTEM、target 無、description 固定），彼此無法分辨。每筆要搶全平台
+    的稽核鏈鎖，而 `DP_AUDIT_LOG` 不可刪、DP05 匯出上限 10,000 筆——等於提供一個
+    「灌一波讓該時段匯出整個失敗」的反鑑識手法。
+
+    ⚠️ 本條是**守門斷言**（不該出現的沒出現），正向錨點由
+    `test_reset_audit_停用帳號的FAIL稽核確實落地` 承擔——那裡才驗 commit 真的落地。
+    """
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": "no-such-token-at-all", "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 400 and r.json()["error_code"] == "DP_PWD_005"
+    assert await _forgot_audits(db) == [], "失效 token 不應寫稽核"
+
+
+async def test_reset_audit_停用帳號的FAIL稽核確實落地(client, db):
+    """停用分支的稽核也要**走端點**驗落地（#958 CR LOW-5）。
+
+    ⚠️ 原本只有 token 失效那條走端點。三個失敗分支共用 `_audit_reset_fail`，但「共用同一支
+    函式」不等於「每條路徑都真的走到它」——漏接某個分支的 commit 不會被既有測試看見。
+    """
+    user = await _make_user(db, user_id="rdz", email="rdz@edms.local", status="ACTIVE")
+    plaintext = await _make_token(db, user_id="rdz")
+    user.status = "DISABLED"
+    await db.flush()
+
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 400 and r.json()["error_code"] == "DP_PWD_007"
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"停用分支的失敗稽核未落地，實得 {len(rows)} 筆"
+    assert (rows[0].action_type, rows[0].result) == ("UPDATE", "FAIL")
+    assert rows[0].created_user == "rdz"
+
+
+async def test_reset_audit_成功只寫一筆(client, db):
+    """正向錨點：成功路徑維持一筆 `UPDATE` / `SUCCESS`，不因本案重複寫（#958 AC 6）。"""
+    await _make_user(db, user_id="rok", email="rok@edms.local")
+    plaintext = await _make_token(db, user_id="rok")
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": _NEW_PWD},
+    )
+    assert r.status_code == 200, r.text
+
+    rows = await _forgot_audits(db)
+    assert len(rows) == 1, f"成功應恰好一筆，實得 {len(rows)}"
+    assert (rows[0].action_type, rows[0].result) == ("UPDATE", "SUCCESS")
+
+
+async def test_reset_audit_打錯字不寫稽核(client, db):
+    """使用者打錯字（兩次不一致）**不**寫稽核（#958 規劃 §10）。
+
+    ⛔ 把 5 個失敗出口全記，會讓 DP05 變成「使用者打錯字的流水帳」，稀釋掉真正要看的事件，
+    而稽核表 append-only、清不掉。只記 token 失效與帳號停用兩種安全相關的。
+    """
+    await _make_user(db, user_id="typ", email="typ@edms.local")
+    plaintext = await _make_token(db, user_id="typ")
+    r = await client.post(
+        "/api/reset-password",
+        json={"token": plaintext, "new_password": _NEW_PWD, "confirm_password": "Different9!"},
+    )
+    assert r.status_code == 422 and r.json()["error_code"] == "DP_USER_002"
+    assert await _forgot_audits(db) == [], "密碼打錯字不應寫稽核"
+
+
+async def test_reset_policy_不產生稽核(client, db):
+    """取門檻端點不寫稽核（#958 AC 7、規劃 §11）。
+
+    它與 `reset` 成對觸發（重設頁載入取門檻、送出才重設），兩邊都記會讓同一次重設在 DP05
+    出現兩筆，而前一筆沒有任何實質操作。
+    """
+    await _make_user(db, user_id="pol", email="pol@edms.local")
+    plaintext = await _make_token(db, user_id="pol")
+    r = await client.post("/api/reset-password/policy", json={"token": plaintext})
+    assert r.status_code == 200, r.text
+    assert await _forgot_audits(db) == [], "門檻查詢不應寫稽核"
 
 
 async def test_shed_503_does_not_consume_reset_token(db, monkeypatch):
