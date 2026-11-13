@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.like_escape import LIKE_ESCAPE_CHAR, contains
 from app.dp.user.kinds import KIND_ADMIN_INVITE, KIND_SELF_REGISTER, PendingKind
 from app.dp.user.models import DpPendingRegistration, DpPwdHistory, DpPwdReset
+from app.dp.users.account_status import account_not_disabled_clause
 from app.dp.users.models import DpUser
 
 _SYSTEM_USER = "SYSTEM"
@@ -188,14 +189,39 @@ class AuthRepository:
         await db.flush()
 
     async def switch_email(
-        self, db: AsyncSession, *, user: DpUser, new_email: str, operator_id: str, now: datetime
-    ) -> None:
-        """切換登入 Email 為新值並清 PENDING_EMAIL（US8 Email 變更驗證通過，延遲生效落地）。"""
-        user.email = new_email
-        user.pending_email = None
-        user.updated_user = operator_id
-        user.updated_date = now
-        await db.flush()
+        self, db: AsyncSession, *, user_id: str, new_email: str, operator_id: str, now: datetime
+    ) -> bool:
+        """切換登入 Email 為新值並清 PENDING_EMAIL（US8 Email 變更驗證通過，延遲生效落地）。
+
+        Returns:
+            True 已切換；**False 代表帳號在本次處理期間被停用（或軟刪）**，一列都沒改到。
+
+        ## 為什麼是條件式 UPDATE 而不是 ORM 賦值（#956 安審 MEDIUM-1）
+
+        原本是 `user.email = ...` + `flush()`，發出的 UPDATE 其 WHERE 只有主鍵。服務層在它
+        之前雖已判過 `STATUS`，但「判定」與「寫入」之間有窗口，而那個窗口**不是一次 DB 往返
+        那麼短**：若管理者的停用交易已先取得該列的行鎖、尚未 commit，本 UPDATE 會**阻塞等鎖
+        而不是失敗**；等對方 commit 後，READ COMMITTED 會重新評估 WHERE，只看主鍵自然仍成立，
+        於是 Email 照樣被改掉——帳號是 DISABLED，Email 卻已換成外部信箱，稽核上只留一筆看起來
+        正常的「Email 變更 SUCCESS」，正是 #956 要擋的結局。窗口上界因此是**對方交易的長度**
+        （其中還含一次要搶稽核鏈 advisory lock 的寫入，等鎖上限 10 秒），不是毫秒級。
+
+        把條件放進 UPDATE 本身即可歸零：等鎖結束後重新評估時 `STATUS` 已是 DISABLED，改到 0 列。
+
+        ⛔ 這裡可以安全地「把隱含條件塞進寫入方法」，是因為本方法**全 codebase 只有一個呼叫端**
+        （`email_change_service.verify`）。`forgot_service` 模組 docstring 對 `update_password`
+        的相反結論不適用於此——那支是共用的。新增第二個呼叫端前請重讀本段。
+
+        ⚠️ 用 `account_not_disabled_clause()`（只看 `STATUS`）而非 `account_usable_clause()`：
+        鎖定是暫時的，不該讓「密碼打錯三次」的人連 Email 變更都完成不了。
+        """
+        stmt = (
+            update(DpUser)
+            .where(DpUser.user_id == user_id, DpUser.deleted == 0, account_not_disabled_clause())
+            .values(email=new_email, pending_email=None, updated_user=operator_id, updated_date=now)
+        )
+        result = await db.execute(stmt)
+        return result.rowcount == 1
 
     async def increment_login_fail(
         self,
@@ -454,6 +480,24 @@ class AuthRepository:
             .values(used_date=now)
             .returning(DpPwdReset.user_id)
         )
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    async def get_active_email_change_token(
+        self, db: AsyncSession, *, token_hash: str, now: datetime
+    ) -> DpPwdReset | None:
+        """查**仍有效**的 EMAIL_CHANGE token 列（唯讀、不消費）；不存在 / 已用 / 已逾時一律回 None。
+
+        供 `EmailChangeService.verify` 在消費前取回 USER_ID 以判斷帳號狀態（#956）——擋下時
+        不白白作廢 token，帳號恢復後同一連結仍可用（SA 裁示 Q2，與 `PWD_RESET` 行為一致）。
+
+        ⚠️ 有效性條件刻意沿用 `_email_change_token_active`，與 `consume_email_change_token`
+        同一條。自己另寫 `used_date is None and expires_date > now` 會讓「消費前的預檢」與
+        「真正的消費」日後各自漂移，那正是該函式 docstring 明令禁止的事。
+
+        ⛔ 本方法**不提供一次性保證**：它不改任何狀態，TOCTOU 仍由 `consume_email_change_token`
+        的條件式 UPDATE 關閉。呼叫端不得以本方法的結果取代消費。
+        """
+        stmt = select(DpPwdReset).where(DpPwdReset.token_hash == token_hash, *_email_change_token_active(now))
         return (await db.execute(stmt)).scalar_one_or_none()
 
     async def consume_email_change_token(
