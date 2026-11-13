@@ -1,5 +1,6 @@
 """US8 個人資料維護整合測試：姓名 / 密碼變更（驗舊 / 複雜度特權 12 / 重複性 / 清 MUST_CHANGE / 稽核）、
-Email 延遲切換（唯一 / token 寄新信箱 / 舊仍有效 / 驗證切換 / 逾時作廢）、速率限制、公開密碼政策。"""
+Email 延遲切換（唯一 / token 寄新信箱 / 舊仍有效 / 驗證切換 / 逾時作廢 / 停用擋下且不燒 token，#956）、
+速率限制、公開密碼政策。"""
 
 from datetime import datetime, timedelta
 
@@ -17,6 +18,7 @@ from app.dp.user import profile_service as profile_service_module
 from app.dp.user.email_change_service import EmailChangeService
 from app.dp.user.models import DpPwdHistory, DpPwdReset
 from app.dp.user.profile_service import ProfileService
+from app.dp.user.repository import AuthRepository
 from app.dp.user.token import hash_token
 from app.dp.users.models import DpUser
 
@@ -491,6 +493,131 @@ async def test_email_change_cooldown(client, db):
     assert r1.status_code == 202
     r2 = await client.put("/api/dp/user/me/email", json={"new_email": "cd-new2@edms.local"}, headers=_bearer("cd"))
     assert r2.status_code == 429
+
+
+# --- 停用帳號不得完成 Email 變更（#956） ---
+
+
+async def _email_change_token(db, *, user_id: str, new_email: str) -> str:
+    """申請一次 Email 變更，回傳驗證信連結中的明文 token。"""
+    notify = _NotifyStub()
+    await EmailChangeService(notify=notify).request(db, user_id=user_id, new_email=new_email)
+    return notify.calls[0]["params"]["verify_link"].split("token=")[1]
+
+
+async def test_email_change_verify_停用帳號被擋且三個欄位都不動(db):
+    """停用後點連結 → 400 `DP_PWD_007`；EMAIL / PENDING_EMAIL / USED_DATE 三者皆不變（#956 AC 1、3）。
+
+    ⚠️ **USED_DATE 要一起驗**：擋下、但把 token 一併燒掉的寫法同樣能讓前兩個斷言通過，
+    而那正是 SA 裁示 Q2 否決的行為（帳號恢復後使用者得重新申請）。少了這條斷言，
+    「擋下前先消費」與「擋下時不消費」兩種實作都會全綠。
+    """
+    user = await _make_user(db, user_id="dz", email="dz@edms.local")
+    token_plain = await _email_change_token(db, user_id="dz", new_email="dz-new@edms.local")
+    user.status = "DISABLED"
+    await db.flush()
+
+    with pytest.raises(AppError) as exc:
+        await EmailChangeService().verify(db, token=token_plain)
+    assert exc.value.status_code == 400 and exc.value.error_code == "DP_PWD_007"
+    assert exc.value.detail == "帳號已停用，請洽管理者"
+
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "dz"))).scalar_one()
+    assert user.email == "dz@edms.local", "EMAIL 不得切換"
+    assert user.pending_email == "dz-new@edms.local", "PENDING_EMAIL 不得清空"
+    row = (await db.execute(select(DpPwdReset).where(DpPwdReset.user_id == "dz"))).scalar_one()
+    assert row.used_date is None, "擋下時不得消費 token（SA 裁示 Q2）"
+
+
+async def test_email_change_verify_重新啟用後同一連結仍可用(db):
+    """停用擋下 → 重新啟用 → 同一連結仍在 TTL 內 → 變更照常完成（#956 AC 2）。
+
+    與 `PWD_RESET` 行為一致：#958 裁示 2 判定「管理者按下啟用」本身就是「已判定該帳號沒問題」。
+    """
+    user = await _make_user(db, user_id="re", email="re@edms.local")
+    token_plain = await _email_change_token(db, user_id="re", new_email="re-new@edms.local")
+    user.status = "DISABLED"
+    await db.flush()
+    with pytest.raises(AppError):
+        await EmailChangeService().verify(db, token=token_plain)
+
+    # ⚠️ 擋下路徑內含 commit，實體可能已過期 → 重查再改，不要沿用上面的 user
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "re"))).scalar_one()
+    user.status = "ACTIVE"
+    await db.flush()
+
+    await EmailChangeService().verify(db, token=token_plain)
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "re"))).scalar_one()
+    assert user.email == "re-new@edms.local" and user.pending_email is None
+
+
+async def test_email_change_verify_鎖定中不被擋(db):
+    """正向錨點：鎖定中（`STATUS` 仍 `ACTIVE`）照常完成——鎖定是暫時的，非本案標的（#956 AC 5）。
+
+    ⚠️ 判定若誤用 `is_account_usable()`（把鎖定也算成不可用）**不會有任何東西報錯**，
+    只有這條會紅。#953 / #958 都在這個分界上踩過。
+    """
+    user = await _make_user(db, user_id="lk", email="lk@edms.local")
+    token_plain = await _email_change_token(db, user_id="lk", new_email="lk-new@edms.local")
+    user.locked_until = utcnow() + timedelta(minutes=15)
+    await db.flush()
+
+    await EmailChangeService().verify(db, token=token_plain)
+    user = (await db.execute(select(DpUser).where(DpUser.user_id == "lk"))).scalar_one()
+    assert user.email == "lk-new@edms.local"
+
+
+async def test_email_change_verify_停用帳號的稽核確實落地(client, db):
+    """🔴 **刻意走端點**驗稽核落地（#956 AC 6）。
+
+    `get_db` 對 `AppError` 會 rollback，稽核列會被一併抹除——結果是「程式有寫、DP05 查不到」。
+    這個缺陷是靜默的：測試若在 service 層直接呼叫、或只驗 `log_action` 有被呼叫，兩種寫法都全綠。
+    範式與理由同 `forgot_service._audit_reset_fail`（#958）。
+    """
+    user = await _make_user(db, user_id="az", email="az@edms.local")
+    token_plain = await _email_change_token(db, user_id="az", new_email="az-new@edms.local")
+    user.status = "DISABLED"
+    await db.flush()
+
+    r = await client.post("/api/verify-email-change", json={"token": token_plain})
+    assert r.status_code == 400 and r.json()["error_code"] == "DP_PWD_007"
+
+    rows = (
+        (
+            await db.execute(
+                select(DpAuditLog)
+                .where(DpAuditLog.func_name == "DP-PROFILE", DpAuditLog.result == "FAIL")
+                .order_by(DpAuditLog.log_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1, f"停用分支的失敗稽核未落地，實得 {len(rows)} 筆"
+    assert rows[0].action_type == "UPDATE"
+    assert rows[0].created_user == "az" and rows[0].target_id == "az"
+    # ⛔ 新 Email 是申請時自選的字串、屬個資；#958 CR HIGH 正是把 Email 寫進 TARGET_ID(100) 撐爆長度
+    assert "az-new@edms.local" not in f"{rows[0].description} {rows[0].target_id}"
+
+
+async def test_switch_email_停用帳號一列都改不到(db):
+    """寫入端自帶 `account_not_disabled_clause()`：帳號已停用時回 `False`、`EMAIL` 不變（#956 安審 MEDIUM-1）。
+
+    ⚠️ 這條守的是**預檢與寫入之間的競態**，與預檢本身是兩回事。管理者的停用交易若先取得該列
+    行鎖，本 UPDATE 會**等鎖而非失敗**；等鎖結束後 READ COMMITTED 會重新評估 WHERE——若 WHERE
+    只有主鍵（改序前的 ORM 賦值就是如此），條件自然仍成立，Email 照樣被改掉。把
+    `account_not_disabled_clause()` 從 where 拿掉，只有這條會紅。
+    """
+    await _make_user(db, user_id="rc", email="rc@edms.local")
+    await db.execute(update(DpUser).where(DpUser.user_id == "rc").values(status="DISABLED"))
+
+    switched = await AuthRepository().switch_email(
+        db, user_id="rc", new_email="rc-new@edms.local", operator_id="rc", now=utcnow()
+    )
+    assert switched is False
+    # 取純欄位而非實體：避開 identity map 回傳記憶體中舊值的可能
+    email = (await db.execute(select(DpUser.email).where(DpUser.user_id == "rc"))).scalar_one()
+    assert email == "rc@edms.local"
 
 
 # --- 公開密碼政策（併 #77） ---
